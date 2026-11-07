@@ -1,13 +1,15 @@
+import { lineVerify } from "./line_verify";
 import { referenceAudit } from "./reference_audit";
 import type { TaskType } from "./types";
 
 /**
- * Every task type the app can serve. Planned: per-line language tags (Pinkas), silver-page confirmation
- * (Ben-Yehuda) and quality-3 second-review adjudication. Each adds a module here and, if it needs a new kind
+ * Every task type the app can serve: the reference audit (E2d4) and line verification. Planned: per-line language
+ * tags (Pinkas) and quality-3 second-review adjudication. Each adds a module here and, if it needs a new kind
  * of view, a renderer in src/web/views/.
  */
 const TASK_TYPES: Record<string, TaskType> = {
   [referenceAudit.id]: referenceAudit,
+  [lineVerify.id]: lineVerify,
 };
 
 export function taskType(id: string): TaskType | undefined {

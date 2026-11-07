@@ -7,6 +7,8 @@ export interface ImportItem {
   payload: Record<string, unknown>;
   /** The page image's file stem in the pages directory, if the item has one. */
   imageStem: string | null;
+  /** The page image shipped inside the bundle itself (line_verify), with its checksum and declared pixel size. */
+  bundleImage?: { path: string; sha256: string; width: number; height: number };
 }
 
 export interface ImportProposal {
@@ -18,6 +20,8 @@ export interface ImportProposal {
   payload: Record<string, unknown>;
   /** The region in page coordinates (fractions), for the crop. */
   pageBox: Box | null;
+  /** A wider region (fractions) to cut around pageBox, when the source defines one (line_verify's context_box). */
+  contextBox?: Box;
   /** The fields a decision depends on; their hash pins every decision to the content the reviewer saw. */
   contentKey: unknown;
 }
@@ -30,6 +34,8 @@ export interface ImportBundle {
 
 export interface TaskImporter {
   taskType: string;
+  /** The source file's name inside a bundle directory (--bundle). */
+  bundleFile: string;
   /** Problems with the source file (empty when valid). */
   problems(raw: unknown): string[];
   bundle(raw: unknown): ImportBundle;

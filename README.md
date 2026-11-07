@@ -3,11 +3,20 @@
 A small online app where volunteers sign in and review correction proposals against real Hebrew page scans, for
 the [HeOCR](https://github.com/HeOCR) open Hebrew OCR project.
 
-The first task type is the **reference audit (E2d4)**. An agent audited 38 Hebrew Wikisource reference pages
-against their scans and proposed 519 corrections (`reference_audit_proposals.v1` in
-[hocrgen](https://github.com/HeOCR/hocrgen)). A human accepts, rejects or edits each proposal. The app exports
-exactly the `reference_audit_decisions.v1` file that hocrgen applies. An agent proposal never changes a reference;
-only human decisions do.
+Two task types:
+
+- **Reference audit (E2d4).** An agent audited 38 Hebrew Wikisource reference pages against their scans and
+  proposed 519 corrections (`reference_audit_proposals.v1` in [hocrgen](https://github.com/HeOCR/hocrgen)). A human
+  accepts, rejects or edits each proposal. The app exports exactly the `reference_audit_decisions.v1` file that
+  hocrgen applies. An agent proposal never changes a reference; only human decisions do.
+- **Line verification.** A human looks at one printed line on a real scan and a candidate transcription of it written
+  by a different human (a Wikisource quality-3 proofreader, or Project Ben-Yehuda text aligned to an NLI free-use
+  scan), and marks it exact, corrects it, or marks it unreadable or misaligned. hocrgen exports the
+  `line_verify_items.v1` bundle; the app exports `line_verify_decisions.v1`, and hocrgen's attestation policy decides
+  what a verified line becomes. The contract is HeOCR planning's
+  `tasks/real-source-mapping/outputs/line_verify_contract.md`; `src/tasks/line_verify/schema.ts` implements it.
+
+When more than one batch is open, the app starts with a task picker (`/app/#b/<batch id>` opens one).
 
 > **Contribution terms, terms of service and privacy policy: version `2026-11-07-v1`**, approved by the maintainer
 > on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)). They are the consent text in
@@ -24,15 +33,19 @@ only human decisions do.
   reviewers, assignments and decisions. Scan crops are Worker static assets under `public/media/` (no R2); an
   `ImageRef` union (`src/shared/media.ts`) leaves room for another image source.
 - **Data model:** task types → batches of items → proposals → decisions. A task type
-  (`src/tasks/reference_audit/`) says how a proposal is shown, which decisions exist, how a decision is
-  normalised, and how decisions are exported. Planned task types (Pinkas per-line language tags, Ben-Yehuda
-  silver-page confirmation, quality-3 second-review adjudication) add a module in `src/tasks/` and, if needed, a
-  view in `src/web/views/`.
+  (`src/tasks/reference_audit/`, `src/tasks/line_verify/`) says how a proposal is shown, which decisions exist, how a
+  decision is normalised, and how decisions are exported. For line verification a bundle page is an item and a line
+  is a proposal (`category` = stratum, `confidence` = candidate provenance). Planned task types (Pinkas per-line
+  language tags, quality-3 second-review adjudication) add a module in `src/tasks/` and, if needed, a view in
+  `src/web/views/`.
 - **Every decision is kept.** Several reviewers may decide one proposal. A reviewer's later decision supersedes
   their own earlier one, which stays in the history. A decision on proposal content that has since changed is stale
   and never exported.
-- **Queue:** easiest and highest-confidence first (confidence, then category, then short spans). A proposal leaves
-  the queue once it has `min_reviewers` decisions (1 for now). A short lease spreads concurrent reviewers.
+- **Queue:** most informative first. Reference audit: by category (letter confusion, extra text, missing text, word
+  join/split, editors' text not in print, then punctuation, and spacing last, since hocrgen now fixes "space before
+  punctuation" by rule), and within a category lower agent confidence first. Line verification: the bundle's `rank`
+  (hard lines first), ties by `item_id`. A re-import updates the order. A proposal leaves the queue once it has
+  `min_reviewers` decisions (1 for now). A short lease spreads concurrent reviewers.
 - **Review screen:** the enlarged crop with the region outlined, zoom, and a full-page view. It shows the current
   and the proposed text with the changed letters marked and invisible characters shown (`␣`, `⍽`, `⟨RLM⟩`,
   presentation forms), plus code points, the category, the agent's confidence and its note. Buttons are Accept,
@@ -100,7 +113,28 @@ Only openly licensed pages may be imported: Wikisource scans and text are fine. 
    `--pages-dir` adds the full-page view. Without a bundle, `--proposals <file> --pages-dir <hires>` cuts the crops
    here.
 
-3. For a remote target, redeploy so the crops are served: `npm run deploy:preview`.
+3. For a remote target, redeploy so the crops are served: `npm run deploy:preview`. A deploy uploads exactly what is
+   in `public/media/`, so copy in the media of every batch the target serves before deploying.
+
+### Line verification bundles
+
+```sh
+npm run import -- --task line_verify --bundle <dir with items.json and pages/> --target local|preview
+```
+
+The script validates `items.json` (`line_verify_items.v1`: open `text_license`, an attribution, boxes inside the
+page, NFC single-line candidates, attention spans as code-point offsets, a URL-safe `batch_id`), checks every page
+image's SHA-256 and aspect ratio, and cuts with `sharp`, per line, one JPEG of its context band (the union of `box`
+and `context_box` plus a little air, at the scan's resolution up to 1,800 px wide, quality 85) and, per page, a
+reduced 1,000 px page. The browser cuts the large line view from the context crop, so there is one file per line.
+It prints the batch's `media_files`, `media_mb` and largest file. For about 1,500 lines over a few hundred pages
+that is roughly 1,500 + pages ≈ 2,000 files and, at 50-150 KB a crop, about 100-250 MB: well inside the Workers
+static-asset limits (20,000 files per version on the free plan, 25 MiB a file) and far lighter for a phone than
+shipping full-resolution pages. A decision is pinned to the line's text, boxes and page image: if a re-export changes
+any of them, earlier decisions on that line become stale (kept, never exported).
+
+A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
+`npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan).
 
 ## Decisions out
 
@@ -115,6 +149,14 @@ applies a proposal when at least `min_reviewers` reviewers agree. It also writes
 per-proposal outcome and `reviewer_count`, conflicts, and opted-in credits. The decisions file is validated before
 it is written. Copy it over hocrgen's `docs/reference_audit_decisions.json` in a PR, then check it there:
 `python -m hocrgen.tools.reference_audit`.
+
+For a line verification batch the same command writes `out/line_verify_decisions.json` (`line_verify_decisions.v1`:
+`decision_id` `decision:<item_id>:<reviewer>`, `exact` / `edited` (with the full corrected line, NFC) /
+`unreadable` / `misaligned`, `decided_at`, `checked_by: human`) and its ledger. The server refuses an edit that is
+empty, has a line break or control character, or is too long; it stores an edit as NFC without leading or trailing
+whitespace, and an edit equal to the candidate as `exact`. Each decision also carries `candidate_sha256`, the
+SHA-256 of the UTF-8 candidate text the reviewer judged. That field is an addition to the v1 contract: an `exact`
+names no text, so without it hocrgen could not tell that a decision was made on an earlier candidate.
 
 The admin can also download both files from the app (`/app/#admin`, *Export*).
 

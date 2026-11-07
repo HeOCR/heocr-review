@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { handle } from "../../src/worker/index";
 import type { Env } from "../../src/worker/env";
-import { Client } from "./helpers";
+import { BATCH, Client } from "./helpers";
 
 const exec = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
 
@@ -76,7 +76,7 @@ describe("request guards", () => {
     const c = new Client();
     await c.signIn("fast");
     await c.acceptTerms();
-    const id = (await env.DB.prepare("SELECT id FROM proposals ORDER BY rank LIMIT 1").first<{ id: number }>())!.id;
+    const id = (await env.DB.prepare("SELECT id FROM proposals WHERE batch_id = ?1 ORDER BY rank LIMIT 1").bind(BATCH).first<{ id: number }>())!.id;
     let limited = 0;
     for (let i = 0; i < 65; i++) {
       const res = await c.req("POST", `/api/proposals/${id}/decision`, { value: i % 2 ? "accepted" : "rejected" });

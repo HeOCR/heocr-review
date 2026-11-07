@@ -1,10 +1,12 @@
 /**
- * Import a proposals file and its page images into HeOCR Review.
+ * Import a task's source file and its page images into HeOCR Review.
  *
- *   # from hocrgen's bundle (python -m hocrgen.tools.reference_audit --export-dir B --page-images P):
+ *   # reference_audit, from hocrgen's bundle (python -m hocrgen.tools.reference_audit --export-dir B --page-images P):
  *   npm run import -- --task reference_audit --bundle <B> [--pages-dir <P>] [--target local|preview|production]
  *   # or from a proposals file and page images (this script cuts the crops):
  *   npm run import -- --task reference_audit --proposals <proposals.json> --pages-dir <P> [--target ...]
+ *   # line_verify, from a line_verify_items.v1 bundle (items.json and pages/; this script cuts the line crops):
+ *   npm run import -- --task line_verify --bundle <B> [--target ...]
  *   options: [--min-reviewers 1] [--dry-run]
  *
  * --pages-dir holds one image per item, named by the item id after its source prefix
@@ -14,31 +16,56 @@
  * The script validates the files, puts the crops into public/media/ (gitignored; deploy uploads them as static
  * assets), writes .import/<batch>.sql and applies it to the target D1 database. Restricted sources are refused.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { importer } from "../src/tasks/importers";
 import type { ProposalMedia } from "../src/tasks/types";
 import { parseArgs, str, target } from "./lib/args";
 import { assertOpenSource } from "./lib/guard";
 import { buildImportSql } from "./lib/importsql";
-import { bundleProblems, cutPage, findImage, pageOnly, placeBundleCrop, safeSegment, type BundleCrop, type CropBundle } from "./lib/media";
+import {
+  bundleImageProblems,
+  bundleProblems,
+  cutLines,
+  cutPage,
+  findImage,
+  pageOnly,
+  placeBundleCrop,
+  safeSegment,
+  type BundleCrop,
+  type CropBundle,
+} from "./lib/media";
 import { inline } from "./lib/sql";
 import { d1File, d1Migrate, d1Query } from "./lib/wrangler";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
+/** How many static files this batch serves and their size (Workers static assets: 20,000 files per version on the
+ * free plan, 25 MiB per file). */
+function mediaBudget(publicDir: string, media: Map<string, ProposalMedia>): { media_files: number; media_mb: number; largest_kb: number } {
+  const paths = new Set<string>();
+  for (const m of media.values()) for (const img of [m.crop, m.page]) if (img?.ref.source === "static") paths.add(img.ref.path);
+  const sizes = [...paths].map((p) => statSync(join(publicDir, p)).size);
+  return {
+    media_files: paths.size,
+    media_mb: Math.round(sizes.reduce((a, b) => a + b, 0) / 1e4) / 100,
+    largest_kb: Math.round(Math.max(0, ...sizes) / 1024),
+  };
+}
+
 async function main(): Promise<void> {
   const { flags } = parseArgs(process.argv.slice(2));
   const taskId = str(flags, "task");
+  const task = importer(taskId);
+  if (!task) throw new Error(`unknown task type ${taskId}`);
   const bundleDir = typeof flags.bundle === "string" ? flags.bundle : null;
-  const proposalsPath = bundleDir ? join(bundleDir, "proposals.json") : str(flags, "proposals");
+  const proposalsPath = bundleDir ? join(bundleDir, task.bundleFile) : str(flags, "proposals");
   const pagesDir = typeof flags["pages-dir"] === "string" ? flags["pages-dir"] : null;
+  if (taskId === "line_verify" && !bundleDir) throw new Error("line_verify imports a bundle: give --bundle <dir with items.json and pages/>");
   if (!bundleDir && !pagesDir) throw new Error("give --bundle, or --proposals with --pages-dir");
   const t = target(flags);
   const minReviewers = Number(str(flags, "min-reviewers", "1"));
   if (!Number.isInteger(minReviewers) || minReviewers < 1) throw new Error("--min-reviewers must be a positive integer");
-  const task = importer(taskId);
-  if (!task) throw new Error(`unknown task type ${taskId}`);
   assertOpenSource(proposalsPath);
   if (bundleDir) assertOpenSource(bundleDir);
   if (pagesDir) assertOpenSource(pagesDir);
@@ -54,7 +81,13 @@ async function main(): Promise<void> {
   for (const p of bundle.proposals) byItem.set(p.itemExternalId, [...(byItem.get(p.itemExternalId) ?? []), p]);
   const publicDir = join(ROOT, "public");
   let bundleCrops: Map<string, BundleCrop> | null = null;
-  if (bundleDir) {
+  const shipsPages = bundle.items.some((i) => i.bundleImage);
+  if (bundleDir && shipsPages) {
+    // The bundle ships its page images (line_verify): check them, then cut a crop per line and a reduced page.
+    const images = bundle.items.flatMap((i) => (i.bundleImage ? [i.bundleImage] : []));
+    const bp = bundleImageProblems(bundleDir, images);
+    if (bp.length) throw new Error(`invalid bundle:\n  ${bp.slice(0, 20).join("\n  ")}`);
+  } else if (bundleDir) {
     const index = JSON.parse(readFileSync(join(bundleDir, "crops.json"), "utf8")) as CropBundle;
     const bp = bundleProblems(bundleDir, index, bundle.batch.id);
     if (bp.length) throw new Error(`invalid crop bundle:\n  ${bp.slice(0, 20).join("\n  ")}`);
@@ -63,6 +96,15 @@ async function main(): Promise<void> {
   for (const item of bundle.items) {
     const proposals = byItem.get(item.externalId) ?? [];
     const stem = item.imageStem ?? safeSegment(item.externalId);
+    if (item.bundleImage) {
+      const lines = proposals.flatMap((p) => (p.pageBox ? [{ externalId: p.externalId, box: p.pageBox, contextBox: p.contextBox ?? p.pageBox }] : []));
+      const cut = await cutLines(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path), item.bundleImage, lines);
+      for (const p of proposals) {
+        const crop = cut.crops.get(p.externalId);
+        media.set(p.externalId, { ...(crop ? { crop } : {}), page: { ...cut.page, box: p.pageBox } });
+      }
+      continue;
+    }
     const image = pagesDir && item.imageStem ? findImage(pagesDir, item.imageStem) : null;
     if (bundleCrops) {
       const page = image ? await pageOnly(publicDir, bundle.batch.id, stem, image) : null;
@@ -95,6 +137,7 @@ async function main(): Promise<void> {
     items: bundle.items.length,
     proposals: bundle.proposals.length,
     crops: [...media.values()].filter((m) => m.crop).length,
+    ...mediaBudget(publicDir, media),
     sql: sqlPath,
     target: t,
   };

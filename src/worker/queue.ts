@@ -11,7 +11,8 @@ const PREFETCH = 3;
 
 /**
  * Open to reviewer ?2: active, not decided by them, not skipped by them, and below the batch's reviewer target.
- * Proposals leased to someone else in the last LEASE_MS come after the rest; then easiest first (rank).
+ * Proposals leased to someone else in the last LEASE_MS come after the rest; then by rank (the
+ * task type's serving order, set at import).
  */
 const OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
   WHERE p.batch_id = ?1 AND p.active = 1
@@ -84,9 +85,10 @@ export async function nextFor(db: D1Database, batch: BatchRecord, reviewerId: st
     )
     .bind(first.id, reviewerId, nowMs)
     .run();
+  const kinds = taskType(batch.taskType)?.prefetch ?? ["crop", "page"];
   const prefetch = rows
     .slice(1)
-    .flatMap((r) => [r.media.crop, r.media.page])
+    .flatMap((r) => kinds.map((k) => r.media[k]))
     .filter((m) => m !== undefined)
     .map((m) => imageUrl(m.ref));
   return { proposal: await proposalView(db, batch, first, reviewerId), progress, prefetch: [...new Set(prefetch)] };

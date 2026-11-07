@@ -1,4 +1,5 @@
 /** JSON shapes shared by the Worker API and the frontend. */
+import type { AttentionRun } from "./attention";
 import type { ImageView } from "./media";
 
 export interface ConfigResponse {
@@ -36,7 +37,26 @@ export interface TextCorrectionView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView;
+/** One printed line and a human transcription of it (task type line_verify). */
+export interface LineVerifyView {
+  kind: "line_verify";
+  candidate: string;
+  /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
+  runs: AttentionRun[];
+  lineIndex: number;
+  provenance: { id: string; label: Label };
+  source: { id: string; label: Label };
+  bookTitle: string;
+  pageLabel: string;
+  attribution: string;
+  textLicense: string;
+  /** The context band (about one line above and below) with the line's ink box. */
+  crop: ImageView | null;
+  /** The reduced full page with the line's ink box. */
+  page: ImageView | null;
+}
+
+export type ProposalViewBody = TextCorrectionView | LineVerifyView;
 
 export interface DecisionOption {
   value: string;
@@ -69,6 +89,7 @@ export interface Progress {
 export interface BatchSummary {
   id: string;
   taskType: string;
+  taskLabel: Label;
   title: string;
   progress: Progress;
 }

@@ -1,14 +1,14 @@
 /** Import hocrgen's reference_audit_proposals.v1 into the generic model. */
 import type { ImportBundle, TaskImporter } from "../import";
-import { CATEGORY_EASE, CONFIDENCE_EASE, DECISIONS_DESCRIPTION, TASK_TYPE_ID, type ReferenceAuditPayload, type ReferenceAuditSource } from "./index";
+import { CATEGORY_PRIORITY, CONFIDENCE_PRIORITY, DECISIONS_DESCRIPTION, TASK_TYPE_ID, type ReferenceAuditPayload, type ReferenceAuditSource } from "./index";
 import { proposalsFileProblems, type RaProposalsFile } from "./schema";
 
 /** Only openly licensed text may be imported (Wikisource is CC BY-SA 4.0). */
 const OPEN_LICENSE = /\b(CC BY-SA|CC BY|CC0|public domain)\b/i;
 
-function ease(p: RaProposalsFile["proposals"][number]): (string | number)[] {
-  const size = Math.max([...p.current].length, [...p.proposed].length);
-  return [CONFIDENCE_EASE[p.confidence] ?? 9, CATEGORY_EASE[p.category] ?? 9, size > 12 ? 1 : 0, p.item_id, p.start];
+/** The serving order (see CATEGORY_PRIORITY): category, then lower confidence first, then position for stability. */
+export function priority(p: RaProposalsFile["proposals"][number]): (string | number)[] {
+  return [CATEGORY_PRIORITY[p.category] ?? 9, CONFIDENCE_PRIORITY[p.confidence] ?? 9, p.item_id, p.start];
 }
 
 function compare(a: (string | number)[], b: (string | number)[]): number {
@@ -23,6 +23,7 @@ function compare(a: (string | number)[], b: (string | number)[]): number {
 
 export const referenceAuditImporter: TaskImporter = {
   taskType: TASK_TYPE_ID,
+  bundleFile: "proposals.json",
 
   problems(raw: unknown): string[] {
     const problems = proposalsFileProblems(raw);
@@ -37,7 +38,7 @@ export const referenceAuditImporter: TaskImporter = {
   bundle(raw: unknown): ImportBundle {
     const file = raw as RaProposalsFile;
     const order = new Map(file.proposals.map((p, i) => [p.proposal_id, i]));
-    const ranked = [...file.proposals].sort((a, b) => compare(ease(a), ease(b)));
+    const ranked = [...file.proposals].sort((a, b) => compare(priority(a), priority(b)));
     const source: ReferenceAuditSource = {
       schema_version: file.schema_version,
       audit_id: file.audit_id,

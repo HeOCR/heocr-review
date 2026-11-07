@@ -1,7 +1,7 @@
 /**
  * The generic data model: task types -> batches of items -> proposals -> decisions.
  *
- * A task type (reference audit, per-line language tags, silver-page confirmation, second-review adjudication)
+ * A task type (reference audit, line verification; planned: per-line language tags, second-review adjudication)
  * defines how its stored proposal payloads are shown, which decisions a reviewer can make, how a decision is
  * normalised, and how resolved decisions are written back out in the format its consumer reads. Everything
  * else (sign-in, queueing, recording every reviewer's decision, progress, export resolution) is shared.
@@ -93,6 +93,8 @@ export interface TaskType {
   id: string;
   label: Label;
   options: DecisionOption[];
+  /** Which of the next proposals' images the browser fetches ahead (default: crop and page). */
+  prefetch?: (keyof ProposalMedia)[];
   toView(proposal: ProposalRecord): ProposalViewBody;
   normalizeDecision(proposal: ProposalRecord, value: string, text: unknown): NormalizedDecision;
   /** The consumer's decisions file, built from the resolved proposals. */

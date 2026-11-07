@@ -155,8 +155,9 @@ export async function batches(ctx: Ctx): Promise<Response> {
   const list = await listBatches(ctx.env.DB, true);
   const out: BatchSummary[] = [];
   for (const b of list) {
-    if (!taskType(b.taskType)) continue;
-    out.push({ id: b.id, taskType: b.taskType, title: b.title, progress: await progressFor(ctx.env.DB, b, reviewer.id) });
+    const type = taskType(b.taskType);
+    if (!type) continue;
+    out.push({ id: b.id, taskType: b.taskType, taskLabel: type.label, title: b.title, progress: await progressFor(ctx.env.DB, b, reviewer.id) });
   }
   return json({ batches: out });
 }

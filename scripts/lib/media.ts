@@ -3,8 +3,8 @@
  * public/media/<batch>/<item>/. File names carry a content hash, so they can be cached forever.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import sharp from "sharp";
 import type { Box } from "../../src/shared/media";
 import type { StoredImage } from "../../src/tasks/types";
@@ -167,4 +167,86 @@ export function placeBundleCrop(publicDir: string, batchId: string, itemStem: st
 /** Only the reduced full page (when crops come from a bundle). */
 export async function pageOnly(publicDir: string, batchId: string, itemStem: string, imagePath: string): Promise<StoredImage> {
   return (await cutPage(publicDir, batchId, itemStem, imagePath, [])).page;
+}
+
+/** Line crops (line_verify): one per line, the context band at the scan's own resolution up to this width. */
+export const LINE_CROP_MAX_WIDTH = 1800;
+
+/**
+ * The crop rectangle (pixels) for one line: the union of its ink box and its context band, with a little air
+ * around it, inside the page.
+ */
+export function lineCropRect(box: Box, context: Box, w: number, h: number): { left: number; top: number; width: number; height: number } {
+  const lineH = (box[3] - box[1]) * h;
+  const padX = Math.max(0.01 * w, 0.5 * lineH);
+  const padY = 0.25 * lineH;
+  const x0 = Math.max(0, Math.floor(Math.min(box[0], context[0]) * w - padX));
+  const y0 = Math.max(0, Math.floor(Math.min(box[1], context[1]) * h - padY));
+  const x1 = Math.min(w, Math.ceil(Math.max(box[2], context[2]) * w + padX));
+  const y1 = Math.min(h, Math.ceil(Math.max(box[3], context[3]) * h + padY));
+  return { left: x0, top: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) };
+}
+
+/** Problems with the page images a bundle ships (path inside the bundle, present, checksum). */
+export function bundleImageProblems(dir: string, images: { path: string; sha256: string }[]): string[] {
+  const problems: string[] = [];
+  const root = realpathSync(dir);
+  for (const img of images) {
+    const abs = join(dir, img.path);
+    if (!existsSync(abs)) problems.push(`${img.path}: missing`);
+    else if (!realpathSync(abs).startsWith(root + sep)) problems.push(`${img.path}: outside the bundle`);
+    else if (sha256File(abs) !== img.sha256) problems.push(`${img.path}: checksum differs from items.json`);
+  }
+  return problems;
+}
+
+/**
+ * Cut one crop per line (its context band, with the line's ink box in crop coordinates) and a reduced full page,
+ * as content-hashed static assets under public/media/<batch>/<page>/. Boxes are fractions of the page; the image
+ * must have the aspect ratio items.json declares (any size: a uniformly scaled raster is fine).
+ */
+export async function cutLines(
+  publicDir: string,
+  batchId: string,
+  pageStem: string,
+  imagePath: string,
+  declared: { width: number; height: number },
+  lines: { externalId: string; box: Box; contextBox: Box }[],
+): Promise<PageMedia> {
+  const input = readFileSync(imagePath);
+  const meta = await sharp(input, { failOn: "error" }).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (!w || !h) throw new Error(`cannot read ${imagePath}`);
+  if (Math.abs(w / h - declared.width / declared.height) > 0.01 * (declared.width / declared.height)) {
+    throw new Error(`${imagePath} is ${w}x${h}, but items.json says ${declared.width}x${declared.height}`);
+  }
+  const base = join("media", safeSegment(batchId), safeSegment(pageStem));
+  const pageW = Math.min(PAGE_WIDTH, w);
+  const pageBuf = await sharp(input).resize({ width: pageW }).jpeg({ quality: 72, mozjpeg: true }).toBuffer();
+  const page: StoredImage = {
+    ref: { source: "static", path: write(publicDir, join(base, "page.jpg"), pageBuf) },
+    width: pageW,
+    height: Math.round((h * pageW) / w),
+    box: null,
+  };
+  const crops = new Map<string, StoredImage>();
+  const rel = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10000) / 10000;
+  for (const line of lines) {
+    const r = lineCropRect(line.box, line.contextBox, w, h);
+    const outW = Math.min(r.width, LINE_CROP_MAX_WIDTH);
+    const buf = await sharp(input).extract(r).resize({ width: outW }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    crops.set(line.externalId, {
+      ref: { source: "static", path: write(publicDir, join(base, `${safeSegment(line.externalId)}.jpg`), buf) },
+      width: outW,
+      height: Math.max(1, Math.round((r.height * outW) / r.width)),
+      box: [
+        rel((line.box[0] * w - r.left) / r.width),
+        rel((line.box[1] * h - r.top) / r.height),
+        rel((line.box[2] * w - r.left) / r.width),
+        rel((line.box[3] * h - r.top) / r.height),
+      ],
+    });
+  }
+  return { page, crops };
 }
