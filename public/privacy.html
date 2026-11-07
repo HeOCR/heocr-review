@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Privacy · HeOCR Review</title>
+    <meta name="description" content="HeOCR Review privacy policy." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/" dir="ltr">HeOCR Review</a>
+      <nav id="nav"><a href="/app/">לסקירה / Start reviewing</a></nav>
+    </header>
+    <main class="doc">
+      <p class="draft" dir="ltr">DRAFT · טיוטה: privacy policy version <span class="mono">2026-11-07-draft-1</span>, 2026-11-07, pending maintainer approval</p>
+      <section class="card" lang="he" dir="rtl">
+        <h1>מדיניות פרטיות</h1>
+        <ul>
+          <li><b>כניסה עם Google</b> משמשת רק לאימות זהות. מתוך האסימון של Google אנו משתמשים רק במזהה הקבוע של החשבון (<span dir="ltr">sub</span>).</li>
+          <li><b>איננו שומרים</b> כתובת דוא״ל, שם או תמונה מחשבון Google.</li>
+          <li><b>המזהה שלכם באתר</b> הוא כינוי: <span dir="ltr">HMAC-SHA256</span> של מזהה Google עם מפתח סודי של השרת, מקוצר (למשל <span dir="ltr" class="mono">rv_1a2b3c4d</span>). אי אפשר לשחזר ממנו את חשבון Google.</li>
+          <li><b>שם לקרדיט</b> נשמר רק אם בחרתם בו, עם ההסכמה ותאריכה. אפשר להסיר אותו בכל עת בהגדרות.</li>
+          <li><b>עוגייה אחת</b>: עוגיית התחברות חתומה (<span dir="ltr" class="mono">__Host-hr_session</span>, ל-14 יום). אין אנליטיקה, אין פרסום, ואין סקריפטים של צד שלישי מלבד סקריפט הכניסה של Google. על הכניסה עצמה חלה מדיניות הפרטיות של Google.</li>
+          <li><b>מה נשמר</b> (במסד הנתונים <span dir="ltr">Cloudflare D1</span>):
+            <ul>
+              <li>הכינוי, מועד ההצטרפות והביקור האחרון, גרסת התנאים שאישרתם ומועד האישור, ושם קרדיט אם בחרתם;</li>
+              <li>יומן הסכמות (אישור תנאים, בחירה או הסרה של שם);</li>
+              <li>ההחלטות שלכם: ההצעה, ההחלטה, הטקסט שערכתם, התאריך וגרסת התנאים;</li>
+              <li>דילוגים, וההצעה האחרונה שהוצגה לכם (כדי לחלק עבודה בין מתנדבים);</li>
+              <li>מוני הגבלת קצב לפי הכינוי, או לפי גיבוב מוצפן של כתובת ה-IP (לא הכתובת עצמה), שנמחקים אחרי כיומיים.</li>
+            </ul>
+          </li>
+          <li><b>התרומות ציבוריות</b>: ההחלטות והטקסט שערכתם מתפרסמים במאגרי HeOCR ברישיון <span dir="ltr">CC BY-SA 4.0</span>, עם הכינוי שלכם (או שם הקרדיט, אם בחרתם).</li>
+          <li><b>מחיקה</b>: כתבו ל-<a href="mailto:heocrproject@gmail.com" dir="ltr">heocrproject@gmail.com</a> עם הכינוי שלכם (מופיע בהגדרות). נמחק את הרשומה שלכם ואת שם הקרדיט מהאתר. החלטות שכבר פורסמו במהדורות ציבוריות נשארות שם, עם הכינוי בלבד.</li>
+        </ul>
+      </section>
+      <section class="card" lang="en" dir="ltr">
+        <h1>Privacy policy</h1>
+        <ul>
+          <li><b>Sign in with Google</b> is used only to verify your identity. From Google's token we use only the account's stable identifier (<code>sub</code>).</li>
+          <li><b>We do not store</b> your email address, name or picture from your Google account.</li>
+          <li><b>Your reviewer id</b> is a pseudonym: an HMAC-SHA256 of your Google identifier under a server secret key, truncated (for example <span class="mono">rv_1a2b3c4d</span>). Your Google account cannot be recovered from it.</li>
+          <li><b>A credit name</b> is stored only if you choose one, with your consent and its date. You can remove it at any time in Settings.</li>
+          <li><b>One cookie</b>: a signed sign-in session cookie (<span class="mono">__Host-hr_session</span>, 14 days). No analytics, no advertising, and no third-party scripts except Google's sign-in script. Google's privacy policy applies to the sign-in itself.</li>
+          <li><b>What we store</b> (in a Cloudflare D1 database):
+            <ul>
+              <li>your pseudonym, when you joined and last visited, which terms version you accepted and when, and your credit name if you chose one;</li>
+              <li>a log of consents (terms accepted, credit name set or removed);</li>
+              <li>your decisions: the proposal, your decision, any text you edited, the date and the terms version;</li>
+              <li>proposals you skipped, and the proposal last shown to you (to spread work between volunteers);</li>
+              <li>rate-limit counters, keyed by your pseudonym or by a keyed hash of your IP address (never the address itself), deleted after about two days.</li>
+            </ul>
+          </li>
+          <li><b>Contributions are public</b>: your decisions and edited text are published in HeOCR datasets under CC BY-SA 4.0, credited to your pseudonym (or your credit name, if you chose one).</li>
+          <li><b>Deletion</b>: email <a href="mailto:heocrproject@gmail.com">heocrproject@gmail.com</a> with your pseudonym (shown in Settings). We delete your record and credit name from the site. Decisions already published in public releases stay there, under your pseudonym only.</li>
+        </ul>
+      </section>
+    </main>
+    <footer class="foot muted small">
+      <a href="/">אודות / About</a> ·
+      <a href="/privacy">פרטיות / Privacy</a> ·
+      <a href="/terms">תנאים / Terms</a> ·
+      <a href="https://github.com/HeOCR/heocr-review" rel="noopener">GitHub</a> ·
+      <a href="mailto:heocrproject@gmail.com" dir="ltr">heocrproject@gmail.com</a>
+    </footer>
+  </body>
+</html>

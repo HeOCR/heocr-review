@@ -1,0 +1,14 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+/public/app.js
+/public/app.js.map
+/public/media/
+/data/
+/out/
+/.import/
+coverage/
+*.log
+.DS_Store
