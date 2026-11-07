@@ -1,0 +1,10 @@
+# Copy to .dev.vars for `wrangler dev`. wrangler never uploads .dev.vars on deploy.
+ENVIRONMENT=development
+# The dev sign-in (POST /api/auth/dev) works only with ENVIRONMENT=development, this flag, and a loopback host.
+DEV_AUTH_BYPASS=1
+SESSION_SECRET=dev-only-session-secret-change-me-0123456789abcdef
+REVIEWER_ID_SECRET=dev-only-reviewer-id-secret-change-me-0123456789
+# Comma-separated reviewer ids (rv_...) that may see progress and export.
+ADMIN_REVIEWER_IDS=
+# Optional: a real Google OAuth client id to try Sign in with Google on http://localhost:8787.
+GOOGLE_CLIENT_ID=

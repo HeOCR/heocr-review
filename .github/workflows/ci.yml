@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # hocrgen's own validator checks our decisions export (python stdlib only; no install).
+      - uses: actions/checkout@v4
+        with:
+          repository: HeOCR/hocrgen
+          ref: main
+          path: hocrgen
+          sparse-checkout: |
+            src
+            docs/reference_audit_proposals.json
+            docs/reference_audit_decisions.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          HOCRGEN_DIR: ${{ github.workspace }}/hocrgen
+          HOCRGEN_REQUIRED: "1"

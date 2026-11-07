@@ -1,0 +1,144 @@
+{
+ "schema_version": "reference_audit_proposals.v1",
+ "audit_id": "fixture_reference_audit_v1",
+ "description": "Synthetic fixture for HeOCR Review tests. Made-up text; not from any source.",
+ "reference_set": {},
+ "method": "fixture",
+ "checked_by": "agent",
+ "checker": "fixture generator",
+ "proposed_at": "2026-11-07",
+ "text_license": "CC BY-SA 4.0 (synthetic test text)",
+ "pages": [
+  {
+   "item_id": "wikisource_he_proofread:fixture_book__p0001",
+   "page_title": "עמוד:Fixture.pdf/1",
+   "reference_text_revision": "latest",
+   "base_revision_id": 1000,
+   "base_text_sha256": "2d40b57d4d2c6a912c260787ba02be60559a3442877b01464d84527dcb7d131f",
+   "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "audit_status": "audited_with_findings",
+   "proposal_count": 3,
+   "text_not_on_page_candidate": null
+  },
+  {
+   "item_id": "wikisource_he_proofread:fixture_book__p0002",
+   "page_title": "עמוד:Fixture.pdf/2",
+   "reference_text_revision": "latest",
+   "base_revision_id": 1001,
+   "base_text_sha256": "579897a7aef2d95c0629ca75ccf36a49775037c634589e6973a8682c53031286",
+   "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "audit_status": "audited_with_findings",
+   "proposal_count": 1,
+   "text_not_on_page_candidate": null
+  },
+  {
+   "item_id": "wikisource_he_proofread:fixture_book__p0003",
+   "page_title": "עמוד:Fixture.pdf/3",
+   "reference_text_revision": "latest",
+   "base_revision_id": 1003,
+   "base_text_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+   "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "audit_status": "audited_no_findings",
+   "proposal_count": 0,
+   "text_not_on_page_candidate": null
+  }
+ ],
+ "proposals": [
+  {
+   "proposal_id": "fx-p0001-001",
+   "item_id": "wikisource_he_proofread:fixture_book__p0001",
+   "start": 11,
+   "end": 13,
+   "current": " ,",
+   "proposed": ", ",
+   "context_before": "ת הספר",
+   "context_after": "כתב המ",
+   "category": "spacing",
+   "confidence": "high",
+   "region": {
+    "coordinate_frame": "page",
+    "box_normalized": [
+     0.55,
+     0.1,
+     0.7,
+     0.14
+    ]
+   },
+   "note": "the print has the comma after the word",
+   "status": "agent_proposed",
+   "checked_by": "agent"
+  },
+  {
+   "proposal_id": "fx-p0001-002",
+   "item_id": "wikisource_he_proofread:fixture_book__p0001",
+   "start": 44,
+   "end": 47,
+   "current": "הוא",
+   "proposed": "היא",
+   "context_before": "לשון.\n",
+   "context_after": " אמר כ",
+   "category": "letter_confusion",
+   "confidence": "medium",
+   "region": {
+    "coordinate_frame": "page",
+    "box_normalized": [
+     0.6,
+     0.3,
+     0.72,
+     0.34
+    ]
+   },
+   "note": "the print reads היא",
+   "status": "agent_proposed",
+   "checked_by": "agent"
+  },
+  {
+   "proposal_id": "fx-p0001-003",
+   "item_id": "wikisource_he_proofread:fixture_book__p0001",
+   "start": 60,
+   "end": 60,
+   "current": "",
+   "proposed": "ו",
+   "context_before": " השפה ",
+   "context_after": "חיה.",
+   "category": "missing_text",
+   "confidence": "low",
+   "region": {
+    "coordinate_frame": "page",
+    "box_normalized": [
+     0.2,
+     0.3,
+     0.3,
+     0.34
+    ]
+   },
+   "note": "a vav before the word in print",
+   "status": "agent_proposed",
+   "checked_by": "agent"
+  },
+  {
+   "proposal_id": "fx-p0002-001",
+   "item_id": "wikisource_he_proofread:fixture_book__p0002",
+   "start": 4,
+   "end": 5,
+   "current": "ﬠ",
+   "proposed": "ע",
+   "context_before": "וזה ",
+   "context_after": "נין הד",
+   "category": "letter_confusion",
+   "confidence": "high",
+   "region": {
+    "coordinate_frame": "page",
+    "box_normalized": [
+     0.7,
+     0.2,
+     0.76,
+     0.25
+    ]
+   },
+   "note": "presentation-form ayin U+FB20 for U+05E2",
+   "status": "agent_proposed",
+   "checked_by": "agent"
+  }
+ ]
+}

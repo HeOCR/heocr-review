@@ -1,0 +1,51 @@
+// HeOCR Review: one Worker serves the static frontend (public/) and the API (/api/*).
+// Never put DEV_AUTH_BYPASS here: the dev sign-in exists only through .dev.vars on a loopback host
+// (see src/worker/auth/dev.ts and test/worker/guards.test.ts).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "heocr-review",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    // Public OAuth client id (not a secret); set by scripts/deploy.ts from ~/.config/heocr/cloudflare.env.
+    "GOOGLE_CLIENT_ID": ""
+  },
+  // Secrets (wrangler secret put): SESSION_SECRET, REVIEWER_ID_SECRET, ADMIN_REVIEWER_IDS.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "heocr-review",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "env": {
+    "preview": {
+      "name": "heocr-review-preview",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": {
+        "ENVIRONMENT": "preview",
+        "GOOGLE_CLIENT_ID": ""
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "heocr-review-preview",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+}
