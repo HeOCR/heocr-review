@@ -1,6 +1,6 @@
 import type { MeResponse } from "../../shared/api";
 import { displayNameProblem, MAX_DISPLAY_NAME } from "../../shared/displayName";
-import { TERMS_EN, TERMS_HE, TERMS_LICENSE_URL, TERMS_STATUS, TERMS_VERSION, type TermsText } from "../../shared/terms";
+import { TERMS_EN, TERMS_HE, TERMS_LICENSE_URL, TERMS_VERSION, type TermsText } from "../../shared/terms";
 import { ApiFailure, post } from "../api";
 import { h } from "../dom";
 
@@ -35,7 +35,6 @@ export function termsView(me: MeResponse, done: (me: MeResponse) => void): HTMLE
   return h(
     "form",
     { class: "card", onsubmit: submit },
-    TERMS_STATUS === "DRAFT" ? h("p", { class: "draft", dir: "ltr" }, "DRAFT · טיוטה — terms pending maintainer approval") : null,
     block(TERMS_HE, "he"),
     block(TERMS_EN, "en"),
     h(

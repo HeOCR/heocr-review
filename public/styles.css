@@ -89,7 +89,7 @@ kbd {
 .dev input { width: 10em; }
 .terms { margin-bottom: 12px; }
 .terms[lang="en"] { border-top: 1px solid var(--line); padding-top: 4px; }
-.draft { background: #fff3c4; color: #5c4700; border: 1px solid #d29922; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 14px; }
+.version { margin: 8px 0 0; }
 .optin { display: block; margin: 12px 0 6px; }
 form.card > input[type="text"] { margin-bottom: 14px; }
 

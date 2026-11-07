@@ -9,11 +9,12 @@ against their scans and proposed 519 corrections (`reference_audit_proposals.v1`
 exactly the `reference_audit_decisions.v1` file that hocrgen applies. An agent proposal never changes a reference;
 only human decisions do.
 
-> **Contribution terms, terms of service and privacy policy are DRAFTs.** The maintainer must approve them before
-> public launch. They are the consent text in [`src/shared/terms.ts`](src/shared/terms.ts) and the pages
-> [`public/terms.html`](public/terms.html) and [`public/privacy.html`](public/privacy.html), each in Hebrew and
-> English, versioned and dated. The terms say that decisions and edited text are contributed under CC BY-SA 4.0,
-> credited by pseudonym unless the volunteer opts in to a display name. Contact: heocrproject@gmail.com.
+> **Contribution terms, terms of service and privacy policy: version `2026-11-07-v1`**, approved by the maintainer
+> on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)). They are the consent text in
+> [`src/shared/terms.ts`](src/shared/terms.ts) and the pages [`public/terms.html`](public/terms.html) and
+> [`public/privacy.html`](public/privacy.html), each in Hebrew and English. Decisions and edited text are contributed
+> under CC BY-SA 4.0, credited by pseudonym unless the volunteer opts in to a display name. Any change needs the
+> maintainer's approval and a new version. Contact: heocrproject@gmail.com.
 
 ## How it works
 
