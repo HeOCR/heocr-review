@@ -1,44 +1,13 @@
-import type { BatchSummary, NextResponse, Progress, ProposalView } from "../../shared/api";
+import type { BatchSummary, NextResponse, Progress, ProposalView, TextCorrectionView } from "../../shared/api";
 import { ApiFailure, get, post } from "../api";
 import { h, mount } from "../dom";
 import { compare, textLine } from "../text";
 import { diffText, sides } from "../../shared/diff";
+import { failureHandler, prefetch, progressBar, type ReviewHooks, type ReviewScreen } from "./common";
 import { viewer, type Viewer } from "./viewer";
 
-export interface ReviewHooks {
-  /** The server wants the current terms accepted first; resolve once they are. */
-  needTerms(): Promise<void>;
-  signedOut(): void;
-}
-
-const prefetched = new Set<string>();
-function prefetch(urls: string[]): void {
-  for (const url of urls) {
-    if (prefetched.has(url)) continue;
-    prefetched.add(url);
-    const img = new Image();
-    img.decoding = "async";
-    img.src = url;
-  }
-}
-
-function progressBar(p: Progress): HTMLElement {
-  const pct = p.total ? Math.round((p.covered / p.total) * 100) : 0;
-  return h(
-    "div",
-    { class: "progress", role: "status" },
-    h("div", { class: "bar", "aria-hidden": "true" }, h("div", { style: `width:${pct}%` })),
-    h(
-      "span",
-      { class: "small" },
-      `החלטת על ${p.decidedByMe} · נשארו ${p.remainingForMe}`,
-      h("span", { class: "muted" }, ` · נבדקו ${p.covered} מתוך ${p.total} (${pct}%)`),
-    ),
-  );
-}
-
 /** `startAt` opens one proposal first (link #p/<id>); then the queue continues. */
-export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): { el: HTMLElement; dispose(): void } {
+export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
   const root = h("div", { class: "review" });
   const history: number[] = [];
   let current: ProposalView | null = null;
@@ -47,14 +16,7 @@ export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: nu
   let editing: HTMLTextAreaElement | null = null;
   let busy = false;
 
-  const fail = (err: unknown) => {
-    if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
-    const msg = root.querySelector(".msg");
-    const text =
-      err instanceof ApiFailure && err.code === "rate_limited" ? "לאט לאט: יותר מדי פעולות בדקה. נסו שוב עוד רגע." : "שגיאה. נסו שוב.";
-    if (msg) msg.textContent = text;
-    console.warn(err);
-  };
+  const fail = failureHandler(root, hooks);
 
   async function loadNext(): Promise<void> {
     const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next`);
@@ -114,7 +76,7 @@ export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: nu
 
   function startEdit(): void {
     if (!current || editing) return;
-    const v = current.view;
+    const v = current.view as TextCorrectionView;
     const box = root.querySelector(".editbox") as HTMLElement;
     const area = h("textarea", { dir: "rtl", lang: "he", rows: 2, spellcheck: "false", maxlength: 1000, "aria-label": "הטקסט המתוקן" });
     area.value = current.mine?.value === "edited" && current.mine.text !== null ? current.mine.text : v.proposed;
@@ -162,6 +124,7 @@ export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: nu
 
   function renderProposal(p: ProposalView, revisiting = false): void {
     editing = null;
+    if (p.view.kind !== "text_correction") throw new Error(`reviewView cannot show ${p.view.kind}`);
     const v = p.view;
     const cmp = compare(v.current, v.proposed, v.contextBefore, v.contextAfter);
     viewerApi = viewer(v.crop, v.page);

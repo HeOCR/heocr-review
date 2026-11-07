@@ -1,7 +1,9 @@
-import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
+import type { BatchSummary, ConfigResponse, MeResponse, ProposalView } from "../shared/api";
 import { ApiFailure, get } from "./api";
 import { h, mount } from "./dom";
 import { adminView } from "./views/admin";
+import type { ReviewScreen } from "./views/common";
+import { lineVerifyView } from "./views/line";
 import { reviewView } from "./views/review";
 import { settingsView } from "./views/settings";
 import { signInView } from "./views/signin";
@@ -67,15 +69,57 @@ async function route(): Promise<void> {
   try {
     const { batches } = await get<{ batches: BatchSummary[] }>("/api/batches");
     const linked = /^p\/(\d{1,12})$/.exec(hash);
-    const batch = batches.find((b) => b.progress.remainingForMe > 0) ?? batches[0];
-    if (!batch) return show(h("section", { class: "card" }, h("p", {}, "אין כרגע משימות פתוחות. / No open tasks right now.")));
-    const view = reviewView(batch, { needTerms, signedOut }, linked ? Number(linked[1]) : undefined);
-    show(h("h1", { class: "batchtitle" }, batch.title), view.el);
+    const chosen = /^b\/([A-Za-z0-9._-]{1,100})$/.exec(hash);
+    let batch: BatchSummary | undefined;
+    if (linked) {
+      const { proposal } = await get<{ proposal: ProposalView }>(`/api/proposals/${linked[1]}`);
+      batch = batches.find((b) => b.id === proposal.batchId);
+    } else if (chosen) batch = batches.find((b) => b.id === chosen[1]);
+    else if (batches.length === 1) batch = batches[0];
+    if (!batch) {
+      if (!batches.length) return show(h("section", { class: "card" }, h("p", {}, "אין כרגע משימות פתוחות. / No open tasks right now.")));
+      return show(picker(batches));
+    }
+    const open = batch.taskType === "line_verify" ? lineVerifyView : reviewView;
+    const view: ReviewScreen = open(batch, { needTerms, signedOut }, linked ? Number(linked[1]) : undefined);
+    show(
+      h(
+        "div",
+        { class: "batchhead" },
+        h("h1", { class: "batchtitle" }, batch.title),
+        batches.length > 1 ? h("a", { href: "#tasks", class: "small" }, "כל המשימות / All tasks") : null,
+      ),
+      view.el,
+    );
     dispose = view.dispose;
   } catch (err) {
     if (err instanceof ApiFailure && err.status === 401) return signedOut();
     show(h("p", { class: "msg" }, "שגיאה בטעינה. / Failed to load."));
   }
+}
+
+/** Every open batch, the ones with work left for this reviewer first. */
+function picker(batches: BatchSummary[]): HTMLElement {
+  const sorted = [...batches].sort((a, b) => Number(b.progress.remainingForMe > 0) - Number(a.progress.remainingForMe > 0));
+  return h(
+    "section",
+    { class: "picker" },
+    h("h1", {}, "בחרו משימה ", h("span", { class: "muted small", lang: "en", dir: "ltr" }, "Choose a task")),
+    ...sorted.map((b) =>
+      h(
+        "a",
+        { class: "card pick", href: `#b/${encodeURIComponent(b.id)}` },
+        h("strong", {}, b.taskLabel.he),
+        h("span", { class: "muted small", lang: "en", dir: "ltr" }, ` ${b.taskLabel.en}`),
+        h("span", { class: "small block", dir: "auto" }, b.title),
+        h(
+          "span",
+          { class: "small muted block" },
+          `נשארו לך ${b.progress.remainingForMe} · נבדקו ${b.progress.covered} מתוך ${b.progress.total}`,
+        ),
+      ),
+    ),
+  );
 }
 
 async function start(): Promise<void> {

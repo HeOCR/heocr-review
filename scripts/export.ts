@@ -3,9 +3,10 @@
  *
  *   npm run export -- --batch e2d4_reference_audit_v1 [--target local|preview|production] [--out out/]
  *
- * Writes <out>/reference_audit_decisions.json (exactly hocrgen's reference_audit_decisions.v1, one decision per
- * proposal) and <out>/reference_audit_decisions_ledger.json (every decision of every reviewer, reviewer counts,
- * conflicts, and opted-in credits). Validates the decisions file before writing; prints counts only.
+ * Writes the task type's decisions file (reference_audit_decisions.json: exactly hocrgen's
+ * reference_audit_decisions.v1; line_verify_decisions.json: line_verify_decisions.v1), one decision per reviewer per
+ * proposal, and <name>_ledger.json (every decision of every reviewer, reviewer counts, conflicts, and opted-in
+ * credits). Validates the decisions file before writing; prints counts only.
  * Then copy the decisions file over hocrgen's docs/reference_audit_decisions.json in a PR, and check it there:
  *   python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json
  */
