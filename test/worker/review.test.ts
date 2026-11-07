@@ -13,9 +13,10 @@ async function nextProposal(c: Client): Promise<NextResponse> {
 describe("review flow", () => {
   it("serves config with the dev sign-in on localhost", async () => {
     const c = new Client();
-    const res = await c.get<{ devAuth: boolean; termsStatus: string; googleClientId: string }>("/api/config");
+    const res = await c.get<{ devAuth: boolean; termsStatus: string; termsVersion: string; googleClientId: string }>("/api/config");
     expect(res.body.devAuth).toBe(true);
-    expect(res.body.termsStatus).toBe("DRAFT");
+    expect(res.body.termsStatus).toBe("APPROVED");
+    expect(res.body.termsVersion).toBe("2026-11-07-v1");
     expect(res.body.googleClientId).toBe("test-client.apps.googleusercontent.com");
   });
 

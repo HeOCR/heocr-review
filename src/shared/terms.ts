@@ -1,15 +1,16 @@
 /**
  * Contribution terms shown before a volunteer's first decision.
  *
- * DRAFT: the maintainer must approve this text before public launch. Bump TERMS_VERSION whenever the text
- * changes; every reviewer is then asked again before their next decision.
+ * Approved by the maintainer on 2026-11-07 as version 2026-11-07-v1 (docs/decisions/2026-11-07-terms-approved.md).
+ * Any change to this text, public/terms.html or public/privacy.html needs the maintainer's approval and a new
+ * version; on a new TERMS_VERSION every reviewer is asked again before their next decision.
  */
-export const TERMS_STATUS = "DRAFT" as const;
-export const TERMS_VERSION = "2026-11-07-draft-1";
+export const TERMS_STATUS = "APPROVED" as const;
+export const TERMS_VERSION = "2026-11-07-v1";
 export const TERMS_LICENSE = "CC BY-SA 4.0";
 export const TERMS_LICENSE_URL = "https://creativecommons.org/licenses/by-sa/4.0/";
 /** The public pages carry the same versions (test/node/pages.test.ts checks them). */
-export const PRIVACY_VERSION = "2026-11-07-draft-1";
+export const PRIVACY_VERSION = "2026-11-07-v1";
 export const CONTACT_EMAIL = "heocrproject@gmail.com";
 
 export interface TermsText {

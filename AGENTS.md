@@ -42,8 +42,9 @@
 - An agent never writes decisions. Only human reviewers do, through the app.
 - The export must produce exactly the consumer's format (for E2d4, hocrgen's `reference_audit_decisions.v1`). Change
   the format only together with the consumer.
-- The contribution terms (`src/shared/terms.ts`), `public/terms.html` and `public/privacy.html` are DRAFTs until the
-  maintainer approves them. Bump `TERMS_VERSION` or `PRIVACY_VERSION` on any change, in the code and in the page.
+- The contribution terms (`src/shared/terms.ts`), `public/terms.html` and `public/privacy.html` are maintainer-approved
+  (`docs/decisions/`). Change their text only with the maintainer's approval, and then bump `TERMS_VERSION` or
+  `PRIVACY_VERSION` in the code and the page and record the approval in `docs/decisions/`.
   The privacy policy must describe exactly what the code stores; update it with any change to the data model.
 - Deploy production only when the maintainer says so. Preview is `npm run deploy:preview`.
 

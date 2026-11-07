@@ -5,8 +5,15 @@ import { CONTACT_EMAIL, PRIVACY_VERSION, TERMS_STATUS, TERMS_VERSION } from "../
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
+  it("versions are the approved 2026-11-07-v1", () => {
+    expect(TERMS_VERSION).toBe("2026-11-07-v1");
+    expect(PRIVACY_VERSION).toBe("2026-11-07-v1");
+  });
+
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
     const html = page("index.html");
+    expect(html).toContain(TERMS_VERSION);
+    expect(html).not.toMatch(/draft|טיוטה/i);
     expect(html).toContain("HeOCR open-source project");
     expect(html).toContain(CONTACT_EMAIL);
     expect(html).toContain("https://github.com/HeOCR/heocr-review");
@@ -16,11 +23,12 @@ describe("public pages (Google branding URLs)", () => {
   it.each([
     ["privacy.html", PRIVACY_VERSION],
     ["terms.html", TERMS_VERSION],
-  ])("%s is bilingual, marked DRAFT with its version, and has no scripts", (name, version) => {
+  ])("%s is bilingual, shows its approved version, carries no draft marker and has no scripts", (name, version) => {
     const html = page(name);
     expect(html).toContain('lang="he" dir="rtl"');
     expect(html).toContain('lang="en" dir="ltr"');
-    if (TERMS_STATUS === "DRAFT") expect(html).toContain("DRAFT");
+    expect(TERMS_STATUS).toBe("APPROVED");
+    expect(html).not.toMatch(/draft|טיוטה/i);
     expect(html).toContain(version);
     expect(html).toContain(CONTACT_EMAIL);
     expect(html).not.toMatch(/<script/i);
