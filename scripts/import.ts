@@ -113,7 +113,10 @@ async function main(): Promise<void> {
     inline("SELECT SUM(active) AS active, COUNT(*) AS total FROM proposals WHERE batch_id = ?1", bundle.batch.id),
   )[0]?.[0];
   console.log(JSON.stringify({ ...summary, applied: true, active_proposals: counts?.active, stored_proposals: counts?.total }, null, 2));
-  if (t !== "local") console.log(`Now deploy so the crops are served: npm run deploy:${t === "preview" ? "preview" : "production"}`);
+  if (t !== "local") {
+    const cmd = t === "preview" ? "npm run deploy:preview" : "tsx scripts/deploy.ts production --yes-production";
+    console.log(`If new crops were added since the last deploy, deploy so they are served: ${cmd}`);
+  }
 }
 
 main().catch((err: unknown) => {

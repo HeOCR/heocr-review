@@ -132,7 +132,7 @@ The deploy script:
 - creates the D1 database if needed and records its id in `wrangler.jsonc`;
 - applies migrations and builds the frontend;
 - deploys with `GOOGLE_CLIENT_ID` as a var;
-- reads the secrets from `~/.config/heocr/heocr-review-<env>.secrets.json` (mode 0600, generated on the first
+- reads the secrets from `~/.config/heocr/<worker>.secrets.json` (`heocr-review-preview.secrets.json`, `heocr-review.secrets.json`) (mode 0600, generated on the first
   deploy): `SESSION_SECRET`, `REVIEWER_ID_SECRET` and `ADMIN_REVIEWER_IDS`. Back the file up: if
   `REVIEWER_ID_SECRET` changes, every reviewer gets a new id.
 
