@@ -25,6 +25,8 @@
 - `src/tasks/`: the generic model (`types.ts`, `export.ts`, `import.ts`, `rows.ts`) and one directory per task type.
 - `src/tasks/reference_audit/schema.ts`: the TypeScript port of hocrgen's E2d4 validators. It is the contract and
   must stay in step with `hocrgen/src/hocrgen/reference_audit.py`.
+- `src/tasks/line_verify/schema.ts`: the line verification contract (`line_verify_items.v1` in,
+  `line_verify_decisions.v1` out). Field names are the contract's own; change them only together with hocrgen.
 - `src/web/`: the review app (vanilla TypeScript, bundled by `scripts/build-web.mjs` into `public/app.js`; page
   `public/app/index.html`, served at `/app/`).
 - `public/index.html`, `public/privacy.html`, `public/terms.html`: the public pages (no scripts).
