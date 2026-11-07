@@ -6,7 +6,7 @@
  *
  * It creates the D1 database if needed (and records its id in wrangler.jsonc), applies migrations, builds the
  * frontend, and deploys with GOOGLE_CLIENT_ID as a var and the secrets from
- * ~/.config/heocr/heocr-review-<env>.secrets.json (generated on first deploy, mode 0600; keep it:
+ * ~/.config/heocr/<worker>.secrets.json (heocr-review-preview / heocr-review; generated on first deploy, mode 0600; keep it:
  * REVIEWER_ID_SECRET must never change, or every reviewer gets a new pseudonym).
  * ADMIN_REVIEWER_IDS is read from that file too; add the maintainer's rv_... id there and redeploy.
  */
@@ -37,7 +37,8 @@ function main(): void {
   const envName = positional[0] ?? "preview";
   if (envName !== "preview" && envName !== "production") throw new Error("deploy preview or production");
   if (envName === "production" && flags["yes-production"] !== true) throw new Error("production needs --yes-production");
-  const envFlags = envName === "preview" ? ["--env", "preview"] : [];
+  // Production is wrangler.jsonc's top-level environment; --env= names it explicitly.
+  const envFlags = envName === "preview" ? ["--env", "preview"] : ["--env="];
   const workerName = envName === "preview" ? "heocr-review-preview" : "heocr-review";
   const dbName = workerName;
 
@@ -72,7 +73,8 @@ function main(): void {
   wrangler(["d1", "migrations", "apply", "DB", "--remote", ...envFlags], { remote: true, input: "y\n" });
 
   // Secrets: generated once, kept outside the repo.
-  const secretsPath = join(homedir(), ".config", "heocr", `heocr-review-${envName}.secrets.json`);
+  // One file per Worker, never shared: heocr-review-preview.secrets.json, heocr-review.secrets.json (production).
+  const secretsPath = join(homedir(), ".config", "heocr", `${workerName}.secrets.json`);
   const secrets: Record<string, string> = existsSync(secretsPath) ? (JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, string>) : {};
   let changed = false;
   for (const key of ["SESSION_SECRET", "REVIEWER_ID_SECRET"]) {
