@@ -61,17 +61,23 @@ export const CONFIDENCE_LABELS: Record<string, Label> = {
   low: { he: "נמוכה", en: "Low" },
 };
 
-/** Easiest first: confidence, then category, then short spans (the order of hocrgen's offline packet). */
-export const CATEGORY_EASE: Record<string, number> = {
-  spacing: 0,
-  punctuation: 1,
-  letter_confusion: 2,
-  extra_text: 3,
-  word_join_split: 4,
-  missing_text: 5,
-  unprinted_editors_text: 6,
+/**
+ * Serving order: most informative first. The categories that need a real reading of the scan (a confused letter,
+ * text the reference has but the print does not, text the print has but the reference lacks, a word joined or
+ * split, editors' additions) come before punctuation, and spacing comes last: the maintainer's first 103 decisions
+ * were all "space before punctuation", which hocrgen now fixes by rule (fix_space_before_punctuation). Within a
+ * category, lower agent confidence comes first, since that is where a human judgement adds the most.
+ */
+export const CATEGORY_PRIORITY: Record<string, number> = {
+  letter_confusion: 0,
+  extra_text: 1,
+  missing_text: 2,
+  word_join_split: 3,
+  unprinted_editors_text: 4,
+  punctuation: 5,
+  spacing: 6,
 };
-export const CONFIDENCE_EASE: Record<string, number> = { high: 0, medium: 1, low: 2 };
+export const CONFIDENCE_PRIORITY: Record<string, number> = { low: 0, medium: 1, high: 2 };
 
 const OPTIONS: DecisionOption[] = [
   { value: "accepted", label: { he: "קבלה", en: "Accept" }, withText: false },

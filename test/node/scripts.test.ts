@@ -23,14 +23,14 @@ describe("import", () => {
     expect(inline("SELECT ?1, ?2", "a'b", 3)).toBe("SELECT 'a''b', 3");
   });
 
-  it("orders proposals easiest first and writes upserts that never touch decisions", () => {
+  it("orders proposals most informative first and writes upserts that never touch decisions", () => {
     const raw: unknown = JSON.parse(readFileSync("test/fixtures/proposals.fixture.json", "utf8"));
     const bundle = referenceAuditImporter.bundle(raw);
     expect(bundle.proposals.map((p) => `${p.confidence}:${p.category}`)).toEqual([
-      "high:spacing",
-      "high:letter_confusion",
       "medium:letter_confusion",
+      "high:letter_confusion",
       "low:missing_text",
+      "high:spacing",
     ]);
     expect(bundle.items).toHaveLength(2); // the no-findings page has nothing to review
     const sql = buildImportSql(bundle, new Map(), { minReviewers: 1, importedAt: "2026-11-07T00:00:00Z" });

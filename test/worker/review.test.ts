@@ -4,6 +4,14 @@ import type { NextResponse, ProposalView } from "../../src/shared/api";
 import { decisionsFileProblems } from "../../src/tasks/reference_audit/schema";
 import { BATCH, Client } from "./helpers";
 
+/** The fixture's spacing proposal (current " ,", proposed ", "); it is served last. */
+async function spacingProposal(c: Client): Promise<ProposalView> {
+  const row = await env.DB.prepare("SELECT id FROM proposals WHERE external_id = 'fx-p0001-001'").first<{ id: number }>();
+  const res = await c.get<{ proposal: ProposalView }>(`/api/proposals/${row!.id}`);
+  expect(res.status).toBe(200);
+  return res.body.proposal;
+}
+
 async function nextProposal(c: Client): Promise<NextResponse> {
   const res = await c.get<NextResponse>(`/api/batches/${BATCH}/next`);
   expect(res.status).toBe(200);
@@ -67,7 +75,7 @@ describe("review flow", () => {
     expect(events.results[0]!.kind).toBe("contribution_terms");
   });
 
-  it("serves easiest, highest-confidence proposals first and shows progress", async () => {
+  it("serves the most informative proposals first (spacing last, lower confidence first) and shows progress", async () => {
     const c = new Client();
     await c.signIn("carol");
     await c.acceptTerms();
@@ -79,24 +87,27 @@ describe("review flow", () => {
         expect(n.progress.covered).toBe(4);
         break;
       }
-      seen.push(`${n.proposal.view.confidence.id}:${n.proposal.view.category.id}`);
+      const v = n.proposal.view;
+      if (v.kind !== "text_correction") throw new Error("expected a text-correction view");
+      seen.push(`${v.confidence.id}:${v.category.id}`);
       expect(n.progress.total).toBe(4);
       expect((await c.post(`/api/proposals/${n.proposal.id}/decision`, { value: "rejected" })).status).toBe(200);
     }
-    expect(seen).toEqual(["high:spacing", "high:letter_confusion", "medium:letter_confusion", "low:missing_text"]);
+    expect(seen).toEqual(["medium:letter_confusion", "high:letter_confusion", "low:missing_text", "high:spacing"]);
   });
 
   it("returns the text-correction view with crop and page", async () => {
     const c = new Client();
     await c.signIn("dana");
-    const { proposal, prefetch } = await nextProposal(c);
-    const v = proposal!.view;
-    expect(v.kind).toBe("text_correction");
+    const { prefetch } = await nextProposal(c);
+    const proposal = await spacingProposal(c);
+    const v = proposal.view;
+    if (v.kind !== "text_correction") throw new Error("expected a text-correction view");
     expect(v.current).toBe(" ,");
     expect(v.proposed).toBe(", ");
     expect(v.crop!.url).toMatch(/^\/media\//);
     expect(v.page!.box).toEqual([0.55, 0.1, 0.7, 0.14]);
-    expect(proposal!.options.map((o) => o.value)).toEqual(["accepted", "rejected", "edited"]);
+    expect(proposal.options.map((o) => o.value)).toEqual(["accepted", "rejected", "edited"]);
     expect(prefetch.length).toBeGreaterThan(0);
   });
 
@@ -104,8 +115,7 @@ describe("review flow", () => {
     const c = new Client();
     await c.signIn("erez");
     await c.acceptTerms();
-    const { proposal } = await nextProposal(c);
-    const id = proposal!.id;
+    const id = (await spacingProposal(c)).id;
     const asCurrent = await c.post<{ value: string }>(`/api/proposals/${id}/decision`, { value: "edited", text: " ," });
     expect(asCurrent.body.value).toBe("rejected");
     const asProposed = await c.post<{ value: string }>(`/api/proposals/${id}/decision`, { value: "edited", text: ", " });
@@ -216,7 +226,8 @@ describe("admin", () => {
     const r2 = new Client();
     const id2 = await r2.signIn("rev2");
     await r2.acceptTerms();
-    const ids = (await env.DB.prepare("SELECT id, external_id FROM proposals ORDER BY rank").all<{ id: number; external_id: string }>()).results;
+    const rows = (await env.DB.prepare("SELECT id, external_id FROM proposals").all<{ id: number; external_id: string }>()).results;
+    const ids = ["fx-p0001-001", "fx-p0002-001", "fx-p0001-002", "fx-p0001-003"].map((ext) => rows.find((r) => r.external_id === ext)!);
     await r1.post(`/api/proposals/${ids[0]!.id}/decision`, { value: "rejected" });
     await r1.post(`/api/proposals/${ids[0]!.id}/decision`, { value: "accepted" }); // supersedes
     await r1.post(`/api/proposals/${ids[1]!.id}/decision`, { value: "edited", text: "\u05e2" }); // = proposed: accepted
