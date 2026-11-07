@@ -8,7 +8,7 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = 
     if (value === null || value === undefined || value === false) continue;
     if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2), value);
     else if (key === "class") el.className = String(value);
-    // CSSOM, not a style attribute: the CSP has no 'unsafe-inline' for styles.
+    // CSSOM rather than a style attribute (keeps working under a strict style-src).
     else if (key === "style") el.style.cssText = String(value);
     else if (value === true) el.setAttribute(key, "");
     else el.setAttribute(key, String(value));

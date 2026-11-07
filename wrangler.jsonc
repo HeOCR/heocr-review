@@ -42,7 +42,7 @@
         {
           "binding": "DB",
           "database_name": "heocr-review-preview",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "f942b3af-e259-40dc-9547-18c2c9e80110",
           "migrations_dir": "migrations"
         }
       ]
