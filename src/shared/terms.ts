@@ -8,6 +8,9 @@ export const TERMS_STATUS = "DRAFT" as const;
 export const TERMS_VERSION = "2026-11-07-draft-1";
 export const TERMS_LICENSE = "CC BY-SA 4.0";
 export const TERMS_LICENSE_URL = "https://creativecommons.org/licenses/by-sa/4.0/";
+/** The public pages carry the same versions (test/node/pages.test.ts checks them). */
+export const PRIVACY_VERSION = "2026-11-07-draft-1";
+export const CONTACT_EMAIL = "heocrproject@gmail.com";
 
 export interface TermsText {
   title: string;

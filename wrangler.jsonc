@@ -1,4 +1,5 @@
-// HeOCR Review: one Worker serves the static frontend (public/) and the API (/api/*).
+// HeOCR Review: one Worker serves the static site (public/: / home, /privacy, /terms, /app the review app)
+// and the API (/api/*).
 // Never put DEV_AUTH_BYPASS here: the dev sign-in exists only through .dev.vars on a loopback host
 // (see src/worker/auth/dev.ts and test/worker/guards.test.ts).
 {
@@ -12,7 +13,8 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash",
     "run_worker_first": ["/api/*"]
   },
   "vars": {

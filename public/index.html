@@ -4,24 +4,39 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <title>HeOCR Review · סקירת תיקונים</title>
-    <meta name="description" content="HeOCR Review: volunteers check proposed corrections of Hebrew text against page scans." />
+    <title>HeOCR Review</title>
+    <meta name="description" content="HeOCR Review: volunteers check proposed corrections of Hebrew text against page scans, for the open-source HeOCR project." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
-    <script src="/app.js" defer></script>
   </head>
   <body>
     <header class="top">
-      <a class="brand" href="#" dir="ltr">HeOCR Review</a>
-      <nav id="nav"></nav>
+      <a class="brand" href="/" dir="ltr">HeOCR Review</a>
+      <nav id="nav"><a href="/app/">לסקירה / Start reviewing</a></nav>
     </header>
-    <main id="app"><p class="muted">טוען… / Loading…</p></main>
+    <main class="doc">
+      <section class="card" lang="he" dir="rtl">
+        <h1>HeOCR Review</h1>
+        <p>HeOCR Review הוא אתר קטן שבו מתנדבים בודקים הצעות לתיקון טקסט עברי מול סריקות של דפים מודפסים. ההחלטות משמשות את <a href="https://github.com/HeOCR" rel="noopener">HeOCR</a>, פרויקט קוד פתוח לזיהוי תווים (OCR) בעברית, כדי לתקן טקסטי ייחוס ולמדוד את איכות הזיהוי.</p>
+        <p>המשימה הראשונה: בדיקת טקסט ייחוס מוויקיטקסט מול הסריקה. סוכן תוכנה הציע תיקונים; רק החלטה של אדם משנה טקסט.</p>
+        <p>האתר מופעל על ידי פרויקט הקוד הפתוח HeOCR. יצירת קשר: <a href="mailto:heocrproject@gmail.com" dir="ltr">heocrproject@gmail.com</a>. הקוד ב-GitHub: <a href="https://github.com/HeOCR/heocr-review" rel="noopener" dir="ltr">HeOCR/heocr-review</a>.</p>
+        <p><a class="cta" href="/app/">כניסה וסקירה</a></p>
+      </section>
+      <section class="card" lang="en" dir="ltr">
+        <h2>About</h2>
+        <p>HeOCR Review is a small website where volunteers check proposed corrections of Hebrew text against scans of printed pages. The decisions are used by <a href="https://github.com/HeOCR" rel="noopener">HeOCR</a>, an open-source Hebrew OCR project, to correct reference texts and measure recognition quality.</p>
+        <p>The first task checks Hebrew Wikisource reference text against the scan. A software agent proposed the corrections; only a human decision changes any text.</p>
+        <p>It is run by the HeOCR open-source project. Contact: <a href="mailto:heocrproject@gmail.com">heocrproject@gmail.com</a>. Source code: <a href="https://github.com/HeOCR/heocr-review" rel="noopener">github.com/HeOCR/heocr-review</a> (MIT).</p>
+        <p><a class="cta" href="/app/">Sign in and start reviewing</a></p>
+        <p class="small muted"><a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of service</a></p>
+      </section>
+    </main>
     <footer class="foot muted small">
-      <span>קוד פתוח (MIT)</span> ·
+      <a href="/">אודות / About</a> ·
+      <a href="/privacy">פרטיות / Privacy</a> ·
+      <a href="/terms">תנאים / Terms</a> ·
       <a href="https://github.com/HeOCR/heocr-review" rel="noopener">GitHub</a> ·
-      <span>תרומות: CC BY-SA 4.0</span> ·
-      <span>ללא אנליטיקה</span>
+      <a href="mailto:heocrproject@gmail.com" dir="ltr">heocrproject@gmail.com</a>
     </footer>
   </body>
 </html>

@@ -25,7 +25,9 @@
 - `src/tasks/`: the generic model (`types.ts`, `export.ts`, `import.ts`, `rows.ts`) and one directory per task type.
 - `src/tasks/reference_audit/schema.ts`: the TypeScript port of hocrgen's E2d4 validators. It is the contract and
   must stay in step with `hocrgen/src/hocrgen/reference_audit.py`.
-- `src/web/`: the frontend (vanilla TypeScript, bundled by `scripts/build-web.mjs` into `public/app.js`).
+- `src/web/`: the review app (vanilla TypeScript, bundled by `scripts/build-web.mjs` into `public/app.js`; page
+  `public/app/index.html`, served at `/app/`).
+- `public/index.html`, `public/privacy.html`, `public/terms.html`: the public pages (no scripts).
 - `src/shared/`: code used by both the Worker and the frontend (diff, visible characters, terms, API types).
 - `scripts/`: import, export and deploy (Node, run with `tsx`).
 - `migrations/`: D1 migrations. Add new numbered files; never edit an applied migration.
@@ -40,8 +42,9 @@
 - An agent never writes decisions. Only human reviewers do, through the app.
 - The export must produce exactly the consumer's format (for E2d4, hocrgen's `reference_audit_decisions.v1`). Change
   the format only together with the consumer.
-- The contribution terms (`src/shared/terms.ts`) are a DRAFT until the maintainer approves them. Bump
-  `TERMS_VERSION` on any change to the text.
+- The contribution terms (`src/shared/terms.ts`), `public/terms.html` and `public/privacy.html` are DRAFTs until the
+  maintainer approves them. Bump `TERMS_VERSION` or `PRIVACY_VERSION` on any change, in the code and in the page.
+  The privacy policy must describe exactly what the code stores; update it with any change to the data model.
 - Deploy production only when the maintainer says so. Preview is `npm run deploy:preview`.
 
 ## Coding rules

@@ -9,13 +9,17 @@ against their scans and proposed 519 corrections (`reference_audit_proposals.v1`
 exactly the `reference_audit_decisions.v1` file that hocrgen applies. An agent proposal never changes a reference;
 only human decisions do.
 
-> **Contribution terms are a DRAFT.** The consent text in [`src/shared/terms.ts`](src/shared/terms.ts) (Hebrew and
-> English) must be approved by the maintainer before public launch. It says decisions and edited text are
-> contributed under CC BY-SA 4.0 and credited by pseudonym unless the volunteer opts in to a display name.
+> **Contribution terms, terms of service and privacy policy are DRAFTs.** The maintainer must approve them before
+> public launch. They are the consent text in [`src/shared/terms.ts`](src/shared/terms.ts) and the pages
+> [`public/terms.html`](public/terms.html) and [`public/privacy.html`](public/privacy.html), each in Hebrew and
+> English, versioned and dated. The terms say that decisions and edited text are contributed under CC BY-SA 4.0,
+> credited by pseudonym unless the volunteer opts in to a display name. Contact: heocrproject@gmail.com.
 
 ## How it works
 
-- **One Cloudflare Worker** serves the static frontend (`public/`) and the API (`/api/*`). **D1** stores
+- **One Cloudflare Worker** serves the static site and the API (`/api/*`). The public pages need no sign-in and
+  no JavaScript: `/` (home), `/privacy` and `/terms`; these are the Google OAuth branding URLs. The review app is at
+  `/app/`. **D1** stores
   reviewers, assignments and decisions. Scan crops are Worker static assets under `public/media/` (no R2); an
   `ImageRef` union (`src/shared/media.ts`) leaves room for another image source.
 - **Data model:** task types → batches of items → proposals → decisions. A task type
@@ -61,7 +65,7 @@ npm ci
 cp .dev.vars.example .dev.vars        # ENVIRONMENT=development, DEV_AUTH_BYPASS=1, dev secrets
 npm run db:migrate:local
 npm run import -- --task reference_audit --bundle <app_bundle> --pages-dir <hires> --target local
-npm run dev                            # http://localhost:8787, with a "DEV sign-in" form
+npm run dev                            # http://localhost:8787/app/, with a "DEV sign-in" form
 npm run lint && npm run typecheck && npm test
 ```
 
@@ -111,7 +115,7 @@ per-proposal outcome and `reviewer_count`, conflicts, and opted-in credits. The 
 it is written. Copy it over hocrgen's `docs/reference_audit_decisions.json` in a PR, then check it there:
 `python -m hocrgen.tools.reference_audit`.
 
-The admin can also download both files from the app (`#admin`, *Export*).
+The admin can also download both files from the app (`/app/#admin`, *Export*).
 
 ## Deploy
 
@@ -133,7 +137,7 @@ The deploy script:
 
 The admin is the maintainer's reviewer id, as `ADMIN_REVIEWER_IDS` in that file. It appears under *Settings* after
 signing in; add it there and redeploy. The Google OAuth client must list the Worker's origin as an authorised
-JavaScript origin. Production (`heocr-review`) is deployed only on the maintainer's word:
+JavaScript origin. Its branding URLs are `<origin>/`, `<origin>/privacy` and `<origin>/terms`. Production (`heocr-review`) is deployed only on the maintainer's word:
 `tsx scripts/deploy.ts production --yes-production`.
 
 ## Licence
