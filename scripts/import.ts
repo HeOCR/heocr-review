@@ -7,7 +7,7 @@
  *   npm run import -- --task reference_audit --proposals <proposals.json> --pages-dir <P> [--target ...]
  *   # line_verify, from a line_verify_items.v1 bundle (items.json and pages/; this script cuts the line crops):
  *   npm run import -- --task line_verify --bundle <B> [--target ...]
- *   options: [--min-reviewers 1] [--dry-run]
+ *   options: [--min-reviewers 1] [--title <batch title shown in the app>] [--dry-run]
  *
  * --pages-dir holds one image per item, named by the item id after its source prefix
  * (wikisource_he_proofread:ws_index_1725257__p0003 -> ws_index_1725257__p0003.jpg), in the page frame the
@@ -74,6 +74,8 @@ async function main(): Promise<void> {
   const problems = task.problems(raw);
   if (problems.length) throw new Error(`invalid ${taskId} file:\n  ${problems.slice(0, 20).join("\n  ")}`);
   const bundle = task.bundle(raw);
+  // Two batches of one task type need different titles in the app (e.g. unpointed and pointed lines).
+  if (typeof flags.title === "string" && flags.title.trim()) bundle.batch.title = flags.title.trim();
 
   const media = new Map<string, ProposalMedia>();
   const missing: string[] = [];
