@@ -53,7 +53,7 @@ describe("line verification", () => {
     expect(v.crop!.url).toMatch(/^\/media\//);
     expect(v.crop!.box).not.toBeNull();
     expect(v.page!.box).not.toBeNull();
-    expect(p.options.map((o) => o.value)).toEqual(["exact", "edited", "unreadable", "misaligned"]);
+    expect(p.options.map((o) => o.value)).toEqual(["exact", "edited", "unreadable", "misaligned", "pointed_print"]);
     // The next lines' crops only: the full page is fetched when the reviewer asks for it.
     expect(n.prefetch.length).toBeGreaterThan(0);
     expect(n.prefetch.some((u) => u.endsWith("/page.jpg"))).toBe(false);
@@ -98,6 +98,8 @@ describe("line verification", () => {
       { value: "edited", text: "שורה\nשנייה" },
       { value: "edited", text: "א\u0007" },
       { value: "edited", text: "א".repeat(1001) },
+      { value: "pointed_print", text: "שָׁלוֹם" },
+      { value: "pointed_print", text: "  " },
     ]) {
       const res = await c.post(url, bad);
       expect(res.status, JSON.stringify(bad)).toBe(400);
@@ -109,9 +111,14 @@ describe("line verification", () => {
     const unordered = "שָׁלום";
     const own = await c.post<{ value: string; text: string | null }>(url, { value: "edited", text: `${unordered} ` });
     expect(own.body).toMatchObject({ value: "edited", text: unordered.normalize("NFC") });
-    for (const value of ["unreadable", "misaligned"]) {
+    for (const value of ["unreadable", "misaligned", "pointed_print"]) {
       expect((await c.post<{ value: string }>(url, { value })).body.value).toBe(value);
     }
+    // pointed_print with the letters corrected keeps them; unchanged letters are stored without text.
+    const fixed = await c.post<{ value: string; text: string | null }>(url, { value: "pointed_print", text: "שורה מתוקנת " });
+    expect(fixed.body).toMatchObject({ value: "pointed_print", text: "שורה מתוקנת" });
+    const unchanged = await c.post<{ value: string; text: string | null }>(url, { value: "pointed_print", text: view!.candidate });
+    expect(unchanged.body).toMatchObject({ value: "pointed_print", text: null });
   });
 
   it("lets a reviewer go back and change the last decision (the new one supersedes it)", async () => {
@@ -138,7 +145,7 @@ describe("line verification", () => {
     expect((await nextLine(c)).proposal!.id).toBe(first.id);
   });
 
-  it("exports line_verify_decisions.v1 for the admin, validated against the items", async () => {
+  it("exports line_verify_decisions.v1.1 for the admin, validated against the items", async () => {
     const admin = new Client();
     const adminId = await admin.signIn("maintainer");
     const e = { ...env, ADMIN_REVIEWER_IDS: adminId };
@@ -154,6 +161,7 @@ describe("line verification", () => {
     await a.post(`/api/proposals/${rows[1]!.id}/decision`, { value: "unreadable" });
     await a.post(`/api/proposals/${rows[3]!.id}/decision`, { value: "misaligned" });
     await b.post(`/api/proposals/${rows[3]!.id}/decision`, { value: "exact" }); // conflict
+    await a.post(`/api/proposals/${rows[4]!.id}/decision`, { value: "pointed_print", text: "אותיות מתוקנות" });
     const res = await handle(new Request(`http://localhost/api/admin/batches/${LINES}/export`, { headers: { cookie: admin.cookie } }), e, exec);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { problems: string[]; counts: Record<string, number>; files: Record<string, Record<string, unknown>> };
@@ -162,16 +170,18 @@ describe("line verification", () => {
     expect(Object.keys(file)).toEqual(["schema_version", "batch_id", "decisions"]);
     expect(file.batch_id).toBe(LINES);
     const decisions = file.decisions as Record<string, unknown>[];
-    expect(decisions).toHaveLength(5);
+    expect(decisions).toHaveLength(6);
+    expect(file.schema_version).toBe("line_verify_decisions.v1.1");
+    expect(decisions.find((d) => d.decision === "pointed_print")).toMatchObject({ text: "אותיות מתוקנות" });
     expect(decisions.filter((d) => d.decision === "edited").map((d) => d.text)).toEqual(["הילד הלך אל בית הספר בבקר השכם.", "הילד הלך אל בית הספר בבקר השכם."]);
     for (const d of decisions) {
       expect(d.checked_by).toBe("human");
       expect(d.decided_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      if (d.decision !== "edited") expect("text" in d).toBe(false);
+      if (d.decision !== "edited" && d.decision !== "pointed_print") expect("text" in d).toBe(false);
     }
     const items = rows.map((r) => ({ item_id: r.external_id, candidate_text: (JSON.parse(r.payload_json) as { candidate_text: string }).candidate_text }));
     expect(decisionsFileProblems(file, LINES, items)).toEqual([]);
-    expect(body.counts).toMatchObject({ proposals: 11, decisions_exported: 5, agreed: 2, conflict: 1, undecided: 8, reviewers: 2 });
+    expect(body.counts).toMatchObject({ proposals: 11, decisions_exported: 6, conflict: 1, undecided: 7, reviewers: 2 });
     expect(body.files["line_verify_decisions_ledger.json"]).toMatchObject({ task_type: "line_verify", batch_id: LINES });
   });
 });

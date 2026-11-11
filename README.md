@@ -11,8 +11,10 @@ Two task types:
   hocrgen applies. An agent proposal never changes a reference; only human decisions do.
 - **Line verification.** A human looks at one printed line on a real scan and a candidate transcription of it written
   by a different human (a Wikisource quality-3 proofreader, or Project Ben-Yehuda text aligned to an NLI free-use
-  scan), and marks it exact, corrects it, or marks it unreadable or misaligned. hocrgen exports the
-  `line_verify_items.v1` bundle; the app exports `line_verify_decisions.v1`, and hocrgen's attestation policy decides
+  scan), and marks it exact, corrects it, or marks it unreadable or misaligned. When the letters match but the print
+  is pointed and the candidate is not, it marks "print has niqqud" (`pointed_print`), optionally with the letters
+  corrected and no niqqud typed. hocrgen exports the `line_verify_items.v1` bundle; the app exports
+  `line_verify_decisions.v1.1` (v1 plus `pointed_print`), and hocrgen's attestation policy decides
   what a verified line becomes. The contract is HeOCR planning's
   `tasks/real-source-mapping/outputs/line_verify_contract.md`; `src/tasks/line_verify/schema.ts` implements it.
 
@@ -147,12 +149,17 @@ current decision, `decision_id` `decision:<proposal_id>:<reviewer>`, `checked_by
 applies a proposal when at least `min_reviewers` reviewers agree. It also writes
 `out/reference_audit_decisions_ledger.json`, which holds every decision including superseded and stale ones, the
 per-proposal outcome and `reviewer_count`, conflicts, and opted-in credits. The decisions file is validated before
-it is written. Copy it over hocrgen's `docs/reference_audit_decisions.json` in a PR, then check it there:
-`python -m hocrgen.tools.reference_audit`.
+it is written. **Never copy it over** hocrgen's `docs/reference_audit_decisions.json`: that file also holds E2d4b
+rule decisions (`checked_by: rule`, `reference_audit_decisions.v2`) and hocrgen's current description, which this
+export lacks, so an overwrite would drop them. Merge it in a hocrgen PR instead, which keeps both and fails closed
+on a decision id recorded with different content:
+`python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json --add-decisions <export>/reference_audit_decisions.json`,
+then check it there with `python -m hocrgen.tools.reference_audit`.
 
-For a line verification batch the same command writes `out/line_verify_decisions.json` (`line_verify_decisions.v1`:
+For a line verification batch the same command writes `out/line_verify_decisions.json` (`line_verify_decisions.v1.1`:
 `decision_id` `decision:<item_id>:<reviewer>`, `exact` / `edited` (with the full corrected line, NFC) /
-`unreadable` / `misaligned`, `decided_at`, `checked_by: human`) and its ledger. The server refuses an edit that is
+`unreadable` / `misaligned` / `pointed_print` (with the corrected letters as `text` only when they changed; niqqud
+is refused), `decided_at`, `checked_by: human`) and its ledger. The server refuses an edit that is
 empty, has a line break or control character, or is too long; it stores an edit as NFC without leading or trailing
 whitespace, and an edit equal to the candidate as `exact`. Each decision also carries `candidate_sha256`, the
 SHA-256 of the UTF-8 candidate text the reviewer judged. That field is an addition to the v1 contract: an `exact`

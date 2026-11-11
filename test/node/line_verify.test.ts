@@ -139,6 +139,19 @@ describe("decisions", () => {
     expect(normalizeLineDecision(cand, "edited", ` ${cand}`)).toEqual({ ok: true, value: "exact", text: null });
   });
 
+  it("store pointed_print without text, or with corrected letters and no niqqud", () => {
+    expect(normalizeLineDecision(cand, "pointed_print", undefined)).toEqual({ ok: true, value: "pointed_print", text: null });
+    expect(normalizeLineDecision(cand, "pointed_print", null)).toEqual({ ok: true, value: "pointed_print", text: null });
+    expect(normalizeLineDecision(cand, "pointed_print", ` ${cand} `)).toEqual({ ok: true, value: "pointed_print", text: null });
+    const letters = "הילד הלך אל בית הספר בבקר השכם.";
+    expect(normalizeLineDecision(cand, "pointed_print", letters)).toEqual({ ok: true, value: "pointed_print", text: letters });
+    for (const bad of ["הַיֶּלֶד הלך", "של\u0591ום", "", "א\nב", 5]) {
+      expect(normalizeLineDecision(cand, "pointed_print", bad).ok, JSON.stringify(bad)).toBe(false);
+    }
+    // maqaf and sof pasuq are punctuation, not niqqud
+    expect(normalizeLineDecision(cand, "pointed_print", "בית־הספר׃").ok).toBe(true);
+  });
+
   it("refuse an empty, multi-line, oversized or missing edit", () => {
     for (const bad of ["", "   ", "א\nב", "א\tב", "א".repeat(1001), undefined, 5]) {
       expect(normalizeLineDecision(cand, "edited", bad).ok).toBe(false);
@@ -146,7 +159,7 @@ describe("decisions", () => {
   });
 });
 
-describe("export: line_verify_decisions.v1", () => {
+describe("export: line_verify_decisions.v1.1", () => {
   const bundle = lineVerifyImporter.bundle(fixture);
   const batch: BatchRecord = { id: bundle.batch.id, taskType: "line_verify", title: "t", source: bundle.batch.source, minReviewers: 1 };
   const proposals: ProposalRecord[] = bundle.proposals.map((p, i) => ({
@@ -186,6 +199,8 @@ describe("export: line_verify_decisions.v1", () => {
       decision(2, "rv_aaaaaaaa", "unreadable"),
       decision(3, "rv_aaaaaaaa", "misaligned", { supersededAt: "2026-11-07T11:00:00.000Z" }),
       decision(4, "rv_aaaaaaaa", "exact", { proposalSha256: "f".repeat(64) }), // stale
+      decision(5, "rv_aaaaaaaa", "pointed_print"),
+      decision(6, "rv_aaaaaaaa", "pointed_print", { text: "שורה מתוקנת" }),
     ];
     const r = buildExport({ batch, proposals, decisions, credits: [], exportedAt: "x" });
     expect(r.problems).toEqual([]);
@@ -193,10 +208,10 @@ describe("export: line_verify_decisions.v1", () => {
     expect(r.ledgerFile.fileName).toBe("line_verify_decisions_ledger.json");
     const content = r.decisionsFile.content as { schema_version: string; batch_id: string; decisions: Record<string, unknown>[] };
     expect(Object.keys(content)).toEqual(["schema_version", "batch_id", "decisions"]);
-    expect(content).toMatchObject({ schema_version: "line_verify_decisions.v1", batch_id: "fixture_line_verify_v1" });
+    expect(content).toMatchObject({ schema_version: "line_verify_decisions.v1.1", batch_id: "fixture_line_verify_v1" });
     for (const d of content.decisions) {
       expect(Object.keys(d)).toEqual(
-        d.decision === "edited"
+        "text" in d
           ? ["decision_id", "item_id", "reviewer", "decision", "text", "candidate_sha256", "decided_at", "checked_by"]
           : ["decision_id", "item_id", "reviewer", "decision", "candidate_sha256", "decided_at", "checked_by"],
       );
@@ -212,17 +227,26 @@ describe("export: line_verify_decisions.v1", () => {
       [proposals[0]!.externalId, "rv_aaaaaaaa", "exact"],
       [proposals[0]!.externalId, "rv_bbbbbbbb", "edited"],
       [proposals[1]!.externalId, "rv_aaaaaaaa", "unreadable"],
+      [proposals[4]!.externalId, "rv_aaaaaaaa", "pointed_print"],
+      [proposals[5]!.externalId, "rv_aaaaaaaa", "pointed_print"],
     ]);
-    expect(r.counts).toMatchObject({ decisions_exported: 3, conflict: 1, agreed: 1, decisions_stale: 1 });
+    expect(content.decisions.filter((d) => d.decision === "pointed_print").map((d) => d.text)).toEqual([undefined, "שורה מתוקנת"]);
+    expect(r.counts).toMatchObject({ decisions_exported: 5, conflict: 1, decisions_stale: 1 });
     expect(lineVerify.validateExport(batch, proposals, content)).toEqual([]);
   });
 
   it("refuses text on a non-edit, an edit equal to the candidate, a wrong id, hash or reviewer", () => {
     const base = { decision_id: `decision:${items[0]!.item_id}:rv_aaaaaaaa`, item_id: items[0]!.item_id, reviewer: "rv_aaaaaaaa", decided_at: "2026-11-07", checked_by: "human" };
-    const file = (d: Record<string, unknown>) => ({ schema_version: "line_verify_decisions.v1", batch_id: batch.id, decisions: [{ ...base, ...d }] });
+    const file = (d: Record<string, unknown>, version = "line_verify_decisions.v1.1") => ({ schema_version: version, batch_id: batch.id, decisions: [{ ...base, ...d }] });
     const check = (d: Record<string, unknown>) => decisionsFileProblems(file(d), batch.id, items).join("\n");
     expect(check({ decision: "exact" })).toBe("");
-    expect(check({ decision: "exact", text: "x" })).toContain("only an edited decision");
+    expect(decisionsFileProblems(file({ decision: "exact" }, "line_verify_decisions.v1"), batch.id, items)).toEqual([]);
+    expect(decisionsFileProblems(file({ decision: "pointed_print" }, "line_verify_decisions.v1"), batch.id, items).join("\n")).toContain("in line_verify_decisions.v1");
+    expect(check({ decision: "pointed_print" })).toBe("");
+    expect(check({ decision: "pointed_print", text: "אותיות מתוקנות" })).toBe("");
+    expect(check({ decision: "pointed_print", text: "שָׁלוֹם" })).toContain("letters only");
+    expect(check({ decision: "pointed_print", text: items[0]!.candidate_text })).toContain("without text");
+    expect(check({ decision: "exact", text: "x" })).toContain("only an edited or pointed_print decision");
     expect(check({ decision: "edited", text: items[0]!.candidate_text })).toContain("record exact");
     expect(check({ decision: "edited" })).toContain("text must be a string");
     expect(check({ decision: "maybe" })).toContain("decision must be one of");

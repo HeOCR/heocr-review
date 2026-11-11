@@ -1,7 +1,8 @@
 /**
  * Task type `line_verify`: a human looks at one printed line on a real scan and a candidate transcription of it
  * (written by a different human: a Wikisource quality-3 proofreader, or Project Ben-Yehuda text aligned to an NLI
- * scan) and marks it exact, edits it, or marks it unreadable or misaligned. The export is
+ * scan) and marks it exact, edits it, or marks it unreadable or misaligned. `pointed_print` says the letters match
+ * but the print has niqqud the candidate lacks; with the letters corrected (niqqud left out) it carries `text`. The export is
  * line_verify_decisions.v1, which hocrgen ingests; its attestation policy, not this app, decides what a verified
  * line becomes.
  *
@@ -14,7 +15,7 @@ import type { Box } from "../../shared/media";
 import { imageUrl } from "../../shared/media";
 import { sha256Hex } from "../../shared/sha256";
 import type { BatchRecord, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType } from "../types";
-import { DECISIONS_SCHEMA, decisionId, decisionsFileProblems, lineTextProblems, type LvDecision, type LvPage, type PixelBox } from "./schema";
+import { DECISIONS_SCHEMA, decisionId, decisionsFileProblems, hasNiqqud, lineTextProblems, type LvDecision, type LvPage, type PixelBox } from "./schema";
 
 export const TASK_TYPE_ID = "line_verify";
 
@@ -62,6 +63,8 @@ const OPTIONS: DecisionOption[] = [
   { value: "edited", label: { he: "עריכה", en: "Edit" }, withText: true },
   { value: "unreadable", label: { he: "לא קריא", en: "Unreadable" }, withText: false },
   { value: "misaligned", label: { he: "לא תואם", en: "Misaligned" }, withText: false },
+  // The letters match, the print is pointed and the candidate is not. Edit's "print has niqqud" box sends it with text.
+  { value: "pointed_print", label: { he: "בדפוס יש ניקוד", en: "Print has niqqud" }, withText: false },
 ];
 
 function payloadOf(p: ProposalRecord): LineVerifyPayload {
@@ -80,14 +83,24 @@ const label = (labels: Record<string, Label>, id: string): Label => labels[id] ?
 
 /**
  * A reviewer's edit as stored: NFC, without leading or trailing whitespace (a line reference has none). An edit
- * equal to the candidate is recorded as exact.
+ * equal to the candidate is recorded as exact. A `pointed_print` text is the corrected letters only: niqqud is
+ * refused, and one equal to the candidate is stored without text.
  */
 export function normalizeLineDecision(candidate: string, value: string, text: unknown): NormalizedDecision {
   if (value === "exact" || value === "unreadable" || value === "misaligned") {
-    if (text !== undefined && text !== null) return { ok: false, error: "only an edited decision carries text" };
+    if (text !== undefined && text !== null) return { ok: false, error: "only an edited or pointed_print decision carries text" };
     return { ok: true, value, text: null };
   }
-  if (value !== "edited") return { ok: false, error: "decision must be exact, edited, unreadable or misaligned" };
+  if (value === "pointed_print") {
+    if (text === undefined || text === null) return { ok: true, value, text: null };
+    if (typeof text !== "string") return { ok: false, error: "a pointed_print text must be the corrected letters" };
+    const letters = text.normalize("NFC").trim();
+    const problems = lineTextProblems(letters);
+    if (problems.length) return { ok: false, error: `the corrected line ${problems.join("; ")}` };
+    if (hasNiqqud(letters)) return { ok: false, error: "type the letters only, without niqqud or marks" };
+    return { ok: true, value, text: letters === candidate ? null : letters };
+  }
+  if (value !== "edited") return { ok: false, error: "decision must be exact, edited, unreadable, misaligned or pointed_print" };
   if (typeof text !== "string") return { ok: false, error: "an edited decision needs the corrected line" };
   const edited = text.normalize("NFC").trim();
   const problems = lineTextProblems(edited);
@@ -135,12 +148,12 @@ export const lineVerify: TaskType = {
           .slice()
           .sort((a, b) => a.reviewerId.localeCompare(b.reviewerId))
           .map((d): LvDecision => ({
-            // The contract's key order; text only for edited.
+            // The contract's key order; text for edited, and for pointed_print when the letters were corrected.
             decision_id: decisionId(r.proposal.externalId, d.reviewerId),
             item_id: r.proposal.externalId,
             reviewer: d.reviewerId,
             decision: d.value as LvDecision["decision"],
-            ...(d.value === "edited" ? { text: d.text ?? "" } : {}),
+            ...(d.value === "edited" ? { text: d.text ?? "" } : d.value === "pointed_print" && d.text ? { text: d.text } : {}),
             candidate_sha256: candidateSha,
             decided_at: d.decidedOn,
             checked_by: "human",

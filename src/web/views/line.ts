@@ -1,12 +1,14 @@
 /**
  * The line verification screen (task type line_verify): one printed line at a time, shown large, under it a
  * smaller context band, then the candidate transcription in large RTL type with the attention spans marked.
- * Keyboard first: Enter exact, E edit, U unreadable, M misaligned, S skip, B back; every key has a button.
+ * Keyboard first: Enter exact, E edit, N print has niqqud, U unreadable, M misaligned, S skip, B back; every key has a
+ * button.
  */
 import type { AttentionRun } from "../../shared/attention";
 import type { BatchSummary, LineVerifyView, NextResponse, Progress, ProposalView } from "../../shared/api";
 import type { Box, ImageView } from "../../shared/media";
 import { visibleTokens } from "../../shared/visible";
+import { hasNiqqud } from "../../shared/niqqud";
 import { ApiFailure, get, post } from "../api";
 import { h, mount } from "../dom";
 import { compare } from "../text";
@@ -84,6 +86,7 @@ function candidateNodes(runs: AttentionRun[]): Node[] {
 const KEYS: [string, string, string][] = [
   ["Enter", "מדויק", "exact"],
   ["E", "עריכה", "edit"],
+  ["N", "בדפוס יש ניקוד", "print has niqqud"],
   ["U", "לא קריא", "unreadable"],
   ["M", "לא תואם", "misaligned"],
   ["S", "דילוג", "skip"],
@@ -129,7 +132,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   async function act(value: string, text?: string): Promise<void> {
     if (!current || busy) return;
-    if (value === "exact" && !ready) return status("התמונה עוד נטענת. / The image is still loading.");
+    if ((value === "exact" || value === "pointed_print") && !ready) return status("התמונה עוד נטענת. / The image is still loading.");
     busy = true;
     const id = current.id;
     try {
@@ -184,7 +187,17 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       maxlength: 1000,
       "aria-label": "השורה המתוקנת / the corrected line",
     });
-    area.value = current.mine?.value === "edited" && current.mine.text !== null ? current.mine.text : v.candidate;
+    const mineText = (current.mine?.value === "edited" || current.mine?.value === "pointed_print") && current.mine.text !== null ? current.mine.text : null;
+    area.value = mineText ?? v.candidate;
+    // The print is pointed and the candidate is not: correct the letters only; the decision is pointed_print.
+    const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
+    pointed.checked = current.mine?.value === "pointed_print";
+    const pointedRow = h(
+      "label",
+      { class: "row check", for: "lv-pointed" },
+      pointed,
+      " בדפוס יש ניקוד: תקנו את האותיות בלבד, בלי ניקוד / Print has niqqud: fix the letters only, without niqqud",
+    );
     const preview = h("div", { class: "preview texts" });
     const update = () => {
       // A line is one line: a pasted line break becomes a space.
@@ -198,8 +211,12 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     };
     const save = () => {
       const text = area.value;
+      if (pointed.checked && hasNiqqud(text)) {
+        status("עם \"בדפוס יש ניקוד\" מקלידים אותיות בלבד, בלי ניקוד. / With \"print has niqqud\", type letters only, without niqqud.");
+        return;
+      }
       cancel();
-      void act("edited", text);
+      void act(pointed.checked ? "pointed_print" : "edited", text);
     };
     const cancel = () => {
       editing = null;
@@ -221,6 +238,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     });
     box.replaceChildren(
       area,
+      pointedRow,
       preview,
       h(
         "div",
@@ -348,9 +366,10 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       ),
       h(
         "nav",
-        { class: "actions five" },
+        { class: "actions six" },
         btn("exact", "Enter", "ok", () => void act("exact")),
         btn("edited", "E", "edit", startEdit),
+        btn("pointed_print", "N", "ok pointed", () => void act("pointed_print")),
         btn("unreadable", "U", "bad", () => void act("unreadable")),
         btn("misaligned", "M", "bad", () => void act("misaligned")),
         h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
@@ -412,6 +431,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       Digit1: () => void act("exact"),
       KeyE: startEdit,
       Digit2: startEdit,
+      // e.code: the physical N key, which is מ in a Hebrew layout.
+      KeyN: () => void act("pointed_print"),
       KeyU: () => void act("unreadable"),
       Digit3: () => void act("unreadable"),
       KeyM: () => void act("misaligned"),
