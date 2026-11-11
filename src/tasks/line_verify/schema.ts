@@ -1,19 +1,26 @@
 /**
- * The line verification contract between hocrgen and HeOCR Review (v1, 2026-11-07): the bundle
- * `line_verify_items.v1` (items.json and pages/) comes in, `line_verify_decisions.v1` goes out.
+ * The line verification contract between hocrgen and HeOCR Review (v1, 2026-11-07; decisions v1.1, 2026-11-11): the
+ * bundle `line_verify_items.v1` (items.json and pages/) comes in, `line_verify_decisions.v1.1` goes out. v1.1 is
+ * additive: it adds the `pointed_print` decision (the letters match the print, but the print has niqqud or marks the
+ * candidate lacks), which may carry the corrected letters as `text`.
  * The contract text is HeOCR planning's `tasks/real-source-mapping/outputs/line_verify_contract.md`; the field
  * names here are exactly its own. Offsets (attention_spans) are code points, as Python counts them.
  */
 import { pyLen, reviewerIdProblems, validDate } from "../reference_audit/schema";
+import { hasNiqqud } from "../../shared/niqqud";
 import { MAX_TEXT_LENGTH } from "../types";
 
 export const ITEMS_SCHEMA = "line_verify_items.v1";
-export const DECISIONS_SCHEMA = "line_verify_decisions.v1";
+export const DECISIONS_SCHEMA = "line_verify_decisions.v1.1";
+/** Both versions validate; a v1 file may not use `pointed_print`. */
+export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA] as const;
 export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned"] as const;
 export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned"] as const;
 export const STRATA = ["hard", "random"] as const;
 export const RELEASE_SPLITS = ["train", "validation", "test"] as const;
-export const DECISION_VALUES = ["exact", "edited", "unreadable", "misaligned"] as const;
+export const DECISION_VALUES_V1 = ["exact", "edited", "unreadable", "misaligned"] as const;
+export const DECISION_VALUES = [...DECISION_VALUES_V1, "pointed_print"] as const;
+export { hasNiqqud };
 
 /** Batch ids appear in the app's URLs (/api/batches/<id>/next). */
 export const BATCH_ID = /^[A-Za-z0-9._-]{1,100}$/;
@@ -77,7 +84,7 @@ export interface LvDecision {
 }
 
 export interface LvDecisionsFile {
-  schema_version: typeof DECISIONS_SCHEMA;
+  schema_version: (typeof DECISIONS_SCHEMAS)[number];
   batch_id: string;
   decisions: LvDecision[];
 }
@@ -202,9 +209,10 @@ export interface ItemRef {
   candidate_sha256?: string;
 }
 
-/** Every problem with a line_verify_decisions.v1 file, checked against its items. */
+/** Every problem with a line_verify_decisions.v1 or .v1.1 file, checked against its items. */
 export function decisionsFileProblems(payload: unknown, batchId: string, items: ItemRef[]): string[] {
-  if (!isObj(payload) || payload.schema_version !== DECISIONS_SCHEMA) return [`schema_version must be ${DECISIONS_SCHEMA}`];
+  if (!isObj(payload) || !oneOf(DECISIONS_SCHEMAS, payload.schema_version)) return [`schema_version must be one of ${join(DECISIONS_SCHEMAS)}`];
+  const allowed: readonly string[] = payload.schema_version === DECISIONS_SCHEMA ? DECISION_VALUES : DECISION_VALUES_V1;
   const problems: string[] = [];
   if (payload.batch_id !== batchId) problems.push("batch_id must match the items' batch_id");
   if (!Array.isArray(payload.decisions)) return [...problems, "decisions must be a list"];
@@ -225,12 +233,17 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     const key = `${String(d.item_id)}\u0000${String(d.reviewer)}`;
     if (item && decided.has(key)) problems.push(`${label}: a second decision by ${String(d.reviewer)} for ${item.item_id}; one per reviewer`);
     decided.add(key);
-    if (!oneOf(DECISION_VALUES, d.decision)) problems.push(`${label}: decision must be one of ${join(DECISION_VALUES)}`);
+    if (!oneOf(allowed, d.decision)) problems.push(`${label}: decision must be one of ${join(allowed)} in ${String(payload.schema_version)}`);
     if (d.decision === "edited") {
       const textProblems = lineTextProblems(d.text);
       if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: text ${p}`));
       else if (item && d.text === item.candidate_text) problems.push(`${label}: an edit equal to the candidate is exact; record exact`);
-    } else if ("text" in d) problems.push(`${label}: only an edited decision carries text`);
+    } else if (d.decision === "pointed_print" && "text" in d) {
+      const textProblems = lineTextProblems(d.text);
+      if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: text ${p}`));
+      else if (hasNiqqud(d.text as string)) problems.push(`${label}: a pointed_print text holds the letters only, without niqqud or marks`);
+      else if (item && d.text === item.candidate_text) problems.push(`${label}: a pointed_print text equal to the candidate is recorded without text`);
+    } else if ("text" in d) problems.push(`${label}: only an edited or pointed_print decision carries text`);
     if (d.candidate_sha256 !== undefined && !(typeof d.candidate_sha256 === "string" && SHA256.test(d.candidate_sha256))) {
       problems.push(`${label}: candidate_sha256 must be a SHA-256`);
     } else if (item?.candidate_sha256 && d.candidate_sha256 !== undefined && d.candidate_sha256 !== item.candidate_sha256) {

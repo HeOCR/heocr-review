@@ -187,11 +187,17 @@ mark.attn { background: var(--attn-bg); outline: 1px solid var(--attn-line); }
 .ctxband { width: 100%; }
 .attrib { margin: 10px 0 0; overflow-wrap: anywhere; }
 .actions.five { grid-template-columns: repeat(5, 1fr); }
-.actions.five .act { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; }
+.actions.six { grid-template-columns: repeat(6, 1fr); }
+.actions.five .act, .actions.six .act { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; }
 @media (max-width: 520px) {
   .txt.cand { font-size: 23px; }
   .actions.five .act { font-size: 15px; min-height: 52px; }
+  /* six buttons do not fit one row on a phone: two rows of three */
+  .actions.six { grid-template-columns: repeat(3, 1fr); }
+  .actions.six .act { font-size: 15px; min-height: 48px; }
 }
+.editbox .check { gap: 8px; align-items: center; cursor: pointer; }
+.editbox .check input { width: 20px; height: 20px; }
 
 .adminbatch table { border-collapse: collapse; margin: 6px 0; }
 .adminbatch th, .adminbatch td { border: 1px solid var(--line); padding: 2px 8px; text-align: left; font-weight: normal; }
