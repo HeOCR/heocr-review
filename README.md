@@ -149,8 +149,12 @@ current decision, `decision_id` `decision:<proposal_id>:<reviewer>`, `checked_by
 applies a proposal when at least `min_reviewers` reviewers agree. It also writes
 `out/reference_audit_decisions_ledger.json`, which holds every decision including superseded and stale ones, the
 per-proposal outcome and `reviewer_count`, conflicts, and opted-in credits. The decisions file is validated before
-it is written. Copy it over hocrgen's `docs/reference_audit_decisions.json` in a PR, then check it there:
-`python -m hocrgen.tools.reference_audit`.
+it is written. **Never copy it over** hocrgen's `docs/reference_audit_decisions.json`: that file also holds E2d4b
+rule decisions (`checked_by: rule`, `reference_audit_decisions.v2`) and hocrgen's current description, which this
+export lacks, so an overwrite would drop them. Merge it in a hocrgen PR instead, which keeps both and fails closed
+on a decision id recorded with different content:
+`python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json --add-decisions <export>/reference_audit_decisions.json`,
+then check it there with `python -m hocrgen.tools.reference_audit`.
 
 For a line verification batch the same command writes `out/line_verify_decisions.json` (`line_verify_decisions.v1.1`:
 `decision_id` `decision:<item_id>:<reviewer>`, `exact` / `edited` (with the full corrected line, NFC) /
