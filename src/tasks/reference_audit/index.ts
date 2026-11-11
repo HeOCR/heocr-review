@@ -35,15 +35,19 @@ export interface ReferenceAuditSource {
   proposed_at: string;
 }
 
-/** hocrgen's committed description (docs/reference_audit_decisions.json, commit 0d2af02). */
+/** hocrgen's committed description (docs/reference_audit_decisions.json, commit c21168f). */
 export const DECISIONS_DESCRIPTION =
-  "E2d4: human decisions on the reference audit proposals in docs/reference_audit_proposals.json. Each decision is " +
-  "accepted (apply the proposed text), rejected (keep the reference) or edited (apply the reviewer's own text for the " +
-  "same span); it names its reviewer by a pseudonymous id (rv_ and 8 lower-case letters or digits, never a real name), " +
-  "the date, and checked_by human. Several reviewers may decide one proposal, one decision each (decision_id " +
-  "decision:<proposal_id>:<reviewer>); a proposal applies when at least min_reviewers reviewers decided it and all " +
-  "agree (min_reviewers is 1 for now), and every applied outcome records its reviewer_count. Only these decisions " +
-  "change a reference; an agent never writes here. Empty until a human reviews.";
+  "E2d4: decisions on the reference audit proposals in docs/reference_audit_proposals.json. A human decision " +
+  "(checked_by human) is accepted (apply the proposed text), rejected (keep the reference) or edited (apply the " +
+  "reviewer's own text for the same span); it names its reviewer by a pseudonymous id (rv_ and 8 lower-case letters " +
+  "or digits, never a real name) and the date. Several reviewers may decide one proposal, one decision each " +
+  "(decision_id decision:<proposal_id>:<reviewer>); a proposal applies when at least min_reviewers reviewers " +
+  "decided it and all agree (min_reviewers is 1 for now), and every applied outcome records its reviewer_count. A " +
+  "rule decision (checked_by rule, E2d4b, schema v2) resolves a proposal that a maintainer-approved reference rule " +
+  "makes exactly on the page text (rule space_before_punctuation.v1, decision record " +
+  "planning/decisions/2026-11-07-space-before-punctuation-rule.md); its id is rule:<rule>:<proposal_id>, it names " +
+  "no reviewer and is never counted as human review. A proposal decided by a human takes no rule decision. An agent " +
+  "never writes a human decision here.";
 
 export const CATEGORY_LABELS: Record<string, Label> = {
   letter_confusion: { he: "בלבול אותיות", en: "Letter confusion" },
