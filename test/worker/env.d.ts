@@ -9,6 +9,8 @@ declare global {
     interface Env extends AppEnv {
       TEST_MIGRATIONS: D1Migration[];
       TEST_FIXTURE_SQL: string[];
+      /** The page review batch imported again with ai_flags.json. */
+      TEST_PAGE_REVIEW_AI_SQL: string[];
     }
   }
 }

@@ -25,6 +25,16 @@ function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number
   return buildImportStatements(bundle, media, { minReviewers, importedAt });
 }
 
+const PAGE_REVIEW = "test/fixtures/page_review";
+
+/** The page review batch imported again with Claude's first-pass hints (ai_flags.json), as lead's import will. */
+function pageReviewWithAiFlags(minReviewers: number): string[] {
+  return fixtureBatch(pageReviewImporter, `${PAGE_REVIEW}/batch_manifest.json`, minReviewers, "2026-11-12T12:00:00.000Z", {
+    "blind_prefill.json": `${PAGE_REVIEW}/blind_prefill.json`,
+    "ai_flags.json": `${PAGE_REVIEW}/ai_flags.json`,
+  });
+}
+
 /** The fixture batches: the reference audit (imported first), line verification and page review. */
 function fixtureStatements(minReviewers: number): string[] {
   return [
@@ -55,6 +65,7 @@ export default defineConfig(async () => {
                   ADMIN_REVIEWER_IDS: "",
                   TEST_MIGRATIONS: migrations,
                   TEST_FIXTURE_SQL: fixtureStatements(1),
+                  TEST_PAGE_REVIEW_AI_SQL: pageReviewWithAiFlags(1),
                 },
               },
             }),

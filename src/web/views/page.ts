@@ -1,7 +1,8 @@
 /**
  * The page review screen (task type page_review): the whole scan beside its pre-filled lines. The reviewer corrects
- * the lines in place; lines flagged "look here" (tier A) must each be looked at (Enter on the line, an edit or an
- * action) before the page can be confirmed. Lines can be marked (print has niqqud, not on the page, unreadable),
+ * the lines in place; lines flagged "look here" (eval's tier A, and on the first pass Claude's hints) must each be
+ * looked at (Enter on the line, an edit or an action) before the page can be confirmed. A hint never shows Claude's
+ * reading, only where to look. Lines can be marked (print has niqqud, not on the page, unreadable),
  * merged, split, moved and added. A draft is kept in memory (not in browser storage, which the privacy policy does
  * not cover) while the app is open, so going back and forth between pages keeps unsaved corrections.
  *
@@ -28,8 +29,14 @@ interface Row {
   tierA: boolean;
   bidiRisk: boolean;
   mismatch: boolean;
+  /** Claude's hints: its reading differs here; text the pre-fill lacks is next to this line. */
+  ai: boolean;
+  aiMissing: boolean;
   looked: boolean;
 }
+
+/** A row the reviewer must look at before confirming: eval's tier A or one of Claude's hints. */
+const mustLook = (r: Row) => r.tierA || r.ai || r.aiMissing;
 
 interface Draft {
   rows: Row[];
@@ -77,6 +84,10 @@ function flagText(r: Row): string {
   return "ספרות/סוגריים";
 }
 
+function aiText(r: Row): string {
+  return [r.ai ? "קריאה אחרת (Claude)" : null, r.aiMissing ? "חסר טקסט לידה? (Claude)" : null].filter(Boolean).join(" · ");
+}
+
 /** `startAt` opens one page first (link #p/<id>); then the queue continues. */
 export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
   const root = h("div", { class: "review pagereview" });
@@ -98,7 +109,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   const draftKey = () => (current && view() ? `${current.id}:${view()!.prefillSha256}` : null);
 
   function rowFrom(l: PageReviewLine): Row {
-    return { key: nextKey++, src: [l.i], text: l.text, action: "correct", orig: l.text, tierA: l.tierA, bidiRisk: l.bidiRisk, mismatch: l.mismatch, looked: false };
+    return { key: nextKey++, src: [l.i], text: l.text, action: "correct", orig: l.text, tierA: l.tierA, bidiRisk: l.bidiRisk, mismatch: l.mismatch, ai: l.aiDisagrees, aiMissing: l.aiMissingNear, looked: false };
   }
 
   /** The rows a page starts with: the reviewer's own decision when revisiting, else their draft, else the pre-fill. */
@@ -120,6 +131,8 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
             tierA: anyA,
             bidiRisk: r.i_src.some((i) => byIndex.get(i)?.bidiRisk),
             mismatch: r.i_src.some((i) => byIndex.get(i)?.mismatch),
+            ai: r.i_src.some((i) => byIndex.get(i)?.aiDisagrees),
+            aiMissing: r.i_src.some((i) => byIndex.get(i)?.aiMissingNear),
             looked: true,
           };
         });
@@ -188,7 +201,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     }
   }
 
-  const pendingA = () => rows.filter((r) => r.tierA && !r.looked);
+  const pendingA = () => rows.filter((r) => mustLook(r) && !r.looked);
 
   function confirmPage(): void {
     const v = view();
@@ -214,6 +227,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     void send("confirm", {
       lines: rows.map((r) => ({ src: r.src, action: r.action, text: TEXTLESS.includes(r.action) || r.action === "correct" ? null : r.text })),
       reading_order_verified: v.readingOrderCheck ? true : null,
+      ai_flags_sha256: v.aiFlagsSha256,
     });
   }
 
@@ -222,7 +236,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const note = (root.querySelector(".rejnote") as HTMLInputElement | null)?.value.trim() ?? "";
     if (!reason) return status("בחרו סיבה לפסילה. / Choose why the page is rejected.");
     if (reason === "other" && !note) return status("כתבו בקצרה למה. / Say briefly why.");
-    void send("reject", { reject_reason: reason, reject_note: note || null });
+    void send("reject", { reject_reason: reason, reject_note: note || null, ai_flags_sha256: view()?.aiFlagsSha256 ?? null });
   }
 
   async function doSkip(): Promise<void> {
@@ -312,6 +326,8 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       tierA: cur.tierA || next.tierA,
       bidiRisk: cur.bidiRisk || next.bidiRisk,
       mismatch: cur.mismatch || next.mismatch,
+      ai: cur.ai || next.ai,
+      aiMissing: cur.aiMissing || next.aiMissing,
       looked: true,
     };
     rows.splice(k, 2, joined);
@@ -352,7 +368,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   function addBelow(key: number | null): void {
     const k = key === null ? rows.length - 1 : groupAt(indexOf(key))[1];
-    const r: Row = { key: nextKey++, src: [], text: "", action: "added", orig: null, tierA: false, bidiRisk: false, mismatch: false, looked: true };
+    const r: Row = { key: nextKey++, src: [], text: "", action: "added", orig: null, tierA: false, bidiRisk: false, mismatch: false, ai: false, aiMissing: false, looked: true };
     rows.splice(k + 1, 0, r);
     renderLines(r.key);
   }
@@ -390,7 +406,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (!r) return;
     r.looked = true;
     updateRow(r);
-    const nextA = rows.slice(k + 1).find((x) => x.tierA && !x.looked) ?? rows.find((x) => x.tierA && !x.looked);
+    const nextA = rows.slice(k + 1).find((x) => mustLook(x) && !x.looked) ?? rows.find((x) => mustLook(x) && !x.looked);
     focusRow(nextA?.key ?? rows[k + 1]?.key ?? null);
     updateSummary();
     saveDraft();
@@ -408,7 +424,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   function updateRow(r: Row): void {
     const li = root.querySelector(`li[data-key="${r.key}"]`) as HTMLElement | null;
     if (!li) return;
-    li.classList.toggle("tiera", r.tierA);
+    li.classList.toggle("tiera", mustLook(r));
     li.classList.toggle("looked", r.looked);
     li.classList.toggle("excluded", TEXTLESS.includes(r.action));
     const chip = li.querySelector(".state") as HTMLElement;
@@ -474,6 +490,16 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           "div",
           { class: "lhead" },
           r.tierA ? h("span", { class: "flag", title: "בדקו את השורה הזאת היטב / look closely at this line" }, `בדקו: ${flagText(r)}`) : null,
+          r.ai || r.aiMissing
+            ? h(
+                "span",
+                {
+                  class: "flag ai",
+                  title: "רמז בלבד: הקריאה של Claude בסריקה שונה כאן, או שליד השורה יש טקסט שחסר. הקלידו את מה שמודפס. / A hint only: Claude reads this differently, or sees text next to it that is missing. Type what is printed.",
+                },
+                `בדקו: ${aiText(r)}`,
+              )
+            : null,
           h("span", { class: "state" }),
           h("span", { class: "hidden", title: "בשורה יש תו נסתר (סימן כיווניות). אם הוא לא בדפוס, מחקו אותו. / The line holds an invisible character." }, "תו נסתר"),
         ),
@@ -573,6 +599,9 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           v.period ? h("span", { class: "tag", dir: "ltr" }, v.period) : null,
           v.pass === 2 ? h("span", { class: "tag", title: "Second pass: the page again, from a different pre-fill" }, "מעבר שני") : null,
           v.prefillFromStock ? h("span", { class: "tag conf-medium", title: v.prefillSource }, "טקסט מוכן: Tesseract") : h("span", { class: "tag", title: v.prefillSource }, "טקסט מוכן: שכבת ה-OCR של ה-PDF"),
+          v.aiFlagsSha256
+            ? h("span", { class: "tag", title: "בעמוד הזה יש גם סימוני \"בדקו\" של Claude: רק איפה להסתכל, אף פעם לא טקסט. / Claude's look-here hints: where to look, never text." }, "רמזים: Claude")
+            : null,
           h("span", { class: "muted small title", dir: "auto" }, p.itemTitle),
         ),
         conventions,
@@ -677,7 +706,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       ),
     );
     watch();
-    const firstA = rows.find((r) => r.tierA && !r.looked) ?? null;
+    const firstA = rows.find((r) => mustLook(r) && !r.looked) ?? null;
     renderLines(null, undefined, false); // nothing changed yet: no draft until the reviewer acts
     if (firstA) focusRow(firstA.key);
   }

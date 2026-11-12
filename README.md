@@ -27,8 +27,11 @@ Three task types:
   first-pass confirm, from a different pre-fill and without their first answers; while it is open and undecided,
   their first-pass page is closed to them (no view, no change). The blind pass's lines are flagged by the digit or
   bracket rule only: its pre-fill has no independent reading to disagree with, so its measured error is that of a
-  second pass without letter-disagreement flags. heocr-eval's batch manifest
-  (`heocr_midcentury_batch.v0`, plus `blind_prefill.json`) comes in; `page_review_decisions.v0` goes out. The spec is
+  second pass without letter-disagreement flags. First-pass pages can also carry Claude's hints (`ai_flags.json`, from
+  heocr-lead): lines where Claude's own reading of the scan differs from the pre-fill, and lines next to which the
+  page has text the pre-fill lacks (a margin note, say). They must be looked at like tier A, but a hint is only
+  where to look: Claude's text is never shown, offered or pre-filled, and the blind pass never has hints. heocr-eval's
+  batch manifest (`heocr_midcentury_batch.v0`, plus `blind_prefill.json`) comes in; `page_review_decisions.v0` goes out. The spec is
   HeOCR planning's `tasks/eval-domains/capture/midcentury/REVIEW_BATCH_SPEC.md`; `src/tasks/page_review/schema.ts`
   implements it.
 
@@ -157,7 +160,7 @@ A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
 ### Page review batches
 
 ```sh
-npm run import -- --task page_review --bundle <dir with batch_manifest.json, pages/ and blind_prefill.json> --target local|preview
+npm run import -- --task page_review --bundle <dir with batch_manifest.json, pages/, blind_prefill.json and ai_flags.json> --target local|preview
 ```
 
 The script validates the manifest (pages, roles, flags on non-blank pre-fill lines, unique pages and image names)
@@ -166,7 +169,13 @@ different from the first pass's, and `manifest_sha256` equal to the manifest fil
 image's SHA-256, and writes each page once, whole, as a 16-level greyscale PNG up to 2,000 px wide (about 150 KB a
 page; re-encoding drops all image metadata). The queue is the test pages in the manifest's order (eval's hardest
 first), then the reserves, then the blind second pass; the last two are gated (`migrations/0002_proposal_gates.sql`).
-A decision is pinned to the page's image, pre-fill and flags. Unsaved corrections stay in memory while the app is
+A decision is pinned to the page's image, pre-fill and flags.
+
+The optional `ai_flags.json` (`heocr_midcentury_ai_flags.v0`: `batch_id`, `model`, `created_at`, `manifest_sha256`,
+and per page `unit_id`, `page`, `flagged_i`, `missing_near_i`) names manifest pages, so first-pass pages only, and
+only shown (non-blank) line indices. The hints are not part of a page's content hash, so importing them, or
+changing them, keeps every earlier decision current; each decision records instead the hints its reviewer was
+shown (the browser sends their hash back; none for a page opened before they were imported). Unsaved corrections stay in memory while the app is
 open (nothing is kept in browser storage).
 
 ## Decisions out
@@ -201,11 +210,13 @@ pass and reviewer, `decision_id` `decision:<unit_id>#p<page>[@pass2]:<reviewer>`
 `prefill_source` and `prefill_sha256` of the pre-fill shown, `page_action` (`confirm`, or `reject` with
 `reject_reason` and `reject_note` and `lines: []`), `reading_order_verified`, `lines` in the page's final reading
 order (`i_src`: indices into the pre-fill's lines, blank lines counted; `action`; `text`, NFC as typed, null when
-excluded; `reference_views`, `["consonantal"]` for `print_has_niqqud`), `counts`, `decided_at` and
+excluded; `reference_views`, `["consonantal"]` for `print_has_niqqud`), `ai_flagged_i` and `ai_missing_near_i`
+(Claude's hints the decision was made with, as line indices; null when none were shown, which is always so on the
+blind pass and for decisions made before hints were imported), `counts`, `decided_at` and
 `first_decided_at` (full ISO timestamps: eval checks the 24-hour gap between passes) and `checked_by: human`. A
 pass-1 record of a page whose blind pass the same reviewer decided also has `revised_after_pass2`: true when that
 pass-1 decision was made after their first pass-2 decision, and then `pass1_at_pass2`, the pass-1 decision that
-stood at that moment (its page action, lines and `decided_at`), which is the one the two passes compare.
+stood at that moment (its page action, lines, hints shown and `decided_at`), which is the one the two passes compare.
 
 The admin can also download both files from the app (`/app/#admin`, *Export*).
 

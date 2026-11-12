@@ -168,8 +168,8 @@ mark.edit { background: var(--edit-bg); outline: 1px solid var(--edit); }
 .block { display: block; margin-top: 4px; }
 
 /* line verification */
-:root { --attn-bg: #fff1b8; --attn-line: #b08800; }
-@media (prefers-color-scheme: dark) { :root { --attn-bg: #4a3d0a; --attn-line: #e0b400; } }
+:root { --attn-bg: #fff1b8; --attn-line: #b08800; --ai-hint: #6f42c1; }
+@media (prefers-color-scheme: dark) { :root { --attn-bg: #4a3d0a; --attn-line: #e0b400; --ai-hint: #b392f0; } }
 .ask { margin: 8px 0 4px; font-weight: 600; }
 .linebox {
   margin: 8px 0; padding: 8px 0; background: var(--scan-bg); border: 1px solid var(--line); border-radius: 8px; min-height: 60px;
@@ -228,6 +228,7 @@ main:has(.pagereview) { max-width: 1500px; }
 .prline .lhead { display: flex; gap: 6px; flex-wrap: wrap; }
 .prline .lhead:empty { display: none; }
 .prline .flag { font-size: 12px; color: var(--attn-line, #b08800); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
+.prline .flag.ai { color: var(--ai-hint); border-style: dashed; }
 .prline .state { font-size: 12px; color: var(--edit); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
 .prline .state[data-action="not_on_page"], .prline .state[data-action="unreadable"] { color: var(--bad); }
 .prline .hidden { font-size: 12px; color: var(--bad); }

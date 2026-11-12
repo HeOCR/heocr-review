@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { sha256Hex } from "../../src/shared/sha256";
+import { contentSha256 } from "../../scripts/lib/importsql";
 import { buildExport } from "../../src/tasks/export";
 import { pageReview, payloadOf } from "../../src/tasks/page_review";
 import { pageReviewImporter } from "../../src/tasks/page_review/importer";
@@ -300,5 +301,121 @@ describe("page_review_decisions.v0 export", () => {
     const problems = pageReview.validateExport(batch, proposals, file).join("\n");
     expect(problems).toContain("pass must be 1");
     expect(problems).toContain("not covered");
+  });
+});
+
+describe("Claude's first-pass hints (ai_flags.json)", () => {
+  const ai = JSON.parse(readFileSync(`${DIR}/ai_flags.json`, "utf8")) as Record<string, any>;
+  const withAi = { ...sidecars, "ai_flags.json": ai };
+  const P1 = "reshumot_scanned:sefer_hachukim_1#p2";
+  const record = (p: { externalId: string; itemExternalId: string; payload: Record<string, unknown> }, k: number): ProposalRecord => ({
+    id: k + 1,
+    batchId: "newprinted_midcentury_v0",
+    externalId: p.externalId,
+    itemExternalId: p.itemExternalId,
+    itemTitle: p.itemExternalId,
+    category: "c",
+    confidence: "test",
+    rank: k,
+    payload: p.payload,
+    media: {},
+    contentSha256: `sha${k}`,
+    active: true,
+  });
+
+  it("accepts the fixture", () => {
+    expect(pageReviewImporter.problems(manifest, withAi)).toEqual([]);
+  });
+
+  it.each([
+    ["another schema", (a: any) => (a.schema = "x"), "schema must be"],
+    ["another batch", (a: any) => (a.batch_id = "x"), "batch_id must be"],
+    ["no manifest hash", (a: any) => delete a.manifest_sha256, "manifest_sha256"],
+    ["a page not in the manifest", (a: any) => (a.pages[0].page = 99), "not in the manifest"],
+    ["a page twice", (a: any) => a.pages.push(clone(a.pages[1])), "listed twice"],
+    ["a blank line", (a: any) => (a.pages[0].flagged_i = [1]), "points at a blank line"],
+    ["a line past the end", (a: any) => (a.pages[0].missing_near_i = [9]), "is not a pre-fill line"],
+    ["a repeated index", (a: any) => (a.pages[0].flagged_i = [3, 3]), "distinct line indices"],
+  ])("refuses %s", (_name, mutate, needle) => {
+    const a = clone(ai);
+    mutate(a);
+    expect(pageReviewImporter.problems(manifest, { ...sidecars, "ai_flags.json": a }).join("\n")).toContain(needle);
+  });
+
+  it("puts hints on first-pass pages only, and leaves every content hash (and so every decision) as it was", () => {
+    const before = pageReviewImporter.bundle(manifest, sidecars);
+    const after = pageReviewImporter.bundle(manifest, withAi);
+    expect(after.proposals.map((p) => p.externalId)).toEqual(before.proposals.map((p) => p.externalId));
+    expect(after.proposals.map((p) => contentSha256(p.contentKey))).toEqual(before.proposals.map((p) => contentSha256(p.contentKey)));
+    const flags = after.proposals.map((p) => [p.externalId, (p.payload as any).ai_flags?.flagged_i ?? null, (p.payload as any).ai_flags?.missing_near_i ?? null]);
+    expect(flags).toEqual([
+      [P1, [3], [4]],
+      ["plenary:K2_1#p3", [0], []],
+      ["reshumot_scanned:kovetz_hatakanot_7#p1", null, null], // empty lists: no hints
+      ["plenary:K2_9#p5", null, null],
+      ["reshumot_scanned:kovetz_hatakanot_8#p4", null, null],
+      [`${P1}@pass2`, null, null], // the blind pass never gets hints
+    ]);
+    expect((after.batch.source as any).ai_flags).toEqual({ schema: "heocr_midcentury_ai_flags.v0", model: "claude-opus-5-5", created_at: "2026-11-12T12:00:00Z" });
+  });
+
+  it("shows the hints as look-here flags, never Claude's text, and none on the blind pass even if a payload had some", () => {
+    const after = pageReviewImporter.bundle(manifest, withAi);
+    const v = pageReview.toView(record(after.proposals[0]!, 0)) as any;
+    expect(v.lines.map((l: any) => [l.i, l.aiDisagrees, l.aiMissingNear])).toEqual([
+      [0, false, false],
+      [2, false, false],
+      [3, true, false],
+      [4, false, true],
+    ]);
+    expect(v.aiFlagsSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(v)).not.toContain("claude-opus");
+    const pass2 = after.proposals[5]!;
+    const forced = record({ ...pass2, payload: { ...pass2.payload, ai_flags: (after.proposals[0]!.payload as any).ai_flags } }, 5);
+    const v2 = pageReview.toView(forced) as any;
+    expect(v2.aiFlagsSha256).toBeNull();
+    expect(v2.lines.some((l: any) => l.aiDisagrees || l.aiMissingNear)).toBe(false);
+    const lines = v2.lines.map((l: any) => L([l.i], "correct"));
+    expect(pageReview.normalizeDecision(forced, "confirm", JSON.stringify({ ...ok(lines), ai_flags_sha256: v.aiFlagsSha256 })).ok).toBe(false);
+  });
+
+  it("records which hints each decision was made with, and exports them", () => {
+    const after = pageReviewImporter.bundle(manifest, withAi);
+    const proposals = after.proposals.map(record);
+    const p1 = proposals[0]!;
+    const sha = (p1.payload as any).ai_flags.sha256 as string;
+    const lines = payloadOf(p1).lines.map((l) => L([l.i], "correct"));
+    const decide = (input: unknown, at: string, superseded: string | null = null): DecisionRecord => {
+      const n = pageReview.normalizeDecision(p1, "confirm", JSON.stringify(input));
+      if (!n.ok) throw new Error(n.error);
+      return { id: at, proposalId: p1.id, reviewerId: "rv_0123abcd", value: n.value, text: n.text, createdAt: at, decidedOn: at.slice(0, 10), supersededAt: superseded, proposalSha256: p1.contentSha256, termsVersion: "t1" };
+    };
+    // Shown: stored with the decision. Not sent (a page opened before the import): recorded as none. Another hash: refused.
+    expect(JSON.parse(decide({ ...ok(lines), ai_flags_sha256: sha }, "a").text!).ai_flags).toEqual({ flagged_i: [3], missing_near_i: [4] });
+    expect(JSON.parse(decide(ok(lines), "b").text!)).not.toHaveProperty("ai_flags");
+    const wrong = pageReview.normalizeDecision(p1, "confirm", JSON.stringify({ ...ok(lines), ai_flags_sha256: "0".repeat(64) }));
+    expect(wrong.ok).toBe(false);
+    if (!wrong.ok) expect(wrong.error).toContain("reload");
+    const reject = pageReview.normalizeDecision(p1, "reject", JSON.stringify({ reject_reason: "blank", ai_flags_sha256: sha }));
+    expect(reject.ok && JSON.parse(reject.text!).ai_flags).toEqual({ flagged_i: [3], missing_near_i: [4] });
+
+    const batch: BatchRecord = { id: after.batch.id, taskType: "page_review", title: "t", source: after.batch.source, minReviewers: 1 };
+    const p2 = proposals[1]!;
+    const n2 = pageReview.normalizeDecision(p2, "confirm", JSON.stringify(ok([L([1], "correct"), L([0], "correct")], true)));
+    if (!n2.ok) throw new Error(n2.error);
+    const old: DecisionRecord = { id: "old", proposalId: p2.id, reviewerId: "rv_0123abcd", value: n2.value, text: n2.text, createdAt: "2026-11-12T08:00:00.000Z", decidedOn: "2026-11-12", supersededAt: null, proposalSha256: p2.contentSha256, termsVersion: "t1" };
+    const out = buildExport({ batch, proposals, decisions: [decide({ ...ok(lines), ai_flags_sha256: sha }, "2026-11-12T13:00:00.000Z"), old], credits: [], exportedAt: "x" });
+    expect(out.problems).toEqual([]);
+    const recs = (out.decisionsFile.content as any).decisions;
+    expect(recs.map((d: any) => [d.decision_id, d.ai_flagged_i, d.ai_missing_near_i])).toEqual([
+      [`decision:${P1}:rv_0123abcd`, [3], [4]],
+      ["decision:plenary:K2_1#p3:rv_0123abcd", null, null], // decided before the hints: none shown
+    ]);
+    const tampered = clone(out.decisionsFile.content) as any;
+    tampered.decisions[0].ai_flagged_i = [1];
+    delete tampered.decisions[1].ai_missing_near_i;
+    const problems = pageReview.validateExport(batch, proposals, tampered).join("\n");
+    expect(problems).toContain("decisions[0]: ai_flagged_i must be null or shown line indices");
+    expect(problems).toContain("decisions[1]: ai_missing_near_i must be null or shown line indices");
   });
 });

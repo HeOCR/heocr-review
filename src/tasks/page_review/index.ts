@@ -23,6 +23,7 @@ import {
   decisionsFileProblems,
   normalizePageDecision,
   referenceViews,
+  type AiShown,
   type PageDecision,
   type PrDecision,
   type PrefillLine,
@@ -52,6 +53,13 @@ export interface PageReviewPayload {
   source_pdf_sha256: string;
   /** Position in the queue (test pages in the manifest's order, then reserves, then pass 2). */
   order: number;
+  /**
+   * Claude's hints (ai_flags.json), first pass only; absent or null when the page has none. Deliberately not in the
+   * proposal's content hash: adding hints leaves earlier decisions current. Each decision records instead which
+   * hints its reviewer was shown (`ai_flags` in the decision, `ai_flagged_i` in the export). `sha256` is what the
+   * browser sends back to say it showed these.
+   */
+  ai_flags?: (AiShown & { sha256: string }) | null;
 }
 
 /** What the importer stores per batch (batches.source_json). */
@@ -62,6 +70,8 @@ export interface PageReviewSource {
   fetch_manifest_sha256: string;
   manifest_sha256: string | null;
   blind_rule: string | null;
+  /** Where the first pass's hints came from (ai_flags.json), when the batch has them. */
+  ai_flags?: { schema: string; model: string; created_at: string } | null;
 }
 
 export const SERIES_LABELS: Record<string, Label> = {
@@ -96,7 +106,13 @@ function imageView(img: StoredImage | undefined) {
   return img ? { url: imageUrl(img.ref), width: img.width, height: img.height, box: null, outlined: false } : null;
 }
 
-/** The page-level fields of one stored decision, as the export writes them. */
+/** The hints a page shows now (never on the blind second pass). */
+export const aiFlagsOf = (x: PageReviewPayload) => (x.pass === 1 ? (x.ai_flags ?? null) : null);
+
+/**
+ * The page-level fields of one stored decision, as the export writes them. `ai_flagged_i` and `ai_missing_near_i` are
+ * the hints the reviewer was shown when making it (null: none, as for every decision made before hints were added).
+ */
 function decisionBody(x: PageReviewPayload, d: DecisionRecord) {
   const decision = JSON.parse(d.text ?? "{}") as PageDecision;
   const lines = decision.page_action === "confirm" ? decision.lines.map((l) => ({ ...l, reference_views: referenceViews(l.action) })) : [];
@@ -105,6 +121,8 @@ function decisionBody(x: PageReviewPayload, d: DecisionRecord) {
     ...(decision.page_action === "reject" ? { reject_reason: decision.reject_reason, reject_note: decision.reject_note } : {}),
     reading_order_verified: decision.page_action === "confirm" ? decision.reading_order_verified : null,
     lines,
+    ai_flagged_i: decision.ai_flags?.flagged_i ?? null,
+    ai_missing_near_i: decision.ai_flags?.missing_near_i ?? null,
   };
 }
 
@@ -156,6 +174,9 @@ export const pageReview: TaskType = {
 
   toView(p: ProposalRecord): PageReviewView {
     const x = payloadOf(p);
+    const ai = aiFlagsOf(x);
+    const flagged = new Set(ai?.flagged_i ?? []);
+    const missing = new Set(ai?.missing_near_i ?? []);
     return {
       kind: "page_review",
       unitId: x.unit_id,
@@ -167,7 +188,16 @@ export const pageReview: TaskType = {
       prefillFromStock: x.prefill_from_stock,
       prefillSha256: x.prefill_sha256,
       readingOrderCheck: x.reading_order_check,
-      lines: x.lines.map((l) => ({ i: l.i, text: l.text, tierA: l.tier_a, bidiRisk: l.bidi_risk, mismatch: l.match !== null && l.match < MISMATCH_BELOW })),
+      lines: x.lines.map((l) => ({
+        i: l.i,
+        text: l.text,
+        tierA: l.tier_a,
+        bidiRisk: l.bidi_risk,
+        mismatch: l.match !== null && l.match < MISMATCH_BELOW,
+        aiDisagrees: flagged.has(l.i),
+        aiMissingNear: missing.has(l.i),
+      })),
+      aiFlagsSha256: ai?.sha256 ?? null,
       rejectReasons: REJECT_REASONS.map((value) => ({ value, label: REJECT_LABELS[value] })),
       attribution: ATTRIBUTION[x.series] ?? "",
       textLicense: TEXT_LICENSE,
@@ -186,7 +216,13 @@ export const pageReview: TaskType = {
     const x = payloadOf(p);
     const n = normalizePageDecision(x.lines, x.reading_order_check, value, input);
     if (!n.ok) return { ok: false, error: n.error };
-    return { ok: true, value: n.decision.page_action, text: JSON.stringify(n.decision) };
+    // Which hints the browser showed: the page's current ones (it sends their hash back), or none (a page opened
+    // before they were imported). Recorded as shown, so eval can tell decisions made with and without them apart.
+    const ai = aiFlagsOf(x);
+    const sent = (input as Record<string, unknown>).ai_flags_sha256 ?? null;
+    if (sent !== null && sent !== ai?.sha256) return { ok: false, error: "this page's hints changed since it was opened: reload the page" };
+    const decision: PageDecision = sent !== null && ai ? { ...n.decision, ai_flags: { flagged_i: ai.flagged_i, missing_near_i: ai.missing_near_i } } : n.decision;
+    return { ok: true, value: decision.page_action, text: JSON.stringify(decision) };
   },
 
   exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[]): ExportFile {
