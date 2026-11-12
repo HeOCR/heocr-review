@@ -24,7 +24,7 @@ export function settingsView(me: MeResponse, changed: (me: MeResponse) => void, 
     h("h3", {}, "קרדיט בשם (רשות)"),
     h("p", {}, me.displayName ? ["שם התצוגה הנוכחי: ", h("bdi", {}, me.displayName)] : "כרגע אין שם תצוגה: הקרדיט הוא בכינוי בלבד."),
     name,
-    h("label", { class: "optin" }, consent, " אני מסכים/ה שהשם הזה יופיע כקרדיט לתרומות שלי (CC BY-SA 4.0)."),
+    h("label", { class: "optin" }, consent, " אני מסכים/ה שהשם הזה יופיע כקרדיט לתרומות שלי (CC0 1.0)."),
     h(
       "div",
       { class: "row" },

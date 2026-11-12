@@ -1,6 +1,6 @@
 import type { MeResponse } from "../../shared/api";
 import { displayNameProblem, MAX_DISPLAY_NAME } from "../../shared/displayName";
-import { TERMS_EN, TERMS_HE, TERMS_LICENSE_URL, TERMS_VERSION, type TermsText } from "../../shared/terms";
+import { TERMS_EN, TERMS_HE, TERMS_LICENSE, TERMS_LICENSE_URL, TERMS_VERSION, type TermsText } from "../../shared/terms";
 import { ApiFailure, post } from "../api";
 import { h } from "../dom";
 
@@ -44,7 +44,7 @@ export function termsView(me: MeResponse, done: (me: MeResponse) => void): HTMLE
       " · ",
       h("a", { href: "/privacy", target: "_blank" }, "מדיניות הפרטיות / Privacy"),
       " · ",
-      h("a", { href: TERMS_LICENSE_URL, rel: "noopener", target: "_blank" }, "CC BY-SA 4.0"),
+      h("a", { href: TERMS_LICENSE_URL, rel: "noopener", target: "_blank" }, TERMS_LICENSE),
       " · ",
       h("bdi", { dir: "ltr" }, `terms ${TERMS_VERSION}`),
     ),

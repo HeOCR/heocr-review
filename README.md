@@ -34,11 +34,13 @@ Three task types:
 
 When more than one batch is open, the app starts with a task picker (`/app/#b/<batch id>` opens one).
 
-> **Contribution terms, terms of service and privacy policy: version `2026-11-07-v1`**, approved by the maintainer
-> on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)). They are the consent text in
+> **Contribution terms, terms of service and privacy policy: version `2026-11-12-v1`**, approved by the maintainer
+> on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)) and changed to CC0 on 2026-11-12
+> ([record](docs/decisions/2026-11-12-cc0.md)). They are the consent text in
 > [`src/shared/terms.ts`](src/shared/terms.ts) and the pages [`public/terms.html`](public/terms.html) and
-> [`public/privacy.html`](public/privacy.html), each in Hebrew and English. Decisions and edited text are contributed
-> under CC BY-SA 4.0, credited by pseudonym unless the volunteer opts in to a display name. Any change needs the
+> [`public/privacy.html`](public/privacy.html), each in Hebrew and English. Decisions and edited text are dedicated
+> to the public domain under CC0 1.0 (the volunteer's own contribution; text they start from keeps its own licence),
+> credited by pseudonym unless the volunteer opts in to a display name. Any change needs the
 > maintainer's approval and a new version. Contact: heocrproject@gmail.com.
 
 ## How it works
@@ -232,4 +234,6 @@ JavaScript origin. Its branding URLs are `<origin>/`, `<origin>/privacy` and `<o
 
 ## Licence
 
-Code: MIT. Contributed decisions and edited text: CC BY-SA 4.0.
+Code: MIT. Contributed decisions and edited text: CC0 1.0 (since terms `2026-11-12-v1`; decisions under
+`2026-11-07-v1` were CC BY-SA 4.0, except the maintainer's own, which he released under CC0 1.0:
+[record](docs/decisions/2026-11-12-cc0.md)). Each exported decision's `terms_version` is in the ledger.

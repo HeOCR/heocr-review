@@ -10,6 +10,17 @@
 import type { BatchRecord, Credit, DecisionRecord, ExportFile, ProposalRecord, ResolvedProposal } from "./types";
 import { taskType } from "./registry";
 
+/**
+ * The licence each terms version gave contributions (src/shared/terms.ts). The maintainer released his own decisions
+ * under CC0 1.0 whatever their terms version (docs/decisions/2026-11-12-cc0.md).
+ */
+export const CONTRIBUTION_LICENCES: Record<string, string> = {
+  "2026-11-07-draft-1": "CC-BY-SA-4.0",
+  "2026-11-07-v1": "CC-BY-SA-4.0",
+  "2026-11-12-v1": "CC0-1.0",
+};
+export const MAINTAINER_RELICENCE = "docs/decisions/2026-11-12-cc0.md";
+
 export const LEDGER_SCHEMA = "heocr_review_decision_ledger.v1";
 
 export interface ExportInput {
@@ -103,6 +114,10 @@ export function buildExport(input: ExportInput): ExportResult {
       stale: "a decision on proposal content that has since changed is never exported",
     },
     counts,
+    contribution_licences: {
+      by_terms_version: CONTRIBUTION_LICENCES,
+      maintainer_relicence: { licence: "CC0-1.0", record: MAINTAINER_RELICENCE, scope: "all of the maintainer's decisions and corrections, past and future" },
+    },
     proposals: resolved.map((r) => ({
       proposal_id: r.proposal.externalId,
       item_id: r.proposal.itemExternalId,
