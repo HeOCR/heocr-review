@@ -12,7 +12,7 @@ import { randomId } from "./crypto";
 import { exportRows, getBatch, getProposal, getReviewer, listBatches, type ReviewerRow } from "./db";
 import type { Env } from "./env";
 import { HttpError, assertSameOrigin, json, readJson } from "./http";
-import { nextFor, progressFor, proposalView } from "./queue";
+import { isOpenTo, nextFor, progressFor, proposalView } from "./queue";
 import { LIMITS, clientKey, enforce, pruneRateLimits } from "./ratelimit";
 
 const PROVIDERS: Record<string, IdentityProvider> = { google: googleProvider, dev: devProvider };
@@ -157,7 +157,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
   for (const b of list) {
     const type = taskType(b.taskType);
     if (!type) continue;
-    out.push({ id: b.id, taskType: b.taskType, taskLabel: type.label, title: b.title, progress: await progressFor(ctx.env.DB, b, reviewer.id) });
+    out.push({ id: b.id, taskType: b.taskType, taskLabel: type.label, title: b.title, progress: await progressFor(ctx.env.DB, b, reviewer.id, ctx.now) });
   }
   return json({ batches: out });
 }
@@ -175,17 +175,25 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   return json(await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now));
 }
 
-async function activeProposal(ctx: Ctx, id: number) {
+async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   const proposal = Number.isSafeInteger(id) ? await getProposal(ctx.env.DB, id) : null;
   if (!proposal || !proposal.active) throw new HttpError(404, "not_found");
   const batch = await openBatch(ctx, proposal.batchId);
+  // A gated page (a reserve, a blind second pass) is not shown or decided by link before it opens to this reviewer,
+  // unless they already decided it (going back to change a decision).
+  if (!(await isOpenTo(ctx.env.DB, proposal, reviewerId, ctx.now))) {
+    const mine = await ctx.env.DB.prepare("SELECT 1 AS ok FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 LIMIT 1")
+      .bind(proposal.id, reviewerId)
+      .first<{ ok: number }>();
+    if (!mine) throw new HttpError(409, "not_open", "this page is not open to you yet");
+  }
   return { proposal, batch };
 }
 
 export async function showProposal(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
-  const { proposal, batch } = await activeProposal(ctx, id);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id) });
 }
 
@@ -196,7 +204,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
   await enforce(ctx.env.DB, LIMITS.writeDay, reviewer.id, ctx.now);
   const body = await readJson(ctx.request);
-  const { proposal, batch } = await activeProposal(ctx, id);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
   const normalized = taskType(batch.taskType)!.normalizeDecision(proposal, body.value, body.text);
   if (!normalized.ok) throw new HttpError(400, "invalid_decision", normalized.error);
@@ -233,7 +241,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     decisionId,
     value: normalized.value,
     text: normalized.text,
-    progress: await progressFor(db, batch, reviewer.id),
+    progress: await progressFor(db, batch, reviewer.id, ctx.now),
   });
 }
 
@@ -241,11 +249,11 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
-  const { proposal, batch } = await activeProposal(ctx, id);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   await ctx.env.DB.prepare("INSERT OR IGNORE INTO skips (reviewer_id, proposal_id, created_at) VALUES (?1, ?2, ?3)")
     .bind(reviewer.id, proposal.id, iso(ctx.now))
     .run();
-  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id) });
+  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
 }
 
 export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
@@ -256,7 +264,7 @@ export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
   await ctx.env.DB.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id IN (SELECT id FROM proposals WHERE batch_id = ?2)")
     .bind(reviewer.id, batch.id)
     .run();
-  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id) });
+  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
 }
 
 async function requireAdmin(ctx: Ctx): Promise<ReviewerRow> {

@@ -7,6 +7,8 @@
  *   npm run import -- --task reference_audit --proposals <proposals.json> --pages-dir <P> [--target ...]
  *   # line_verify, from a line_verify_items.v1 bundle (items.json and pages/; this script cuts the line crops):
  *   npm run import -- --task line_verify --bundle <B> [--target ...]
+ *   # page_review, from eval's mid-century batch (batch_manifest.json, pages/, optional blind_prefill.json):
+ *   npm run import -- --task page_review --bundle <B> [--target ...]
  *   options: [--min-reviewers 1] [--title <batch title shown in the app>] [--dry-run]
  *
  * --pages-dir holds one image per item, named by the item id after its source prefix
@@ -16,7 +18,7 @@
  * The script validates the files, puts the crops into public/media/ (gitignored; deploy uploads them as static
  * assets), writes .import/<batch>.sql and applies it to the target D1 database. Restricted sources are refused.
  */
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { importer } from "../src/tasks/importers";
 import type { ProposalMedia } from "../src/tasks/types";
@@ -29,6 +31,8 @@ import {
   cutLines,
   cutPage,
   findImage,
+  readingPage,
+  sha256File,
   pageOnly,
   placeBundleCrop,
   safeSegment,
@@ -62,6 +66,7 @@ async function main(): Promise<void> {
   const proposalsPath = bundleDir ? join(bundleDir, task.bundleFile) : str(flags, "proposals");
   const pagesDir = typeof flags["pages-dir"] === "string" ? flags["pages-dir"] : null;
   if (taskId === "line_verify" && !bundleDir) throw new Error("line_verify imports a bundle: give --bundle <dir with items.json and pages/>");
+  if (taskId === "page_review" && !bundleDir) throw new Error("page_review imports a bundle: give --bundle <dir with batch_manifest.json and pages/>");
   if (!bundleDir && !pagesDir) throw new Error("give --bundle, or --proposals with --pages-dir");
   const t = target(flags);
   const minReviewers = Number(str(flags, "min-reviewers", "1"));
@@ -71,9 +76,21 @@ async function main(): Promise<void> {
   if (pagesDir) assertOpenSource(pagesDir);
 
   const raw: unknown = JSON.parse(readFileSync(proposalsPath, "utf8"));
-  const problems = task.problems(raw);
+  // Sidecar files next to the bundle file (page_review: the blind second pass's pre-fill). One that names the
+  // bundle file's sha256 must name this exact file.
+  const sidecars: Record<string, unknown> = {};
+  for (const name of task.sidecars ?? []) {
+    const path = bundleDir ? join(bundleDir, name) : null;
+    if (!path || !existsSync(path)) continue;
+    const side = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    if (typeof side.manifest_sha256 === "string" && side.manifest_sha256 !== sha256File(proposalsPath)) {
+      throw new Error(`${name} was made for another ${task.bundleFile} (manifest_sha256 differs)`);
+    }
+    sidecars[name] = side;
+  }
+  const problems = task.problems(raw, sidecars);
   if (problems.length) throw new Error(`invalid ${taskId} file:\n  ${problems.slice(0, 20).join("\n  ")}`);
-  const bundle = task.bundle(raw);
+  const bundle = task.bundle(raw, sidecars);
   // Two batches of one task type need different titles in the app (e.g. unpointed and pointed lines).
   if (typeof flags.title === "string" && flags.title.trim()) bundle.batch.title = flags.title.trim();
 
@@ -98,9 +115,16 @@ async function main(): Promise<void> {
   for (const item of bundle.items) {
     const proposals = byItem.get(item.externalId) ?? [];
     const stem = item.imageStem ?? safeSegment(item.externalId);
+    if (item.bundleImage && task.fullPages) {
+      const page = await readingPage(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path));
+      for (const p of proposals) media.set(p.externalId, { page });
+      continue;
+    }
     if (item.bundleImage) {
+      const { width, height } = item.bundleImage;
+      if (!width || !height) throw new Error(`${item.externalId}: the bundle does not declare the page's size`);
       const lines = proposals.flatMap((p) => (p.pageBox ? [{ externalId: p.externalId, box: p.pageBox, contextBox: p.contextBox ?? p.pageBox }] : []));
-      const cut = await cutLines(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path), item.bundleImage, lines);
+      const cut = await cutLines(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path), { width, height }, lines);
       for (const p of proposals) {
         const crop = cut.crops.get(p.externalId);
         media.set(p.externalId, { ...(crop ? { crop } : {}), page: { ...cut.page, box: p.pageBox } });

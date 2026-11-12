@@ -3,7 +3,7 @@
 A small online app where volunteers sign in and review correction proposals against real Hebrew page scans, for
 the [HeOCR](https://github.com/HeOCR) open Hebrew OCR project.
 
-Two task types:
+Three task types:
 
 - **Reference audit (E2d4).** An agent audited 38 Hebrew Wikisource reference pages against their scans and
   proposed 519 corrections (`reference_audit_proposals.v1` in [hocrgen](https://github.com/HeOCR/hocrgen)). A human
@@ -17,6 +17,17 @@ Two task types:
   `line_verify_decisions.v1.1` (v1 plus `pointed_print`), and hocrgen's attestation policy decides
   what a verified line becomes. The contract is HeOCR planning's
   `tasks/real-source-mapping/outputs/line_verify_contract.md`; `src/tasks/line_verify/schema.ts` implements it.
+- **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
+  layer, or stock Tesseract; never a HeOCR model), corrects it line by line (edit, print has niqqud, not on the page,
+  unreadable, merge, split, move, add) and confirms that the lines, as corrected, are the page's text in reading
+  order, or rejects the page with a reason. Lines flagged tier A ("look here": letters that disagree with an
+  independent reading, or digits and brackets) must each be looked at before the page can be confirmed; a flag never
+  proposes a correction. A typing-conventions sheet is shown on the screen. Reserve pages open only to replace a
+  rejected page (same stratum first), and a blind second pass of a page opens to a reviewer 24 hours after their own
+  first-pass confirm, from a different pre-fill and without their first answers. heocr-eval's batch manifest
+  (`heocr_midcentury_batch.v0`, plus `blind_prefill.json`) comes in; `page_review_decisions.v0` goes out. The spec is
+  HeOCR planning's `tasks/eval-domains/capture/midcentury/REVIEW_BATCH_SPEC.md`; `src/tasks/page_review/schema.ts`
+  implements it.
 
 When more than one batch is open, the app starts with a task picker (`/app/#b/<batch id>` opens one).
 
@@ -138,6 +149,21 @@ any of them, earlier decisions on that line become stale (kept, never exported).
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
 `npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan).
 
+### Page review batches
+
+```sh
+npm run import -- --task page_review --bundle <dir with batch_manifest.json, pages/ and blind_prefill.json> --target local|preview
+```
+
+The script validates the manifest (pages, roles, flags on non-blank pre-fill lines, unique pages and image names)
+and the optional `blind_prefill.json` (only pages the manifest marks `blind_second_pass`, the same image, a pre-fill
+different from the first pass's, and `manifest_sha256` equal to the manifest file's SHA-256), checks every page
+image's SHA-256, and writes each page once, whole, as a 16-level greyscale PNG up to 2,000 px wide (about 150 KB a
+page; re-encoding drops all image metadata). The queue is the test pages in the manifest's order (eval's hardest
+first), then the reserves, then the blind second pass; the last two are gated (`migrations/0002_proposal_gates.sql`).
+A decision is pinned to the page's image, pre-fill and flags. Unsaved corrections stay in memory while the app is
+open (nothing is kept in browser storage).
+
 ## Decisions out
 
 ```sh
@@ -164,6 +190,14 @@ empty, has a line break or control character, or is too long; it stores an edit 
 whitespace, and an edit equal to the candidate as `exact`. Each decision also carries `candidate_sha256`, the
 SHA-256 of the UTF-8 candidate text the reviewer judged. That field is an addition to the v1 contract: an `exact`
 names no text, so without it hocrgen could not tell that a decision was made on an earlier candidate.
+
+For a page review batch it writes `out/page_review_decisions.json` (`page_review_decisions.v0`): one record per page
+pass and reviewer, `decision_id` `decision:<unit_id>#p<page>[@pass2]:<reviewer>`, `pass` and `blind_second_pass`,
+`prefill_source` and `prefill_sha256` of the pre-fill shown, `page_action` (`confirm`, or `reject` with
+`reject_reason` and `reject_note` and `lines: []`), `reading_order_verified`, `lines` in the page's final reading
+order (`i_src`: indices into the pre-fill's lines, blank lines counted; `action`; `text`, NFC as typed, null when
+excluded; `reference_views`, `["consonantal"]` for `print_has_niqqud`), `counts`, `decided_at` and
+`first_decided_at` (full ISO timestamps: eval checks the 24-hour gap between passes) and `checked_by: human`.
 
 The admin can also download both files from the app (`/app/#admin`, *Export*).
 

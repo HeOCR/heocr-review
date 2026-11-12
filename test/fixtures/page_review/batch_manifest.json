@@ -1,0 +1,149 @@
+{
+ "schema_version": "heocr_midcentury_batch.v0",
+ "split_sha256": "ad1a64057f9ab34fecfe3f4ee78660bb0316dbda9370581ffbeb1e8bddf3d598",
+ "fetch_manifest_sha256": "e7d3799ecc09f5cbc446aa0a79bb1fb9d0126395fa19a5903b7425f42e5e92e7",
+ "pages": [
+  {
+   "unit_id": "reshumot_scanned:sefer_hachukim_1",
+   "stratum": "sefer_hachukim|1948-59",
+   "series": "sefer_hachukim",
+   "page": 2,
+   "role": "test",
+   "image": "eval-domains/capture/midcentury/pages/reshumot_scanned_sefer_hachukim_1_p0002.png",
+   "image_sha256": "d567f29d77c23b51fbfb01fcf221200e14b250acb20aac968636cd38b98353e8",
+   "source_pdf_sha256": "4a319215fb37bb7c3130c6498dc3e5e7fb58298b785ef3010af3194ac9ec6430",
+   "prefill_source": "publisher_ocr_layer (fixture)",
+   "prefill_from_stock": false,
+   "prefill": "חוק הדגמה, תשי\"ג-1953\n\nסעיף 1. הגדרות בחוק זה\n649\nשורה רגילה בלי מספרים",
+   "difficulty": 0.9,
+   "lines": [
+    {
+     "i": 0,
+     "match": 100.0,
+     "tier_a": true,
+     "bidi_risk": true
+    },
+    {
+     "i": 2,
+     "match": 70.0,
+     "tier_a": true,
+     "bidi_risk": true
+    },
+    {
+     "i": 4,
+     "match": 99.0,
+     "tier_a": false,
+     "bidi_risk": false
+    }
+   ],
+   "node": "printed/new_printed",
+   "reading_order_check": false,
+   "blind_second_pass": true
+  },
+  {
+   "unit_id": "plenary:K2_1",
+   "stratum": "plenary|1949-59",
+   "series": "plenary",
+   "page": 3,
+   "role": "test",
+   "image": "eval-domains/capture/midcentury/pages/plenary_K2_1_p0003.png",
+   "image_sha256": "bf90fa410c0ae4ce462dde19a70e48dcc0de37204e061d8b66ad252022d82434",
+   "source_pdf_sha256": "54815e237b1870781307aeab14decf614a1a58d4ca1cb6e941cabc9d2cc67be0",
+   "prefill_source": "publisher_ocr_layer (fixture)",
+   "prefill_from_stock": false,
+   "prefill": "היושב ראש: אני פותח את הישיבה\nחבר הכנסת: תודה רבה לכם",
+   "difficulty": 0.4,
+   "lines": [
+    {
+     "i": 0,
+     "match": 95.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 1,
+     "match": 60.0,
+     "tier_a": true,
+     "bidi_risk": false
+    }
+   ],
+   "node": "printed/new_printed",
+   "reading_order_check": true,
+   "blind_second_pass": false
+  },
+  {
+   "unit_id": "reshumot_scanned:kovetz_hatakanot_7",
+   "stratum": "kovetz_hatakanot|1960s",
+   "series": "kovetz_hatakanot",
+   "page": 1,
+   "role": "test",
+   "image": "eval-domains/capture/midcentury/pages/reshumot_scanned_kovetz_hatakanot_7_p0001.png",
+   "image_sha256": "a2e23fe6c121b0bd384e67195cb9d1c1d232cf04ba95d0a742a28e9a6fbb0865",
+   "source_pdf_sha256": "aafec6497c2540ac09d078678220b4876507d921b3350a9e315a0ad0e5e6bc72",
+   "prefill_source": "publisher_ocr_layer (fixture)",
+   "prefill_from_stock": false,
+   "prefill": "תקנות הדגמה\nשורה שנייה של תקנות",
+   "difficulty": 0.1,
+   "lines": [
+    {
+     "i": 0,
+     "match": 99.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 1,
+     "match": 99.0,
+     "tier_a": false,
+     "bidi_risk": false
+    }
+   ],
+   "node": "printed/new_printed",
+   "reading_order_check": false,
+   "blind_second_pass": false
+  },
+  {
+   "unit_id": "plenary:K2_9",
+   "stratum": "plenary|1949-59",
+   "series": "plenary",
+   "page": 5,
+   "role": "reserve",
+   "image": "eval-domains/capture/midcentury/pages/plenary_K2_9_p0005.png",
+   "image_sha256": "5453c48e00a8d9a31372fd6ad6db2eb7b3734f8f7036b759de689ed0b0b7b68b",
+   "source_pdf_sha256": "1871904da4909b9c54cded16ddbf39f1ea4c1cec203878aed2223ccb2cce6beb",
+   "prefill_source": "publisher_ocr_layer (fixture)",
+   "prefill_from_stock": false,
+   "prefill": "עמוד רזרבה של הכנסת\nשורה נוספת ברזרבה",
+   "difficulty": 0.5,
+   "lines": [],
+   "node": "printed/new_printed",
+   "reading_order_check": true,
+   "blind_second_pass": false
+  },
+  {
+   "unit_id": "reshumot_scanned:kovetz_hatakanot_8",
+   "stratum": "kovetz_hatakanot|1970s",
+   "series": "kovetz_hatakanot",
+   "page": 4,
+   "role": "reserve",
+   "image": "eval-domains/capture/midcentury/pages/reshumot_scanned_kovetz_hatakanot_8_p0004.png",
+   "image_sha256": "fd266ba79dd5810324a4517fc8ba5bf2bb637f420bd967bbda27d493b1e43192",
+   "source_pdf_sha256": "918fc252ffb7be06eaffe3029fb2ad7a0e09a6ecb91ed1a4a16835e67243a28a",
+   "prefill_source": "publisher_ocr_layer (fixture)",
+   "prefill_from_stock": false,
+   "prefill": "עמוד רזרבה של תקנות\nעוד שורה",
+   "difficulty": 0.5,
+   "lines": [],
+   "node": "printed/new_printed",
+   "reading_order_check": false,
+   "blind_second_pass": false
+  }
+ ],
+ "problems": [],
+ "counts": {
+  "test": 3,
+  "reserve": 2,
+  "blind_second_pass": 1
+ },
+ "status": "fixture"
+}
