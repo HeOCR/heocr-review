@@ -4,13 +4,15 @@ import { defineConfig } from "vitest/config";
 import { buildImportStatements } from "./scripts/lib/importsql";
 import type { TaskImporter } from "./src/tasks/import";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
+import { pageReviewImporter } from "./src/tasks/page_review/importer";
 import { referenceAuditImporter } from "./src/tasks/reference_audit/importer";
 import type { ProposalMedia } from "./src/tasks/types";
 
 /** One fixture batch as SQL statements, with fake static media, for the Worker tests. */
-function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number, importedAt: string): string[] {
+function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number, importedAt: string, sidecars?: Record<string, string>): string[] {
   const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-  const bundle = importer.bundle(raw);
+  const side = Object.fromEntries(Object.entries(sidecars ?? {}).map(([k, v]) => [k, JSON.parse(readFileSync(v, "utf8")) as unknown]));
+  const bundle = importer.bundle(raw, side);
   const media = new Map<string, ProposalMedia>(
     bundle.proposals.map((p) => [
       p.externalId,
@@ -23,11 +25,14 @@ function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number
   return buildImportStatements(bundle, media, { minReviewers, importedAt });
 }
 
-/** Both fixture batches: the reference audit (imported first) and line verification. */
+/** The fixture batches: the reference audit (imported first), line verification and page review. */
 function fixtureStatements(minReviewers: number): string[] {
   return [
     ...fixtureBatch(referenceAuditImporter, "test/fixtures/proposals.fixture.json", minReviewers, "2026-11-07T00:00:00.000Z"),
     ...fixtureBatch(lineVerifyImporter, "test/fixtures/line_verify/items.json", minReviewers, "2026-11-07T00:00:01.000Z"),
+    ...fixtureBatch(pageReviewImporter, "test/fixtures/page_review/batch_manifest.json", minReviewers, "2026-11-07T00:00:02.000Z", {
+      "blind_prefill.json": "test/fixtures/page_review/blind_prefill.json",
+    }),
   ];
 }
 

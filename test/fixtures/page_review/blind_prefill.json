@@ -1,0 +1,17 @@
+{
+ "batch_id": "newprinted_midcentury_v0",
+ "pass": 2,
+ "manifest_sha256": "42eeb8d0b168b2ba8a4ad82ecbe263d001814b2b550ee5752ff758c19330d2c3",
+ "rule": "fixture",
+ "pages": [
+  {
+   "unit_id": "reshumot_scanned:sefer_hachukim_1",
+   "page": "2",
+   "image_sha256": "d567f29d77c23b51fbfb01fcf221200e14b250acb20aac968636cd38b98353e8",
+   "first_pass_prefill_source": "publisher_ocr_layer (fixture)",
+   "blind_prefill_source": "stock_tesseract heb psm4",
+   "blind_prefill": "חוק הדגמה, תשי\"ג--1953\nסעיף 1 הגדרות בחוק זה\nשורה רגילה בלי מספרים",
+   "differs_from_first_pass": "True"
+  }
+ ]
+}

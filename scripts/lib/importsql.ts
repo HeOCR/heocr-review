@@ -32,8 +32,8 @@ export function buildImportStatements(
   for (const p of bundle.proposals) {
     const itemId = `(SELECT id FROM items WHERE batch_id = ${b} AND external_id = ${lit(p.itemExternalId)})`;
     out.push(
-      `INSERT INTO proposals (batch_id, item_id, external_id, category, confidence, rank, payload_json, media_json, content_sha256, active) VALUES (${b}, ${itemId}, ${lit(p.externalId)}, ${lit(p.category)}, ${lit(p.confidence)}, ${p.rank}, ${lit(JSON.stringify(p.payload))}, ${lit(JSON.stringify(media.get(p.externalId) ?? {}))}, ${lit(contentSha256(p.contentKey))}, 1)
-  ON CONFLICT (batch_id, external_id) DO UPDATE SET item_id = excluded.item_id, category = excluded.category, confidence = excluded.confidence, rank = excluded.rank, payload_json = excluded.payload_json, media_json = excluded.media_json, content_sha256 = excluded.content_sha256, active = 1;`,
+      `INSERT INTO proposals (batch_id, item_id, external_id, category, confidence, rank, payload_json, media_json, content_sha256, active, gate_kind, gate_ref) VALUES (${b}, ${itemId}, ${lit(p.externalId)}, ${lit(p.category)}, ${lit(p.confidence)}, ${p.rank}, ${lit(JSON.stringify(p.payload))}, ${lit(JSON.stringify(media.get(p.externalId) ?? {}))}, ${lit(contentSha256(p.contentKey))}, 1, ${p.gate ? lit(p.gate.kind) : "NULL"}, ${p.gate?.ref ? lit(p.gate.ref) : "NULL"})
+  ON CONFLICT (batch_id, external_id) DO UPDATE SET item_id = excluded.item_id, category = excluded.category, confidence = excluded.confidence, rank = excluded.rank, payload_json = excluded.payload_json, media_json = excluded.media_json, content_sha256 = excluded.content_sha256, active = 1, gate_kind = excluded.gate_kind, gate_ref = excluded.gate_ref;`,
     );
   }
   const keep = bundle.proposals.map((p) => lit(p.externalId)).join(", ");

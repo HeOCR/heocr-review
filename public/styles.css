@@ -209,3 +209,50 @@ mark.attn { background: var(--attn-bg); outline: 1px solid var(--attn-line); }
 .doc ul ul { margin-top: 4px; }
 .cta { display: inline-block; background: var(--acc); color: #fff; text-decoration: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; }
 code { font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+/* page review (task type page_review): the scan beside its lines */
+main:has(.pagereview) { max-width: 1500px; }
+.conventions { margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+.conventions summary { cursor: pointer; font-weight: 600; }
+.conventions dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; }
+.conventions dt { color: var(--muted); }
+.conventions dd { margin: 0; font-weight: 600; text-align: right; unicode-bidi: plaintext; }
+.prgrid { display: grid; gap: 14px; }
+@media (min-width: 1000px) {
+  .prgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .prgrid .scan { position: sticky; top: 8px; }
+  .prgrid .scan .scroller { max-height: calc(100vh - 90px); }
+}
+.prlines { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
+.prline { display: grid; grid-template-columns: 2.2em 1fr; gap: 6px; align-items: start; padding: 4px 6px; border-radius: 8px; border: 1px solid transparent; }
+.prline .num { font-size: 13px; padding-top: 10px; text-align: center; }
+.prline .lhead { display: flex; gap: 6px; flex-wrap: wrap; }
+.prline .lhead:empty { display: none; }
+.prline .flag { font-size: 12px; color: var(--attn-line, #b08800); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
+.prline .state { font-size: 12px; color: var(--edit); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
+.prline .state[data-action="not_on_page"], .prline .state[data-action="unreadable"] { color: var(--bad); }
+.prline .hidden { font-size: 12px; color: var(--bad); }
+.prline .hidden[hidden], .prline .state[hidden] { display: none; }
+.prline input.lt {
+  width: 100%; font-size: 21px; line-height: 1.5; padding: 4px 8px;
+  font-family: "Frank Ruehl CLM", "Taamey Frank CLM", "David", "Times New Roman", "Noto Serif Hebrew", serif;
+}
+.prline.tiera { border-color: var(--attn-line, #b08800); background: var(--attn-bg, #fff6d6); }
+.prline.tiera.looked { background: none; border-color: var(--line); }
+.prline.excluded input.lt { text-decoration: line-through; color: var(--muted); }
+.prline .tools { display: none; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.prline:focus-within { border-color: var(--acc); }
+.prline:focus-within .tools { display: flex; }
+.prline .tools button { padding: 2px 8px; font-size: 13px; }
+.pending { font-weight: 600; color: var(--attn-line, #b08800); margin: 4px 0; }
+.pending.ok { color: var(--ok); }
+.decide .confirmbtn { font-size: 17px; padding: 10px 16px; }
+.decide .confirmbtn.notyet { opacity: .6; }
+.roc { gap: 8px; align-items: center; cursor: pointer; }
+.roc input { width: 20px; height: 20px; }
+.reject { margin-top: 10px; }
+.reject summary { cursor: pointer; color: var(--bad); }
+@media (max-width: 520px) {
+  .prline { grid-template-columns: 1.6em 1fr; padding: 4px 2px; }
+  .prline input.lt { font-size: 19px; }
+  .conventions dl { grid-template-columns: 1fr; }
+}

@@ -42,7 +42,7 @@ export function cropRect(box: Box, w: number, h: number): { left: number; top: n
 
 function write(outRoot: string, rel: string, data: Buffer): string {
   const hash = createHash("sha256").update(data).digest("hex").slice(0, 10);
-  const relHashed = rel.replace(/\.jpg$/, `-${hash}.jpg`);
+  const relHashed = rel.replace(/\.(jpg|png)$/, `-${hash}.$1`);
   const abs = join(outRoot, relHashed);
   mkdirSync(join(abs, ".."), { recursive: true });
   writeFileSync(abs, data);
@@ -167,6 +167,31 @@ export function placeBundleCrop(publicDir: string, batchId: string, itemStem: st
 /** Only the reduced full page (when crops come from a bundle). */
 export async function pageOnly(publicDir: string, batchId: string, itemStem: string, imagePath: string): Promise<StoredImage> {
   return (await cutPage(publicDir, batchId, itemStem, imagePath, [])).page;
+}
+
+/** Whole pages shown for reading (page_review): the scan's own width up to this, greyscale. */
+export const READING_PAGE_MAX_WIDTH = 2000;
+
+/**
+ * One whole page at reading resolution (page_review: the reviewer reads every line on it), as a content-hashed
+ * 16-level greyscale PNG under public/media/<batch>/<page>/. Re-encoding drops every metadata field of the source.
+ */
+export async function readingPage(publicDir: string, batchId: string, pageStem: string, imagePath: string): Promise<StoredImage> {
+  const input = readFileSync(imagePath);
+  const meta = await sharp(input, { failOn: "error" }).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (!w || !h) throw new Error(`cannot read ${imagePath}`);
+  const outW = Math.min(READING_PAGE_MAX_WIDTH, w);
+  // 16 grey levels: print stays crisp (no JPEG ringing around letters) at about a third of the source PNG's bytes.
+  const buf = await sharp(input).resize({ width: outW }).greyscale().png({ palette: true, colors: 16, compressionLevel: 9 }).toBuffer();
+  const base = join("media", safeSegment(batchId), safeSegment(pageStem));
+  return {
+    ref: { source: "static", path: write(publicDir, join(base, "page.png"), buf) },
+    width: outW,
+    height: Math.round((h * outW) / w),
+    box: null,
+  };
 }
 
 /** Line crops (line_verify): one per line, the context band at the scan's own resolution up to this width. */

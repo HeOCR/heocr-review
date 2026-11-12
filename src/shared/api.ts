@@ -56,7 +56,40 @@ export interface LineVerifyView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView | LineVerifyView;
+/** One pre-fill line of a page under review, with its "look here" flags (never a proposed correction). */
+export interface PageReviewLine {
+  /** Index into the pre-fill's lines (blank lines counted, not shown). */
+  i: number;
+  text: string;
+  /** Must look: the letters disagree with an independent reading, or the line has digits or brackets. */
+  tierA: boolean;
+  /** The line has digits or brackets, which the OCR layer may have reordered or mirrored. */
+  bidiRisk: boolean;
+  /** The letters disagree with an independent stock-OCR reading. */
+  mismatch: boolean;
+}
+
+/** A whole printed page and a pre-filled transcription of it, corrected line by line (task type page_review). */
+export interface PageReviewView {
+  kind: "page_review";
+  unitId: string;
+  pageNumber: number;
+  series: { id: string; label: Label };
+  period: string;
+  pass: 1 | 2;
+  prefillSource: string;
+  prefillFromStock: boolean;
+  prefillSha256: string;
+  readingOrderCheck: boolean;
+  lines: PageReviewLine[];
+  rejectReasons: { value: string; label: Label }[];
+  attribution: string;
+  textLicense: string;
+  /** The page at reading resolution. */
+  page: ImageView | null;
+}
+
+export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView;
 
 export interface DecisionOption {
   value: string;

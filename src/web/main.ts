@@ -4,6 +4,7 @@ import { h, mount } from "./dom";
 import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
 import { lineVerifyView } from "./views/line";
+import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
 import { settingsView } from "./views/settings";
 import { signInView } from "./views/signin";
@@ -80,7 +81,7 @@ async function route(): Promise<void> {
       if (!batches.length) return show(h("section", { class: "card" }, h("p", {}, "אין כרגע משימות פתוחות. / No open tasks right now.")));
       return show(picker(batches));
     }
-    const open = batch.taskType === "line_verify" ? lineVerifyView : reviewView;
+    const open = batch.taskType === "line_verify" ? lineVerifyView : batch.taskType === "page_review" ? pageReviewView : reviewView;
     const view: ReviewScreen = open(batch, { needTerms, signedOut }, linked ? Number(linked[1]) : undefined);
     show(
       h(

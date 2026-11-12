@@ -24,12 +24,13 @@ async function reviewer(name: string): Promise<Client> {
 }
 
 describe("line verification", () => {
-  it("lists both task types for the picker, with their labels", async () => {
+  it("lists every task type for the picker, with their labels", async () => {
     const c = await reviewer("picker");
     const res = await c.get<{ batches: BatchSummary[] }>("/api/batches");
     expect(res.body.batches.map((b) => [b.id, b.taskType])).toEqual([
       [BATCH, "reference_audit"],
       [LINES, "line_verify"],
+      ["newprinted_midcentury_v0", "page_review"],
     ]);
     const lines = res.body.batches[1]!;
     expect(lines.taskLabel).toEqual({ he: "אימות שורות מול הסריקה", en: "Line verification" });
