@@ -48,7 +48,9 @@ export function failureHandler(root: HTMLElement, hooks: ReviewHooks): (err: unk
     const text =
       err instanceof ApiFailure && err.code === "rate_limited"
         ? "לאט לאט: יותר מדי פעולות בדקה. נסו שוב עוד רגע. / Too many actions a minute; try again shortly."
-        : err instanceof ApiFailure && err.code === "invalid_decision" && err.message
+        : err instanceof ApiFailure && err.code === "not_open"
+          ? "העמוד הזה סגור לך כרגע (עמוד רזרבה, או מעבר ראשון שהמעבר העיוור שלו פתוח). / This page is not open to you now."
+          : err instanceof ApiFailure && err.code === "invalid_decision" && err.message
           ? `ההחלטה לא נשמרה: ${err.message}`
           : "שגיאה. נסו שוב. / Error, please try again.";
     if (msg) msg.textContent = text;

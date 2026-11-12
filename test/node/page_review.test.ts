@@ -257,6 +257,9 @@ describe("page_review_decisions.v0 export", () => {
       ["decision:reshumot_scanned:sefer_hachukim_1#p2@pass2:rv_0123abcd", 2, true, "confirm"],
     ]);
     const first = file.decisions[0];
+    expect(first.revised_after_pass2).toBe(false);
+    expect(first).not.toHaveProperty("pass1_at_pass2");
+    expect(file.decisions[1]).not.toHaveProperty("revised_after_pass2"); // no blind pass on that page
     expect(first.first_decided_at).toBe("2026-11-12T08:00:00.000Z");
     expect(first.decided_at).toBe("2026-11-12T09:00:00.000Z");
     expect(first.counts).toEqual({ tier_a: 3, edited: 1, excluded: 0 });
@@ -265,6 +268,27 @@ describe("page_review_decisions.v0 export", () => {
     expect(second.reading_order_verified).toBe(true);
     expect(second.lines[0].reference_views).toEqual(["consonantal"]);
     expect(file.decisions[2].prefill_sha256).toBe(sha256Hex(blind.pages[0].blind_prefill));
+  });
+
+  it("marks a pass-1 decision changed after pass 2, and keeps the one that stood when pass 2 was decided", () => {
+    const [p1, , , , , pass2] = proposals as [ProposalRecord, ProposalRecord, ProposalRecord, ProposalRecord, ProposalRecord, ProposalRecord];
+    const decisions = [
+      decide(p1, "confirm", ok(linesOf(p1)), "2026-11-12T09:00:00.000Z", "2026-11-13T12:00:00.000Z"),
+      decide(pass2, "confirm", ok(linesOf(pass2)), "2026-11-13T10:00:00.000Z"),
+      decide(p1, "confirm", ok([L([0], "edit", "חוק הדגמה, תשי\"ג–1953"), ...linesOf(p1).slice(1)]), "2026-11-13T12:00:00.000Z"),
+    ];
+    const out = buildExport({ batch, proposals, decisions, credits: [], exportedAt: "x" });
+    expect(out.problems).toEqual([]);
+    const rec = (out.decisionsFile.content as any).decisions[0];
+    expect(rec.pass).toBe(1);
+    expect(rec.revised_after_pass2).toBe(true);
+    expect(rec.lines[0].action).toBe("edit");
+    expect(rec.pass1_at_pass2.decided_at).toBe("2026-11-12T09:00:00.000Z");
+    expect(rec.pass1_at_pass2.lines[0].action).toBe("correct");
+    expect(rec.first_decided_at).toBe("2026-11-12T09:00:00.000Z");
+    const tampered = clone(out.decisionsFile.content) as any;
+    delete tampered.decisions[0].pass1_at_pass2;
+    expect(pageReview.validateExport(batch, proposals, tampered).join("\n")).toContain("pass1_at_pass2");
   });
 
   it("finds a tampered record", () => {

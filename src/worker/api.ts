@@ -187,6 +187,19 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
       .first<{ ok: number }>();
     if (!mine) throw new HttpError(409, "not_open", "this page is not open to you yet");
   }
+  // A first pass is closed to a reviewer while its blind second pass is open to them and they have not decided it:
+  // they must not see (or change) their first answers during the blind pass.
+  const blind = await ctx.env.DB.prepare(
+    `SELECT id, batch_id FROM proposals WHERE batch_id = ?1 AND gate_kind = 'after_confirm' AND gate_ref = ?2 AND active = 1`,
+  )
+    .bind(proposal.batchId, proposal.externalId)
+    .first<{ id: number; batch_id: string }>();
+  if (blind && (await isOpenTo(ctx.env.DB, { id: blind.id, batchId: blind.batch_id }, reviewerId, ctx.now))) {
+    const done = await ctx.env.DB.prepare("SELECT 1 AS ok FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
+      .bind(blind.id, reviewerId)
+      .first<{ ok: number }>();
+    if (!done) throw new HttpError(409, "not_open", "this page's blind second pass is open to you: decide it first");
+  }
   return { proposal, batch };
 }
 

@@ -24,7 +24,10 @@ Three task types:
   independent reading, or digits and brackets) must each be looked at before the page can be confirmed; a flag never
   proposes a correction. A typing-conventions sheet is shown on the screen. Reserve pages open only to replace a
   rejected page (same stratum first), and a blind second pass of a page opens to a reviewer 24 hours after their own
-  first-pass confirm, from a different pre-fill and without their first answers. heocr-eval's batch manifest
+  first-pass confirm, from a different pre-fill and without their first answers; while it is open and undecided,
+  their first-pass page is closed to them (no view, no change). The blind pass's lines are flagged by the digit or
+  bracket rule only: its pre-fill has no independent reading to disagree with, so its measured error is that of a
+  second pass without letter-disagreement flags. heocr-eval's batch manifest
   (`heocr_midcentury_batch.v0`, plus `blind_prefill.json`) comes in; `page_review_decisions.v0` goes out. The spec is
   HeOCR planning's `tasks/eval-domains/capture/midcentury/REVIEW_BATCH_SPEC.md`; `src/tasks/page_review/schema.ts`
   implements it.
@@ -197,7 +200,10 @@ pass and reviewer, `decision_id` `decision:<unit_id>#p<page>[@pass2]:<reviewer>`
 `reject_reason` and `reject_note` and `lines: []`), `reading_order_verified`, `lines` in the page's final reading
 order (`i_src`: indices into the pre-fill's lines, blank lines counted; `action`; `text`, NFC as typed, null when
 excluded; `reference_views`, `["consonantal"]` for `print_has_niqqud`), `counts`, `decided_at` and
-`first_decided_at` (full ISO timestamps: eval checks the 24-hour gap between passes) and `checked_by: human`.
+`first_decided_at` (full ISO timestamps: eval checks the 24-hour gap between passes) and `checked_by: human`. A
+pass-1 record of a page whose blind pass the same reviewer decided also has `revised_after_pass2`: true when that
+pass-1 decision was made after their first pass-2 decision, and then `pass1_at_pass2`, the pass-1 decision that
+stood at that moment (its page action, lines and `decided_at`), which is the one the two passes compare.
 
 The admin can also download both files from the app (`/app/#admin`, *Export*).
 

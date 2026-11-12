@@ -358,6 +358,13 @@ export interface PrDecision {
   counts: { tier_a: number; edited: number; excluded: number };
   decided_at: string;
   first_decided_at: string;
+  /**
+   * Pass-1 records of a page whose blind second pass the same reviewer decided: true when this pass-1 decision was
+   * made after their first pass-2 decision (the passes are then no longer independent).
+   */
+  revised_after_pass2?: boolean;
+  /** With revised_after_pass2: the pass-1 decision that stood when pass 2 was first decided (null if none). */
+  pass1_at_pass2?: { page_action: "confirm" | "reject"; reading_order_verified: boolean | null; lines: ExportLine[]; decided_at: string; reject_reason?: RejectReason; reject_note?: string | null } | null;
   checked_by: "human";
 }
 
@@ -409,6 +416,12 @@ export function decisionsFileProblems(
       out.push(`${at}: decided_at and first_decided_at must be ISO UTC timestamps`);
     } else if (d.first_decided_at > d.decided_at) out.push(`${at}: first_decided_at is after decided_at`);
     if (d.checked_by !== "human") out.push(`${at}: checked_by must be human`);
+    if (d.revised_after_pass2 !== undefined) {
+      if (d.pass !== 1 || typeof d.revised_after_pass2 !== "boolean") out.push(`${at}: revised_after_pass2 is a boolean on pass-1 records only`);
+      else if (d.revised_after_pass2 !== Object.prototype.hasOwnProperty.call(d, "pass1_at_pass2")) {
+        out.push(`${at}: pass1_at_pass2 comes exactly with revised_after_pass2: true`);
+      }
+    }
     if (d.page_action === "reject") {
       if (!(Array.isArray(d.lines) && d.lines.length === 0)) out.push(`${at}: a rejected page has lines []`);
       if (!oneOf(REJECT_REASONS, d.reject_reason)) out.push(`${at}: reject_reason must be one of ${REJECT_REASONS.join(", ")}`);

@@ -113,8 +113,19 @@ describe("page review", () => {
     expect(blind.view!.pass).toBe(2);
     expect(blind.view!.prefillSource).toBe("stock_tesseract heb psm4");
     expect(blind.view!.lines.map((l) => l.text)).toEqual(['חוק הדגמה, תשי"ג--1953', "סעיף 1 הגדרות בחוק זה", "שורה רגילה בלי מספרים"]);
-    // The first pass's answers are not shown: the pass-2 proposal has no decision of the reviewer's.
+    // The first pass's answers are not shown: the pass-2 proposal has no decision of the reviewer's, and the
+    // pass-1 page is closed to them (no view, no change) until they decide pass 2.
     expect(blind.proposal!.mine).toBeNull();
+    const pass1 = first.proposal!.id;
+    expect((await a.get(`/api/proposals/${pass1}`)).status).toBe(409);
+    const change = { value: "reject", text: JSON.stringify({ reject_reason: "blank" }) };
+    expect((await a.post(`/api/proposals/${pass1}/decision`, change)).status).toBe(409);
+    expect((await confirmAsIs(a, blind)).status).toBe(200);
+    expect((await a.get(`/api/proposals/${pass1}`)).status).toBe(200);
+    // After pass 2, pass 1 can change again; the export then marks it revised_after_pass2.
+    const revised = first.view!.lines.map((l) => ({ src: [l.i], action: "correct" as string, text: null as string | null }));
+    revised[0] = { src: [0], action: "edit", text: "חוק הדגמה, תשי\"ג–1953" };
+    expect((await a.post(`/api/proposals/${pass1}/decision`, { value: "confirm", text: JSON.stringify({ lines: revised }) })).status).toBe(200);
     // Another reviewer, who never confirmed the page, does not get it.
     expect((await next(b)).proposal).toBeNull(); // (the test pages are covered: one reviewer per page)
     expect((await b.get(`/api/proposals/${pass2}`)).status).toBe(409);

@@ -96,11 +96,29 @@ function imageView(img: StoredImage | undefined) {
   return img ? { url: imageUrl(img.ref), width: img.width, height: img.height, box: null, outlined: false } : null;
 }
 
-function exportRecord(batchId: string, p: ProposalRecord, d: DecisionRecord, all: DecisionRecord[]): PrDecision {
-  const x = payloadOf(p);
+/** The page-level fields of one stored decision, as the export writes them. */
+function decisionBody(x: PageReviewPayload, d: DecisionRecord) {
   const decision = JSON.parse(d.text ?? "{}") as PageDecision;
-  const mine = all.filter((o) => o.reviewerId === d.reviewerId).map((o) => o.createdAt);
   const lines = decision.page_action === "confirm" ? decision.lines.map((l) => ({ ...l, reference_views: referenceViews(l.action) })) : [];
+  return {
+    page_action: decision.page_action,
+    ...(decision.page_action === "reject" ? { reject_reason: decision.reject_reason, reject_note: decision.reject_note } : {}),
+    reading_order_verified: decision.page_action === "confirm" ? decision.reading_order_verified : null,
+    lines,
+  };
+}
+
+/**
+ * One record. `pass2At` is when this reviewer first decided the page's blind second pass (pass-1 records of blind
+ * pages only): a pass-1 decision made after it is `revised_after_pass2`, and the record then also carries
+ * `pass1_at_pass2`, the pass-1 decision that stood when pass 2 was first decided (the one the passes compare).
+ */
+function exportRecord(batchId: string, p: ProposalRecord, d: DecisionRecord, all: DecisionRecord[], pass2At: string | null): PrDecision {
+  const x = payloadOf(p);
+  const mine = all.filter((o) => o.reviewerId === d.reviewerId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const body = decisionBody(x, d);
+  const revised = pass2At !== null && d.createdAt > pass2At;
+  const standing = revised ? mine.filter((o) => o.createdAt <= pass2At).pop() : undefined;
   return {
     decision_id: decisionIdFor(p.externalId, d.reviewerId),
     batch_id: batchId,
@@ -112,17 +130,20 @@ function exportRecord(batchId: string, p: ProposalRecord, d: DecisionRecord, all
     reviewer: d.reviewerId,
     pass: x.pass,
     blind_second_pass: x.pass === 2 ? true : x.blind_second_pass,
-    page_action: decision.page_action,
-    ...(decision.page_action === "reject" ? { reject_reason: decision.reject_reason, reject_note: decision.reject_note } : {}),
-    reading_order_verified: decision.page_action === "confirm" ? decision.reading_order_verified : null,
-    lines,
+    ...body,
     counts: {
       tier_a: x.lines.filter((l) => l.tier_a).length,
-      edited: lines.filter((l) => TEXT_ACTIONS.includes(l.action)).length,
-      excluded: lines.filter((l) => EXCLUDED_ACTIONS.includes(l.action)).length,
+      edited: body.lines.filter((l) => TEXT_ACTIONS.includes(l.action)).length,
+      excluded: body.lines.filter((l) => EXCLUDED_ACTIONS.includes(l.action)).length,
     },
     decided_at: d.createdAt,
-    first_decided_at: mine.reduce((a, b) => (b < a ? b : a), d.createdAt),
+    first_decided_at: mine[0]?.createdAt ?? d.createdAt,
+    ...(pass2At !== null
+      ? {
+          revised_after_pass2: revised,
+          ...(revised ? { pass1_at_pass2: standing ? { ...decisionBody(x, standing), decided_at: standing.createdAt } : null } : {}),
+        }
+      : {}),
     checked_by: "human",
   };
 }
@@ -170,15 +191,27 @@ export const pageReview: TaskType = {
 
   exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[]): ExportFile {
     const batchId = sourceOf(batch).batch_id;
+    // Per first-pass page: when each reviewer first decided its blind second pass.
+    const blindByFirst = new Map<string, Map<string, string>>();
+    for (const r of resolved) {
+      if (payloadOf(r.proposal).pass !== 2) continue;
+      const first = new Map<string, string>();
+      for (const d of [...r.current, ...r.superseded, ...r.stale]) {
+        const at = first.get(d.reviewerId);
+        if (!at || d.createdAt < at) first.set(d.reviewerId, d.createdAt);
+      }
+      blindByFirst.set(r.proposal.itemExternalId, first);
+    }
     const decisions = resolved
       .slice()
       .sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order)
       .flatMap((r) => {
         const all = [...r.current, ...r.superseded, ...r.stale];
+        const blind = blindByFirst.get(r.proposal.externalId);
         return r.current
           .slice()
           .sort((a, b) => a.reviewerId.localeCompare(b.reviewerId))
-          .map((d) => exportRecord(batchId, r.proposal, d, all));
+          .map((d) => exportRecord(batchId, r.proposal, d, all, blind?.get(d.reviewerId) ?? null));
       });
     return { fileName: "page_review_decisions.json", content: { schema_version: DECISIONS_SCHEMA, batch_id: batchId, decisions } };
   },
