@@ -24,7 +24,7 @@ describe("review flow", () => {
     const res = await c.get<{ devAuth: boolean; termsStatus: string; termsVersion: string; googleClientId: string }>("/api/config");
     expect(res.body.devAuth).toBe(true);
     expect(res.body.termsStatus).toBe("APPROVED");
-    expect(res.body.termsVersion).toBe("2026-11-07-v1");
+    expect(res.body.termsVersion).toBe("2026-11-12-v1");
     expect(res.body.googleClientId).toBe("test-client.apps.googleusercontent.com");
   });
 

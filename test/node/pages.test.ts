@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CONTACT_EMAIL, PRIVACY_VERSION, TERMS_STATUS, TERMS_VERSION } from "../../src/shared/terms";
+import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved 2026-11-07-v1", () => {
-    expect(TERMS_VERSION).toBe("2026-11-07-v1");
-    expect(PRIVACY_VERSION).toBe("2026-11-07-v1");
+  it("versions are the approved 2026-11-12-v1", () => {
+    expect(TERMS_VERSION).toBe("2026-11-12-v1");
+    expect(PRIVACY_VERSION).toBe("2026-11-12-v1");
   });
 
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
@@ -36,14 +37,14 @@ describe("public pages (Google branding URLs)", () => {
 
   it("the privacy policy states what the app does", () => {
     const html = page("privacy.html");
-    for (const fact of ["HMAC-SHA256", "__Host-hr_session", "No analytics", "Cloudflare D1", "CC BY-SA 4.0", "Deletion", "do not store"]) {
+    for (const fact of ["HMAC-SHA256", "__Host-hr_session", "No analytics", "Cloudflare D1", "CC0 1.0", "Deletion", "do not store"]) {
       expect(html).toContain(fact);
     }
   });
 
   it("the terms carry the contribution terms", () => {
     const html = page("terms.html");
-    for (const fact of ["CC BY-SA 4.0", "pseudonym", "No warranty", "suspend or remove accounts"]) expect(html).toContain(fact);
+    for (const fact of ["CC0 1.0", "pseudonym", "No warranty", "suspend or remove accounts"]) expect(html).toContain(fact);
   });
 
   it("every page and the app link the privacy policy and terms from the footer", () => {
@@ -55,5 +56,11 @@ describe("public pages (Google branding URLs)", () => {
     const consent = readFileSync("src/web/views/terms.ts", "utf8");
     expect(consent).toContain('href: "/terms"');
     expect(consent).toContain('href: "/privacy"');
+  });
+});
+
+describe("contribution licences", () => {
+  it("every terms version names its licence, and the current one is CC0", () => {
+    expect(CONTRIBUTION_LICENCES[TERMS_VERSION]).toBe("CC0-1.0");
   });
 });
