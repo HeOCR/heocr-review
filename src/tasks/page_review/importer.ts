@@ -1,12 +1,14 @@
 /** Import eval's page review batch (batch_manifest.json, pages/, optional blind_prefill.json) into the generic model. */
 import { sha256Hex } from "../../shared/sha256";
-import type { ImportBundle, ImportProposal, TaskImporter } from "../import";
+import { canonicalJson, type ImportBundle, type ImportProposal, type TaskImporter } from "../import";
 import { TASK_TYPE_ID, SERIES_LABELS, type PageReviewPayload, type PageReviewSource } from "./index";
-import { manifestProblems, pageKey, prefillLines, type BlindFile, type Manifest, type ManifestPage } from "./schema";
+import { aiShownFor, manifestProblems, pageKey, prefillLines, type AiFlagsFile, type BlindFile, type Manifest, type ManifestPage } from "./schema";
 
 /** The manifest schema is this batch's own; its id is the spec's (REVIEW_BATCH_SPEC.md). */
 export const MIDCENTURY_BATCH_ID = "newprinted_midcentury_v0";
 const BLIND_FILE = "blind_prefill.json";
+/** Claude's first-pass hints (heocr-lead); never on the blind second pass. */
+const AI_FILE = "ai_flags.json";
 const imageName = (p: ManifestPage) => `pages/${p.image.split("/").pop()!}`;
 
 function title(p: ManifestPage): string {
@@ -18,13 +20,15 @@ function title(p: ManifestPage): string {
 export const pageReviewImporter: TaskImporter = {
   taskType: TASK_TYPE_ID,
   bundleFile: "batch_manifest.json",
-  sidecars: [BLIND_FILE],
+  sidecars: [BLIND_FILE, AI_FILE],
   fullPages: true,
 
   problems(raw: unknown, sidecars?: Record<string, unknown>): string[] {
     const blind = sidecars?.[BLIND_FILE];
-    const out = manifestProblems(raw, blind);
+    const ai = sidecars?.[AI_FILE];
+    const out = manifestProblems(raw, blind, ai);
     if (blind && (blind as BlindFile).batch_id !== MIDCENTURY_BATCH_ID) out.push(`${BLIND_FILE}: batch_id must be ${MIDCENTURY_BATCH_ID}`);
+    if (ai && (ai as AiFlagsFile).batch_id !== MIDCENTURY_BATCH_ID) out.push(`${AI_FILE}: batch_id must be ${MIDCENTURY_BATCH_ID}`);
     return out;
   },
 
@@ -32,6 +36,8 @@ export const pageReviewImporter: TaskImporter = {
     const file = raw as Manifest;
     const blind = sidecars?.[BLIND_FILE] as BlindFile | undefined;
     const blindByKey = new Map((blind?.pages ?? []).map((b) => [pageKey(b.unit_id, b.page), b]));
+    const ai = sidecars?.[AI_FILE] as AiFlagsFile | undefined;
+    const aiByKey = new Map((ai?.pages ?? []).map((f) => [pageKey(f.unit_id, f.page), f]));
     const source: PageReviewSource = {
       schema_version: file.schema_version,
       batch_id: MIDCENTURY_BATCH_ID,
@@ -39,6 +45,7 @@ export const pageReviewImporter: TaskImporter = {
       fetch_manifest_sha256: file.fetch_manifest_sha256,
       manifest_sha256: blind?.manifest_sha256 ?? null,
       blind_rule: blind ? ((blind as unknown as Record<string, unknown>).rule as string | undefined) ?? null : null,
+      ai_flags: ai ? { schema: ai.schema, model: ai.model, created_at: ai.created_at } : null,
     };
     // Queue: test pages in the manifest's order (eval's hardest-first), then the reserves, then pass 2.
     const tests = file.pages.filter((p) => p.role === "test");
@@ -53,6 +60,7 @@ export const pageReviewImporter: TaskImporter = {
       const b = pass === 2 ? blindByKey.get(key)! : null;
       const prefill = b ? b.blind_prefill : p.prefill;
       const lines = prefillLines(prefill, b ? [] : p.lines);
+      const shown = pass === 1 ? aiShownFor(aiByKey.get(key)) : null;
       const payload: PageReviewPayload = {
         unit_id: p.unit_id,
         page: p.page,
@@ -71,6 +79,7 @@ export const pageReviewImporter: TaskImporter = {
         image_sha256: p.image_sha256,
         source_pdf_sha256: p.source_pdf_sha256,
         order,
+        ai_flags: shown ? { ...shown, sha256: sha256Hex(canonicalJson(shown)) } : null,
       };
       const externalId = pass === 2 ? `${key}@pass2` : key;
       return {
@@ -82,6 +91,7 @@ export const pageReviewImporter: TaskImporter = {
         payload: payload as unknown as Record<string, unknown>,
         pageBox: null,
         // A decision is on this scan, this pre-fill and these flags: if any changes, earlier decisions become stale.
+        // Claude's hints (payload.ai_flags) are left out on purpose: adding them keeps earlier decisions current.
         contentKey: { external_id: externalId, image_sha256: p.image_sha256, prefill_sha256: payload.prefill_sha256, lines, reading_order_check: p.reading_order_check },
         ...(pass === 2 ? { gate: { kind: "after_confirm" as const, ref: key } } : p.role === "reserve" ? { gate: { kind: "reserve" as const, ref: null } } : {}),
       };

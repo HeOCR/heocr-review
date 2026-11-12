@@ -139,4 +139,54 @@ describe("page review", () => {
     await env.DB.prepare("UPDATE decisions SET created_at = ?1 WHERE proposal_id = ?2").bind(old, n.proposal!.id).run();
     expect((await c.get(`/api/proposals/${await idOf(`${FIRST}@pass2`)}`)).status).toBe(409);
   });
+  it("adds Claude's hints by re-import without making an earlier decision stale, records them, and never shows them on pass 2", async () => {
+    const a = await reviewer("ari");
+    const first = await next(a);
+    expect(first.proposal!.externalId).toBe(FIRST);
+    expect(first.view!.aiFlagsSha256).toBeNull();
+    expect((await confirmAsIs(a, first)).status).toBe(200);
+    const before = await env.DB.prepare("SELECT content_sha256 FROM proposals WHERE id = ?1").bind(first.proposal!.id).first<{ content_sha256: string }>();
+
+    await env.DB.batch(env.TEST_PAGE_REVIEW_AI_SQL.map((s) => env.DB.prepare(s)));
+
+    // The decision is still current: same content hash, not superseded, and the page still counts as done.
+    const row = await env.DB.prepare(
+      "SELECT d.proposal_sha256 AS d, p.content_sha256 AS p, d.superseded_at AS s FROM decisions d JOIN proposals p ON p.id = d.proposal_id WHERE p.id = ?1",
+    )
+      .bind(first.proposal!.id)
+      .first<{ d: string; p: string; s: string | null }>();
+    expect(row).toEqual({ d: before!.content_sha256, p: before!.content_sha256, s: null });
+    const second = await next(a);
+    expect(second.proposal!.externalId).toBe("plenary:K2_1#p3");
+    expect(second.progress).toMatchObject({ total: 3, remainingForMe: 2 });
+    // The next page shows its hint as a look-here flag; the decision records it was shown.
+    expect(second.view!.lines.map((l) => [l.i, l.aiDisagrees, l.aiMissingNear])).toEqual([
+      [0, true, false],
+      [1, false, false],
+    ]);
+    const sha = second.view!.aiFlagsSha256!;
+    const lines = second.view!.lines.map((l) => ({ src: [l.i], action: "correct" }));
+    const stale = await a.post(`/api/proposals/${second.proposal!.id}/decision`, { value: "confirm", text: JSON.stringify({ lines, reading_order_verified: true, ai_flags_sha256: "0".repeat(64) }) });
+    expect(stale.status).toBe(400);
+    const res = await a.post<{ text: string }>(`/api/proposals/${second.proposal!.id}/decision`, { value: "confirm", text: JSON.stringify({ lines, reading_order_verified: true, ai_flags_sha256: sha }) });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body.text).ai_flags).toEqual({ flagged_i: [0], missing_near_i: [] });
+    // Revisiting the first page now shows its hints, with the decision made without them still standing.
+    const revisit = await a.get<NextResponse["proposal"] & {}>(`/api/proposals/${first.proposal!.id}`);
+    expect(revisit.status).toBe(200);
+    expect(revisit.body.mine).not.toBeNull();
+    // The blind pass: no hints, and a hint hash is refused.
+    const old = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+    await env.DB.prepare("UPDATE decisions SET created_at = ?1 WHERE proposal_id = ?2").bind(old, first.proposal!.id).run();
+    let blind = await next(a);
+    while (blind.proposal && !blind.proposal.externalId.endsWith("@pass2")) {
+      expect((await confirmAsIs(a, blind)).status).toBe(200);
+      blind = await next(a);
+    }
+    expect(blind.proposal!.externalId).toBe(`${FIRST}@pass2`);
+    expect(blind.view!.aiFlagsSha256).toBeNull();
+    expect(blind.view!.lines.some((l) => l.aiDisagrees || l.aiMissingNear)).toBe(false);
+    const blindLines = blind.view!.lines.map((l) => ({ src: [l.i], action: "correct" }));
+    expect((await a.post(`/api/proposals/${blind.proposal!.id}/decision`, { value: "confirm", text: JSON.stringify({ lines: blindLines, ai_flags_sha256: sha }) })).status).toBe(400);
+  });
 });

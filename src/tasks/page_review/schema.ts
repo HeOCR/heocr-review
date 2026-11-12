@@ -13,6 +13,7 @@ import { reviewerIdProblems } from "../reference_audit/schema";
 
 export const MANIFEST_SCHEMA = "heocr_midcentury_batch.v0";
 export const DECISIONS_SCHEMA = "page_review_decisions.v0";
+export const AI_FLAGS_SCHEMA = "heocr_midcentury_ai_flags.v0";
 export const ROLES = ["test", "reserve"] as const;
 export const LINE_ACTIONS = ["correct", "edit", "print_has_niqqud", "not_on_page", "unreadable", "merge", "split", "added"] as const;
 export type LineAction = (typeof LINE_ACTIONS)[number];
@@ -177,7 +178,7 @@ function pageProblems(p: unknown, at: string): string[] {
   return out;
 }
 
-export function manifestProblems(raw: unknown, blind?: unknown): string[] {
+export function manifestProblems(raw: unknown, blind?: unknown, aiFlags?: unknown): string[] {
   if (!isObj(raw)) return ["the manifest must be a JSON object"];
   if (raw.schema_version !== MANIFEST_SCHEMA) return [`schema_version must be ${MANIFEST_SCHEMA}`];
   if (!Array.isArray(raw.pages) || raw.pages.length === 0) return ["pages must be a non-empty list"];
@@ -193,6 +194,7 @@ export function manifestProblems(raw: unknown, blind?: unknown): string[] {
     images.add(base);
   }
   if (blind !== undefined) out.push(...blindProblems(blind, raw.pages as ManifestPage[]));
+  if (aiFlags !== undefined) out.push(...aiFlagsProblems(aiFlags, raw.pages as ManifestPage[]));
   return out;
 }
 
@@ -221,6 +223,82 @@ function blindProblems(raw: unknown, pages: ManifestPage[]): string[] {
   return out;
 }
 
+/**
+ * Claude's "look here" hints for the first pass (ai_flags.json, written by heocr-lead): lines where its own reading
+ * of the scan differs from the pre-fill (`flagged_i`), and lines next to which the page has text the pre-fill lacks,
+ * such as a margin note (`missing_near_i`). Both index prefill.splitlines() and must be shown (non-blank) lines. A
+ * hint never carries text: Claude's reading is not shown, offered or pre-filled. The blind second pass never gets
+ * hints, and the file cannot name it (its pages are the manifest's, which are first-pass pages).
+ */
+export interface AiFlagsFile {
+  schema: typeof AI_FLAGS_SCHEMA;
+  batch_id: string;
+  model: string;
+  created_at: string;
+  manifest_sha256: string;
+  pages: AiFlagsPage[];
+}
+
+export interface AiFlagsPage {
+  unit_id: string;
+  page: number;
+  flagged_i: number[];
+  missing_near_i: number[];
+}
+
+/** The hints a page was shown with (stored with the payload and with each decision made on it). */
+export interface AiShown {
+  flagged_i: number[];
+  missing_near_i: number[];
+}
+
+function aiFlagsProblems(raw: unknown, pages: ManifestPage[]): string[] {
+  const at = "ai_flags.json";
+  if (!isObj(raw)) return [`${at} must be a JSON object`];
+  if (raw.schema !== AI_FLAGS_SCHEMA) return [`${at}: schema must be ${AI_FLAGS_SCHEMA}`];
+  const out: string[] = [];
+  if (typeof raw.model !== "string" || raw.model === "") out.push(`${at}: model must be a non-empty string`);
+  if (!(typeof raw.created_at === "string" && !Number.isNaN(Date.parse(raw.created_at)))) out.push(`${at}: created_at must be a timestamp`);
+  if (typeof raw.manifest_sha256 !== "string" || !HEX64.test(raw.manifest_sha256)) out.push(`${at}: manifest_sha256 must be the manifest's sha256`);
+  if (!Array.isArray(raw.pages)) return [...out, `${at}: pages must be a list`];
+  const byKey = new Map(pages.map((p) => [pageKey(p.unit_id, p.page), p]));
+  const seen = new Set<string>();
+  for (const [k, f] of raw.pages.entries()) {
+    if (!(isObj(f) && typeof f.unit_id === "string" && isInt(f.page) && Array.isArray(f.flagged_i) && Array.isArray(f.missing_near_i))) {
+      out.push(`${at} pages[${k}] must have unit_id, page, flagged_i and missing_near_i`);
+      continue;
+    }
+    const key = pageKey(f.unit_id, f.page);
+    if (seen.has(key)) out.push(`ai ${key}: listed twice`);
+    seen.add(key);
+    const page = byKey.get(key);
+    if (!page) {
+      out.push(`ai ${key}: not in the manifest`);
+      continue;
+    }
+    const lines = splitLines(page.prefill);
+    for (const field of ["flagged_i", "missing_near_i"] as const) {
+      const list = f[field] as unknown[];
+      if (!list.every(isInt) || new Set(list).size !== list.length) {
+        out.push(`ai ${key}: ${field} must be distinct line indices`);
+        continue;
+      }
+      for (const i of list as number[]) {
+        if (i < 0 || i >= lines.length) out.push(`ai ${key}: ${field} ${i} is not a pre-fill line`);
+        else if (lines[i]!.trim() === "") out.push(`ai ${key}: ${field} ${i} points at a blank line`);
+      }
+    }
+  }
+  return out;
+}
+
+/** The page's hints as stored: sorted, or null when it has none. */
+export function aiShownFor(f: AiFlagsPage | undefined): AiShown | null {
+  if (!f || (f.flagged_i.length === 0 && f.missing_near_i.length === 0)) return null;
+  const sort = (a: number[]) => [...a].sort((x, y) => x - y);
+  return { flagged_i: sort(f.flagged_i), missing_near_i: sort(f.missing_near_i) };
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // A reviewer's page decision (what the app stores as the decision's text, as canonical JSON)
 
@@ -231,9 +309,11 @@ export interface LineRecord {
   text: string | null;
 }
 
-export type PageDecision =
+/** `ai_flags`: the hints the reviewer was shown (absent: none). The app adds it; normalizePageDecision never does. */
+export type PageDecision = (
   | { page_action: "confirm"; reading_order_verified: boolean | null; lines: LineRecord[] }
-  | { page_action: "reject"; reject_reason: RejectReason; reject_note: string | null };
+  | { page_action: "reject"; reject_reason: RejectReason; reject_note: string | null }
+) & { ai_flags?: AiShown };
 
 /** What the browser sends: value confirm|reject, and text = JSON of this. */
 export interface PageDecisionInput {
@@ -241,6 +321,8 @@ export interface PageDecisionInput {
   reading_order_verified?: boolean | null;
   reject_reason?: string;
   reject_note?: string | null;
+  /** The hash of the hints the browser showed (null or absent: none). */
+  ai_flags_sha256?: string | null;
 }
 
 export type Normalized = { ok: true; decision: PageDecision } | { ok: false; error: string };
@@ -355,6 +437,9 @@ export interface PrDecision {
   reject_note?: string | null;
   reading_order_verified: boolean | null;
   lines: ExportLine[];
+  /** Claude's hints this decision was made with: line indices (prefill.splitlines()), or null when none were shown. */
+  ai_flagged_i: number[] | null;
+  ai_missing_near_i: number[] | null;
   counts: { tier_a: number; edited: number; excluded: number };
   decided_at: string;
   first_decided_at: string;
@@ -364,7 +449,7 @@ export interface PrDecision {
    */
   revised_after_pass2?: boolean;
   /** With revised_after_pass2: the pass-1 decision that stood when pass 2 was first decided (null if none). */
-  pass1_at_pass2?: { page_action: "confirm" | "reject"; reading_order_verified: boolean | null; lines: ExportLine[]; decided_at: string; reject_reason?: RejectReason; reject_note?: string | null } | null;
+  pass1_at_pass2?: { page_action: "confirm" | "reject"; reading_order_verified: boolean | null; lines: ExportLine[]; ai_flagged_i: number[] | null; ai_missing_near_i: number[] | null; decided_at: string; reject_reason?: RejectReason; reject_note?: string | null } | null;
   checked_by: "human";
 }
 
@@ -416,6 +501,13 @@ export function decisionsFileProblems(
       out.push(`${at}: decided_at and first_decided_at must be ISO UTC timestamps`);
     } else if (d.first_decided_at > d.decided_at) out.push(`${at}: first_decided_at is after decided_at`);
     if (d.checked_by !== "human") out.push(`${at}: checked_by must be human`);
+    const shownIdx = new Set(page.shown.map((l) => l.i));
+    for (const field of ["ai_flagged_i", "ai_missing_near_i"] as const) {
+      const v = d[field];
+      if (v === null) continue;
+      if (d.pass === 2) out.push(`${at}: ${field} must be null on the blind second pass`);
+      else if (!(Array.isArray(v) && v.every((i) => isInt(i) && shownIdx.has(i)))) out.push(`${at}: ${field} must be null or shown line indices`);
+    }
     if (d.revised_after_pass2 !== undefined) {
       if (d.pass !== 1 || typeof d.revised_after_pass2 !== "boolean") out.push(`${at}: revised_after_pass2 is a boolean on pass-1 records only`);
       else if (d.revised_after_pass2 !== Object.prototype.hasOwnProperty.call(d, "pass1_at_pass2")) {

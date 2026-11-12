@@ -67,6 +67,10 @@ export interface PageReviewLine {
   bidiRisk: boolean;
   /** The letters disagree with an independent stock-OCR reading. */
   mismatch: boolean;
+  /** Must look: Claude's own reading of the scan differs here (a hint only: its text is never shown). */
+  aiDisagrees: boolean;
+  /** Must look: Claude sees text next to this line that the pre-fill lacks (e.g. a margin note). */
+  aiMissingNear: boolean;
 }
 
 /** A whole printed page and a pre-filled transcription of it, corrected line by line (task type page_review). */
@@ -82,6 +86,8 @@ export interface PageReviewView {
   prefillSha256: string;
   readingOrderCheck: boolean;
   lines: PageReviewLine[];
+  /** The hash of Claude's hints on this page, sent back with the decision; null when it shows none (always on pass 2). */
+  aiFlagsSha256: string | null;
   rejectReasons: { value: string; label: Label }[];
   attribution: string;
   textLicense: string;
