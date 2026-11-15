@@ -12,7 +12,7 @@ import { randomId } from "./crypto";
 import { exportRows, getBatch, getProposal, getReviewer, listBatches, type ReviewerRow } from "./db";
 import type { Env } from "./env";
 import { HttpError, assertSameOrigin, json, readJson } from "./http";
-import { isOpenTo, nextFor, progressFor, proposalView } from "./queue";
+import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import { LIMITS, clientKey, enforce, pruneRateLimits } from "./ratelimit";
 
 const PROVIDERS: Record<string, IdentityProvider> = { google: googleProvider, dev: devProvider };
@@ -157,7 +157,14 @@ export async function batches(ctx: Ctx): Promise<Response> {
   for (const b of list) {
     const type = taskType(b.taskType);
     if (!type) continue;
-    out.push({ id: b.id, taskType: b.taskType, taskLabel: type.label, title: b.title, progress: await progressFor(ctx.env.DB, b, reviewer.id, ctx.now) });
+    out.push({
+      id: b.id,
+      taskType: b.taskType,
+      taskLabel: type.label,
+      title: b.title,
+      progress: await progressFor(ctx.env.DB, b, reviewer.id, ctx.now),
+      subsets: await subsetsOf(ctx.env.DB, b.id),
+    });
   }
   return json({ batches: out });
 }
@@ -172,7 +179,15 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
-  return json(await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now));
+  // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
+  const subsetId = new URL(ctx.request.url).searchParams.get("subset");
+  let filter = null;
+  if (subsetId !== null) {
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(subsetId)) throw new HttpError(404, "not_found");
+    filter = await loadSubset(ctx.env.DB, batch.id, subsetId);
+    if (!filter) throw new HttpError(404, "not_found");
+  }
+  return json(await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter));
 }
 
 async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {

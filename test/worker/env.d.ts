@@ -11,6 +11,8 @@ declare global {
       TEST_FIXTURE_SQL: string[];
       /** The page review batch imported again with ai_flags.json. */
       TEST_PAGE_REVIEW_AI_SQL: string[];
+      /** The page review fixture's interim subset (subset tables only). */
+      TEST_SUBSET_SQL: string[];
     }
   }
 }

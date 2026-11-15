@@ -163,6 +163,9 @@ mark.edit { background: var(--edit-bg); outline: 1px solid var(--edit); }
 }
 /* task picker */
 .batchhead { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.subsetnav { display: flex; gap: 6px; flex-wrap: wrap; }
+.subsetnav a { padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
+.subsetnav a.on { font-weight: 700; border-color: currentColor; }
 .picker .pick { display: block; text-decoration: none; color: var(--fg); }
 .picker .pick:hover { border-color: var(--acc); }
 .block { display: block; margin-top: 4px; }

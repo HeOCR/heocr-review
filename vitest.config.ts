@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 import { buildImportStatements } from "./scripts/lib/importsql";
+import { buildSubsetStatements, interimMembers } from "./scripts/lib/subset";
 import type { TaskImporter } from "./src/tasks/import";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
 import { pageReviewImporter } from "./src/tasks/page_review/importer";
@@ -35,6 +36,12 @@ function pageReviewWithAiFlags(minReviewers: number): string[] {
   });
 }
 
+/** The page review fixture's interim subset (the subset tables only), as `npm run import-subset` loads it. */
+function pageReviewSubset(): string[] {
+  const raw: unknown = JSON.parse(readFileSync(`${PAGE_REVIEW}/interim_fixture.json`, "utf8"));
+  return buildSubsetStatements("newprinted_midcentury_v0", { id: "interim_fixture", title: "סט ביניים", sourceSha256: "fixture" }, interimMembers(raw), "2026-11-15T00:00:00.000Z");
+}
+
 /** The fixture batches: the reference audit (imported first), line verification and page review. */
 function fixtureStatements(minReviewers: number): string[] {
   return [
@@ -66,6 +73,7 @@ export default defineConfig(async () => {
                   TEST_MIGRATIONS: migrations,
                   TEST_FIXTURE_SQL: fixtureStatements(1),
                   TEST_PAGE_REVIEW_AI_SQL: pageReviewWithAiFlags(1),
+                  TEST_SUBSET_SQL: pageReviewSubset(),
                 },
               },
             }),

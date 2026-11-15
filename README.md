@@ -178,6 +178,23 @@ changing them, keeps every earlier decision current; each decision records inste
 shown (the browser sends their hash back; none for a page opened before they were imported). Unsaved corrections stay in memory while the app is
 open (nothing is kept in browser storage).
 
+### Subsets (a filter in the app)
+
+```sh
+npm run import-subset -- --file <interim_v1.json> --batch newprinted_midcentury_v0 --target local|preview
+```
+
+A subset is a named set of a batch's pages that a reviewer can work through on its own: the batch header offers
+"כל העמודים" (all pages) and each subset (`#b/<batch>/s/<subset id>`; the id is the file name without `.json`). The
+file is eval's interim set (`heocr_midcentury_interim.v1`): per stratum a pick and ordered alternates, named by
+proposal `external_id`. Its sha256 must be the registered one (`REGISTERED_SHA256` in `scripts/lib/subset.ts`, from
+heocr-restricted-eval's preregistration `SHA256SUMS`), its `manifest_sha256` the batch's, and every member an active,
+ungated proposal of the batch. In the filter, each stratum serves its pick; once the pick has a current rejection (or a
+confirm with every line excluded, which leaves no reference line), it serves the first alternate still standing. The
+queue serves those pages in rank order, and progress counts strata. Only the subset tables change
+(`migrations/0003_subsets.sql`): proposals, content hashes, decisions and exports are untouched, and decisions made in
+the filter are ordinary decisions on the same proposals.
+
 ## Decisions out
 
 ```sh

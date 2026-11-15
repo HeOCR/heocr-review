@@ -1,0 +1,9 @@
+{
+ "schema": "heocr_midcentury_interim.v1",
+ "rule": "fixture: two strata; the first has one alternate",
+ "manifest_sha256": "42eeb8d0b168b2ba8a4ad82ecbe263d001814b2b550ee5752ff758c19330d2c3",
+ "pages": [
+  { "key": "reshumot_scanned:sefer_hachukim_1#p2", "stratum": "sefer_hachukim|1948-59", "alternates": ["reshumot_scanned:kovetz_hatakanot_7#p1"] },
+  { "key": "plenary:K2_1#p3", "stratum": "plenary|1949-59", "alternates": [] }
+ ]
+}

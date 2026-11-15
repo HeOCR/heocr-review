@@ -88,8 +88,8 @@ function aiText(r: Row): string {
   return [r.ai ? "קריאה אחרת (Claude)" : null, r.aiMissing ? "חסר טקסט לידה? (Claude)" : null].filter(Boolean).join(" · ");
 }
 
-/** `startAt` opens one page first (link #p/<id>); then the queue continues. */
-export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
+/** `startAt` opens one page first (link #p/<id>); then the queue continues. `subset`: serve only that subset's pages. */
+export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number, subset?: string): ReviewScreen {
   const root = h("div", { class: "review pagereview" });
   const history: number[] = [];
   let current: ProposalView | null = null;
@@ -163,7 +163,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   async function loadNext(): Promise<void> {
-    const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next`);
+    const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next${subset ? `?subset=${encodeURIComponent(subset)}` : ""}`);
     progress = res.progress;
     prefetch(res.prefetch);
     current = res.proposal;
@@ -718,8 +718,8 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       h(
         "section",
         { class: "card done" },
-        h("h2", {}, "אין עוד עמודים בשבילך כרגע. תודה רבה!"),
-        h("p", { lang: "en", dir: "ltr", class: "muted" }, "No pages left for you right now. Thank you!"),
+        h("h2", {}, subset ? "סיימת את הסט הזה. תודה רבה!" : "אין עוד עמודים בשבילך כרגע. תודה רבה!"),
+        h("p", { lang: "en", dir: "ltr", class: "muted" }, subset ? "You have finished this set. Thank you!" : "No pages left for you right now. Thank you!"),
         h("p", { class: "muted small" }, "עמודי המעבר השני נפתחים יממה אחרי שאישרת את העמוד במעבר הראשון. / Second-pass pages open a day after your first-pass confirm."),
         progress.skippedByMe
           ? h(
