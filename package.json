@@ -16,6 +16,7 @@
     "test": "npm run build && VITE_CONFIG_NATIVE_IGNORE_WARNING=true vitest run",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "import": "tsx scripts/import.ts",
+    "import-subset": "tsx scripts/import-subset.ts",
     "export": "tsx scripts/export.ts",
     "deploy:preview": "tsx scripts/deploy.ts preview"
   },

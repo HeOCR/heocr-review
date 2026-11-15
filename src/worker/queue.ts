@@ -5,6 +5,7 @@ import { PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
 import { taskType } from "../tasks/registry";
 import type { BatchRecord, ProposalRecord } from "../tasks/types";
 import { assignReserves, type ReserveRow } from "./reserves";
+import { servedMembers, type CurrentDecisionRow, type SubsetMemberRow } from "./subsets";
 
 /** How long a served proposal stays leased to its reviewer before others are offered it first. */
 export const LEASE_MS = 10 * 60 * 1000;
@@ -56,13 +57,59 @@ export async function isOpenTo(db: D1Database, p: { id: number; batchId: string 
   return row !== null;
 }
 
+/** A subset chosen as a filter on the queue: the proposals its strata serve now, and how many strata it has. */
+export interface SubsetFilter {
+  id: string;
+  ids: number[];
+  strata: number;
+}
+
+/** A batch's subset as a queue filter (migrations/0003_subsets.sql), or null when the batch has no such subset. */
+export async function loadSubset(db: D1Database, batchId: string, subsetId: string): Promise<SubsetFilter | null> {
+  const exists = await db.prepare("SELECT 1 AS ok FROM subsets WHERE batch_id = ?1 AND id = ?2").bind(batchId, subsetId).first<{ ok: number }>();
+  if (!exists) return null;
+  const [members, decisions] = await db.batch([
+    db
+      .prepare(
+        `SELECT m.stratum, m.position, p.id AS proposal_id, p.active FROM subset_members m
+         LEFT JOIN proposals p ON p.batch_id = m.batch_id AND p.external_id = m.external_id
+         WHERE m.batch_id = ?1 AND m.subset_id = ?2`,
+      )
+      .bind(batchId, subsetId),
+    db
+      .prepare(
+        `SELECT d.proposal_id, d.value, d.text FROM decisions d JOIN proposals p ON p.id = d.proposal_id
+         JOIN subset_members m ON m.batch_id = p.batch_id AND m.external_id = p.external_id
+         WHERE m.batch_id = ?1 AND m.subset_id = ?2 AND d.superseded_at IS NULL`,
+      )
+      .bind(batchId, subsetId),
+  ]);
+  const served = servedMembers((members!.results ?? []) as SubsetMemberRow[], (decisions!.results ?? []) as CurrentDecisionRow[]);
+  return { id: subsetId, ...served };
+}
+
+/** The subsets of a batch, for the app's filter: id, title and number of strata. */
+export async function subsetsOf(db: D1Database, batchId: string): Promise<{ id: string; title: string; size: number }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT s.id, s.title, (SELECT COUNT(DISTINCT m.stratum) FROM subset_members m WHERE m.batch_id = s.batch_id AND m.subset_id = s.id) AS size
+       FROM subsets s WHERE s.batch_id = ?1 ORDER BY s.id`,
+    )
+    .bind(batchId)
+    .all<{ id: string; title: string; size: number }>();
+  return results;
+}
+
+/** SQL: proposal p is in the filter bound at ?n (a JSON array of ids), or there is no filter (null). */
+const inFilter = (n: number) => `(?${n} IS NULL OR p.id IN (SELECT value FROM json_each(?${n})))`;
+
 /**
  * Open to reviewer ?2: active, not decided by them, not skipped by them, and below the batch's reviewer target.
  * Proposals leased to someone else in the last LEASE_MS come after the rest; then by rank (the
  * task type's serving order, set at import).
  */
 const OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
-  WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)}
+  WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8)}
     AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
     AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ?3
@@ -70,28 +117,32 @@ const OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.
     p.rank
   LIMIT ?5`;
 
-/** Progress over the proposals open to this reviewer now (gated ones count once they open). */
-export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now()): Promise<Progress> {
+/**
+ * Progress over the proposals open to this reviewer now (gated ones count once they open). With a subset filter,
+ * over the proposals its strata serve, and the total is its number of strata.
+ */
+export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<Progress> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
+  const f = inFilter(6);
   const row = await db
     .prepare(
       `SELECT
-        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)}) AS total,
-        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND
+        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}) AS total,
+        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f} AND
           (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) >= ?3) AS covered,
         (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id = d.proposal_id
-          WHERE p.batch_id = ?1 AND p.active = 1 AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
+          WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
-          WHERE p.batch_id = ?1 AND p.active = 1 AND s.reviewer_id = ?2) AS skipped,
-        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)}
+          WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND s.reviewer_id = ?2) AS skipped,
+        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
           AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
           AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ?3) AS remaining`,
     )
-    .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff)
+    .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();
   return {
-    total: row?.total ?? 0,
+    total: filter ? filter.strata : (row?.total ?? 0),
     covered: row?.covered ?? 0,
     minReviewers: batch.minReviewers,
     decidedByMe: row?.mine ?? 0,
@@ -118,14 +169,14 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
   };
 }
 
-export async function nextFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now()): Promise<NextResponse> {
+export async function nextFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<NextResponse> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
     .prepare(OPEN_SQL)
-    .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff)
+    .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const rows = results.map(toProposal);
-  const progress = await progressFor(db, batch, reviewerId, nowMs);
+  const progress = await progressFor(db, batch, reviewerId, nowMs, filter);
   const first = rows[0];
   if (!first) return { proposal: null, progress, prefetch: [] };
   await db

@@ -70,7 +70,8 @@ async function route(): Promise<void> {
   try {
     const { batches } = await get<{ batches: BatchSummary[] }>("/api/batches");
     const linked = /^p\/(\d{1,12})$/.exec(hash);
-    const chosen = /^b\/([A-Za-z0-9._-]{1,100})$/.exec(hash);
+    // #b/<batch>, or #b/<batch>/s/<subset> to work through one subset of it (a filter on the queue).
+    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100}))?$/.exec(hash);
     let batch: BatchSummary | undefined;
     if (linked) {
       const { proposal } = await get<{ proposal: ProposalView }>(`/api/proposals/${linked[1]}`);
@@ -81,13 +82,19 @@ async function route(): Promise<void> {
       if (!batches.length) return show(h("section", { class: "card" }, h("p", {}, "אין כרגע משימות פתוחות. / No open tasks right now.")));
       return show(picker(batches));
     }
-    const open = batch.taskType === "line_verify" ? lineVerifyView : batch.taskType === "page_review" ? pageReviewView : reviewView;
-    const view: ReviewScreen = open(batch, { needTerms, signedOut }, linked ? Number(linked[1]) : undefined);
+    const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
+    const hooks = { needTerms, signedOut };
+    const startAt = linked ? Number(linked[1]) : undefined;
+    const view: ReviewScreen =
+      batch.taskType === "page_review"
+        ? pageReviewView(batch, hooks, startAt, subset?.id)
+        : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
     show(
       h(
         "div",
         { class: "batchhead" },
         h("h1", { class: "batchtitle" }, batch.title),
+        batch.subsets.length ? subsetNav(batch, linked ? undefined : (subset?.id ?? "")) : null,
         batches.length > 1 ? h("a", { href: "#tasks", class: "small" }, "כל המשימות / All tasks") : null,
       ),
       view.el,
@@ -97,6 +104,18 @@ async function route(): Promise<void> {
     if (err instanceof ApiFailure && err.status === 401) return signedOut();
     show(h("p", { class: "msg" }, "שגיאה בטעינה. / Failed to load."));
   }
+}
+
+/** All pages, or one of the batch's subsets ("" = all pages; undefined = a page opened by link). */
+function subsetNav(batch: BatchSummary, current: string | undefined): HTMLElement {
+  const link = (id: string, label: string) =>
+    h("a", { href: id ? `#b/${encodeURIComponent(batch.id)}/s/${encodeURIComponent(id)}` : `#b/${encodeURIComponent(batch.id)}`, ...(current === id ? { "aria-current": "page", class: "on" } : {}) }, label);
+  return h(
+    "nav",
+    { class: "subsetnav small", "aria-label": "סינון / Filter" },
+    link("", "כל העמודים"),
+    ...batch.subsets.map((s) => link(s.id, `${s.title} (${s.size})`)),
+  );
 }
 
 /** Every open batch, the ones with work left for this reviewer first. */

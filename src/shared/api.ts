@@ -131,6 +131,8 @@ export interface BatchSummary {
   taskLabel: Label;
   title: string;
   progress: Progress;
+  /** Subsets the reviewer can filter the queue to (e.g. an interim eval set); size = its number of pages to serve. */
+  subsets: { id: string; title: string; size: number }[];
 }
 
 export interface NextResponse {
