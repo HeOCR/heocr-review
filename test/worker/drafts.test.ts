@@ -111,4 +111,16 @@ describe("page drafts on the server", () => {
     expect((await c.json("DELETE", `/api/proposals/${p.id}/draft`, {})).status).toBe(200);
     expect((await show(c, p.id)).draft).toBeNull();
   });
+  it("goes with the reviewer's record when it is deleted", async () => {
+    const c = await reviewer("jo");
+    const { p } = await first(c);
+    expect((await save(c, p, draftOf(p))).status).toBe(200);
+    const id = (await env.DB.prepare("SELECT reviewer_id FROM drafts").first<{ reviewer_id: string }>())!.reviewer_id;
+    // A deletion on request (manual, by email): the record and what hangs on it; the drafts follow by cascade.
+    await env.DB.batch(
+      ["consent_events", "assignments", "skips", "decisions"].map((t) => env.DB.prepare(`DELETE FROM ${t} WHERE reviewer_id = ?1`).bind(id)),
+    );
+    await env.DB.prepare("DELETE FROM reviewers WHERE id = ?1").bind(id).run();
+    expect((await draftRows()).results).toHaveLength(0);
+  });
 });
