@@ -27,3 +27,5 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const get = <T>(path: string) => call<T>("GET", path);
 export const post = <T>(path: string, body: unknown = {}) => call<T>("POST", path, body);
+export const put = <T>(path: string, body: unknown) => call<T>("PUT", path, body);
+export const del = <T>(path: string) => call<T>("DELETE", path, {});

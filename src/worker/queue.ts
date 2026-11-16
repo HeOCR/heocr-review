@@ -1,6 +1,7 @@
 /** Which proposal a reviewer sees next, and progress counts. */
-import type { NextResponse, Progress, ProposalView } from "../shared/api";
+import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
+import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
 import { taskType } from "../tasks/registry";
 import type { BatchRecord, ProposalRecord } from "../tasks/types";
@@ -158,6 +159,7 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     .prepare("SELECT value, text, decided_on FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
     .bind(p.id, reviewerId)
     .first<{ value: string; text: string | null; decided_on: string }>();
+  const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
   return {
     id: p.id,
     batchId: p.batchId,
@@ -166,7 +168,24 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     view: type.toView(p),
     options: type.options,
     mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
+    ...(batch.taskType === PAGE_REVIEW ? { draft } : {}),
   };
+}
+
+/** The reviewer's draft of a page, if it was made on the page's current pre-fill; one made on another is deleted. */
+async function draftFor(db: D1Database, p: ProposalRecord, reviewerId: string): Promise<PageDraft | null> {
+  const row = await db
+    .prepare("SELECT prefill_sha256, body, updated_at FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2")
+    .bind(reviewerId, p.id)
+    .first<{ prefill_sha256: string; body: string; updated_at: string }>();
+  if (!row) return null;
+  const sha = payloadOf(p).prefill_sha256;
+  if (row.prefill_sha256 !== sha) {
+    await db.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewerId, p.id).run();
+    return null;
+  }
+  const body = JSON.parse(row.body) as { readingOrder: boolean; rows: PageDraftRow[] };
+  return { prefillSha256: sha, readingOrder: body.readingOrder, rows: body.rows, savedAt: row.updated_at };
 }
 
 export async function nextFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<NextResponse> {

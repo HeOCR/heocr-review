@@ -37,9 +37,10 @@ Three task types:
 
 When more than one batch is open, the app starts with a task picker (`/app/#b/<batch id>` opens one).
 
-> **Contribution terms, terms of service and privacy policy: version `2026-11-12-v1`**, approved by the maintainer
-> on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)) and changed to CC0 on 2026-11-12
-> ([record](docs/decisions/2026-11-12-cc0.md)). They are the consent text in
+> **Contribution terms and terms of service: version `2026-11-12-v1`; privacy policy: version `2026-11-16-v1`**,
+> approved by the maintainer on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)), changed to CC0
+> on 2026-11-12 ([record](docs/decisions/2026-11-12-cc0.md)), and the privacy policy extended to unsaved page
+> corrections on 2026-11-16 ([record](docs/decisions/2026-11-16-drafts-privacy.md)). They are the consent text in
 > [`src/shared/terms.ts`](src/shared/terms.ts) and the pages [`public/terms.html`](public/terms.html) and
 > [`public/privacy.html`](public/privacy.html), each in Hebrew and English. Decisions and edited text are dedicated
 > to the public domain under CC0 1.0 (the volunteer's own contribution; text they start from keeps its own licence),
@@ -175,8 +176,14 @@ The optional `ai_flags.json` (`heocr_midcentury_ai_flags.v0`: `batch_id`, `model
 and per page `unit_id`, `page`, `flagged_i`, `missing_near_i`) names manifest pages, so first-pass pages only, and
 only shown (non-blank) line indices. The hints are not part of a page's content hash, so importing them, or
 changing them, keeps every earlier decision current; each decision records instead the hints its reviewer was
-shown (the browser sends their hash back; none for a page opened before they were imported). Unsaved corrections stay in memory while the app is
-open (nothing is kept in browser storage).
+shown (the browser sends their hash back; none for a page opened before they were imported). Unsaved corrections are saved on the server as a
+draft (`migrations/0004_drafts.sql`; `PUT`/`DELETE /api/proposals/<id>/draft`): after a pause in typing, and at once
+when a line is left, with a status line (נשמר / שומר… / שמירה נכשלה, מנסה שוב) and retries. Opening the page again,
+after a reload or on another device, restores it: the reviewer's own decision first, then the draft, then the
+pre-fill. A draft is per reviewer and page, pinned to the pre-fill it was made on (one made on another pre-fill is
+refused, and deleted when found); it is never exported, never counted in progress, and confirming or rejecting the
+page deletes it. Nothing is kept in browser storage. Decision and draft requests may be up to 512 KB (a whole page's
+lines); other writes stay at 16 KB.
 
 ### Subsets (a filter in the app)
 

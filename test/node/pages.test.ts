@@ -6,9 +6,9 @@ import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved 2026-11-12-v1", () => {
+  it("versions are the approved ones: terms 2026-11-12-v1, privacy 2026-11-16-v1", () => {
     expect(TERMS_VERSION).toBe("2026-11-12-v1");
-    expect(PRIVACY_VERSION).toBe("2026-11-12-v1");
+    expect(PRIVACY_VERSION).toBe("2026-11-16-v1");
   });
 
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
@@ -37,7 +37,17 @@ describe("public pages (Google branding URLs)", () => {
 
   it("the privacy policy states what the app does", () => {
     const html = page("privacy.html");
-    for (const fact of ["HMAC-SHA256", "__Host-hr_session", "No analytics", "Cloudflare D1", "CC0 1.0", "Deletion", "do not store"]) {
+    for (const fact of [
+      "HMAC-SHA256",
+      "__Host-hr_session",
+      "No analytics",
+      "Cloudflare D1",
+      "CC0 1.0",
+      "Deletion",
+      "do not store",
+      "corrections you have not yet confirmed or rejected",
+      "תיקונים שעוד לא אישרתם או פסלתם",
+    ]) {
       expect(html).toContain(fact);
     }
   });
