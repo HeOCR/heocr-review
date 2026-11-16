@@ -6,9 +6,9 @@ import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved ones: terms 2026-11-12-v1, privacy 2026-11-16-v1", () => {
+  it("versions are the approved ones: terms 2026-11-12-v1, privacy 2026-11-16-v2", () => {
     expect(TERMS_VERSION).toBe("2026-11-12-v1");
-    expect(PRIVACY_VERSION).toBe("2026-11-16-v1");
+    expect(PRIVACY_VERSION).toBe("2026-11-16-v2");
   });
 
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
@@ -50,6 +50,25 @@ describe("public pages (Google branding URLs)", () => {
     ]) {
       expect(html).toContain(fact);
     }
+  });
+
+  it("the deletion item gives the choice for unpublished decisions, in both languages (2026-11-16-v2)", () => {
+    const html = page("privacy.html");
+    for (const fact of [
+      "על ההחלטות שלכם שעוד לא פורסמו תחליטו אתם: למחוק אותן, או להשאיר אותן בלי שום קשר אליכם (בלי כינוי ובלי שם)",
+      "אם לא תבחרו, נשאיר אותן בלי קשר אליכם.",
+      "החלטה ששימשה כבר בסט הערכה רשום נשארת בכל מקרה, בלי קשר אליכם, כדי שאפשר יהיה לשחזר תוצאות שפורסמו.",
+      "For your decisions that are not yet published, you choose: we delete them, or we keep them with no link to you (no pseudonym and no name)",
+      "If you don't choose, we keep them with no link to you.",
+      "A decision already used in a registered evaluation set stays in any case, with no link to you, so published results can be reproduced.",
+      "Decisions already published in public releases stay there, under your pseudonym only.",
+      '<a href="mailto:heocrproject@gmail.com" dir="ltr">heocrproject@gmail.com</a>',
+      '<a href="mailto:heocrproject@gmail.com">heocrproject@gmail.com</a>',
+    ]) {
+      expect(html).toContain(fact);
+    }
+    expect(html).not.toContain("2026-11-16-v1");
+    expect(readFileSync("public/index.html", "utf8")).toContain(PRIVACY_VERSION);
   });
 
   it("the terms carry the contribution terms", () => {
