@@ -112,6 +112,24 @@ export interface ProposalView {
   view: ProposalViewBody;
   options: DecisionOption[];
   mine: { value: string; text: string | null; decidedAt: string } | null;
+  /** page_review: the reviewer's saved unsaved-corrections for this pre-fill (none once they decided the page). */
+  draft?: PageDraft | null;
+}
+
+/** One line of a draft: as the decision will record it, plus whether the reviewer has looked at it. */
+export interface PageDraftRow {
+  src: number[];
+  action: string;
+  /** null: the pre-fill line's text (an unchanged or excluded line). */
+  text: string | null;
+  looked: boolean;
+}
+
+export interface PageDraft {
+  prefillSha256: string;
+  readingOrder: boolean;
+  rows: PageDraftRow[];
+  savedAt: string;
 }
 
 export interface Progress {

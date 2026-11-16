@@ -2,6 +2,7 @@ import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
 import { cleanDisplayName, displayNameProblem } from "../shared/displayName";
 import { TERMS_STATUS, TERMS_VERSION } from "../shared/terms";
 import { buildExport } from "../tasks/export";
+import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { taskType } from "../tasks/registry";
 import { devAuthEnabled, devProvider } from "./auth/dev";
 import { googleProvider } from "./auth/google";
@@ -11,6 +12,7 @@ import { clearSessionCookie, createSessionCookie, readSession } from "./auth/ses
 import { randomId } from "./crypto";
 import { exportRows, getBatch, getProposal, getReviewer, listBatches, type ReviewerRow } from "./db";
 import type { Env } from "./env";
+import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import { LIMITS, clientKey, enforce, pruneRateLimits } from "./ratelimit";
@@ -265,12 +267,58 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
       db.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id),
     ]);
   }
+  // The page is decided: its draft is done with (page_review).
+  await db.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
   return json({
     decisionId,
     value: normalized.value,
     text: normalized.text,
     progress: await progressFor(db, batch, reviewer.id, ctx.now),
   });
+}
+
+/**
+ * Save the reviewer's unsaved corrections of a page (page_review), pinned to the pre-fill they were made on. Refused
+ * for another pre-fill (409 stale_draft) and once the reviewer has decided the page (409 decided).
+ */
+export async function saveDraft(ctx: Ctx, id: number): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  await enforce(ctx.env.DB, LIMITS.draftMinute, reviewer.id, ctx.now);
+  await enforce(ctx.env.DB, LIMITS.draftDay, reviewer.id, ctx.now);
+  const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (batch.taskType !== PAGE_REVIEW) throw new HttpError(400, "invalid_draft", "drafts are for page review");
+  const x = payloadOf(proposal);
+  if (body.prefillSha256 !== x.prefill_sha256) throw new HttpError(409, "stale_draft", "this page's pre-fill changed: reload the page");
+  const db = ctx.env.DB;
+  const decided = await db
+    .prepare("SELECT 1 AS ok FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
+    .bind(proposal.id, reviewer.id)
+    .first<{ ok: number }>();
+  if (decided) throw new HttpError(409, "decided", "this page is decided");
+  const checked = checkDraft(body, new Set(x.lines.map((l) => l.i)));
+  if (!checked.ok) throw new HttpError(400, "invalid_draft", checked.error);
+  const savedAt = iso(ctx.now);
+  await db
+    .prepare(
+      `INSERT INTO drafts (reviewer_id, proposal_id, prefill_sha256, body, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT (reviewer_id, proposal_id) DO UPDATE SET prefill_sha256 = excluded.prefill_sha256, body = excluded.body, updated_at = excluded.updated_at`,
+    )
+    .bind(reviewer.id, proposal.id, x.prefill_sha256, JSON.stringify(checked.body), savedAt)
+    .run();
+  return json({ ok: true, savedAt });
+}
+
+/** Discard the reviewer's draft of a page (back to the pre-fill). */
+export async function clearDraft(ctx: Ctx, id: number): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  await enforce(ctx.env.DB, LIMITS.draftMinute, reviewer.id, ctx.now);
+  const { proposal } = await activeProposal(ctx, id, reviewer.id);
+  await ctx.env.DB.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
+  return json({ ok: true });
 }
 
 export async function skip(ctx: Ctx, id: number): Promise<Response> {

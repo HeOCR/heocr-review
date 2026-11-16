@@ -166,6 +166,8 @@ mark.edit { background: var(--edit-bg); outline: 1px solid var(--edit); }
 .subsetnav { display: flex; gap: 6px; flex-wrap: wrap; }
 .subsetnav a { padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
 .subsetnav a.on { font-weight: 700; border-color: currentColor; }
+.savestate { color: var(--muted); align-self: center; }
+.savestate[data-state="failed"], .savestate[data-state="stale"] { color: var(--bad); font-weight: 600; }
 .picker .pick { display: block; text-decoration: none; color: var(--fg); }
 .picker .pick:hover { border-color: var(--acc); }
 .block { display: block; margin-top: 4px; }

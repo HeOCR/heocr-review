@@ -20,6 +20,8 @@ const ROUTES: [string, RegExp, Handler][] = [
   ["GET", /^\/api\/proposals\/(\d+)$/, (c, id) => api.showProposal(c, int(id!))],
   ["POST", /^\/api\/proposals\/(\d+)\/decision$/, (c, id) => api.decide(c, int(id!))],
   ["POST", /^\/api\/proposals\/(\d+)\/skip$/, (c, id) => api.skip(c, int(id!))],
+  ["PUT", /^\/api\/proposals\/(\d+)\/draft$/, (c, id) => api.saveDraft(c, int(id!))],
+  ["DELETE", /^\/api\/proposals\/(\d+)\/draft$/, (c, id) => api.clearDraft(c, int(id!))],
   ["GET", /^\/api\/admin\/progress$/, (c) => api.adminProgress(c)],
   ["GET", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/export$/, (c, b) => api.adminExport(c, b!)],
 ];

@@ -3,16 +3,17 @@
  * the lines in place; lines flagged "look here" (eval's tier A, and on the first pass Claude's hints) must each be
  * looked at (Enter on the line, an edit or an action) before the page can be confirmed. A hint never shows Claude's
  * reading, only where to look. Lines can be marked (print has niqqud, not on the page, unreadable),
- * merged, split, moved and added. A draft is kept in memory (not in browser storage, which the privacy policy does
- * not cover) while the app is open, so going back and forth between pages keeps unsaved corrections.
+ * merged, split, moved and added. Unsaved corrections are kept in memory and saved on the server as a draft
+ * (debounced, and at once when a line is left), so a reload or another device restores them; nothing goes in browser
+ * storage. A draft is not a decision: confirming or rejecting the page deletes it.
  *
  * Keys in a line: Enter looked, next flagged line · ↑/↓ previous/next line · Alt+Enter split at the cursor ·
  * Alt+J merge with the next · Alt+N niqqud · Alt+X not on the page · Alt+U unreadable · Alt+↑/↓ move · Alt+A add a line
  * below · Alt+- en dash · Ctrl+Enter confirm the page.
  */
-import type { BatchSummary, NextResponse, PageReviewLine, PageReviewView, Progress, ProposalView } from "../../shared/api";
+import type { BatchSummary, NextResponse, PageDraftRow, PageReviewLine, PageReviewView, Progress, ProposalView } from "../../shared/api";
 import { hasNiqqud } from "../../shared/niqqud";
-import { ApiFailure, get, post } from "../api";
+import { ApiFailure, del, get, post, put } from "../api";
 import { h, mount } from "../dom";
 import { failureHandler, prefetch, progressBar, type ReviewHooks, type ReviewScreen } from "./common";
 import { viewer } from "./viewer";
@@ -44,6 +45,17 @@ interface Draft {
 }
 
 const TEXTLESS: Action[] = ["not_on_page", "unreadable"];
+
+/** How long typing pauses before the draft is saved (leaving a line saves at once). */
+const SAVE_DELAY_MS = 1200;
+type SaveState = "idle" | "saving" | "saved" | "failed" | "stale";
+const SAVE_LABEL: Record<SaveState, string> = {
+  idle: "",
+  saving: "שומר…",
+  saved: "✓ נשמר",
+  failed: "שמירה נכשלה, מנסה שוב",
+  stale: "העמוד השתנה: טענו את הדף מחדש",
+};
 const HIDDEN = /[\u200e\u200f\u202a-\u202e\u2066-\u2069\u00ad\u200b-\u200d\ufeff]/;
 
 const ACTION_LABEL: Record<Action, string> = {
@@ -98,6 +110,12 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   let readingOrder = false;
   let nextKey = 1;
   let busy = false;
+  // The server draft: the latest unsent one, a timer, and a chain that sends one at a time, in order.
+  let pending: { id: number; body: Record<string, unknown> } | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let saveChain: Promise<void> = Promise.resolve();
+  let retryMs = 0;
+  let saveState: SaveState = "idle";
   let ready = false; // the scan has loaded: confirming a page nobody could see would be blind
   const fail = failureHandler(root, hooks);
 
@@ -149,20 +167,117 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       readingOrder = draft.readingOrder;
       return;
     }
+    // The draft saved on the server (after a reload, or from another device), made on this same pre-fill.
+    const saved = p.draft && p.draft.prefillSha256 === v.prefillSha256 ? p.draft : null;
+    if (saved) {
+      rows = saved.rows.map((r) => fromDraftRow(r, byIndex));
+      readingOrder = saved.readingOrder;
+      return;
+    }
     rows = v.lines.map(rowFrom);
+  }
+
+  function fromDraftRow(r: PageDraftRow, byIndex: Map<number, PageReviewLine>): Row {
+    const first = byIndex.get(r.src[0]!);
+    const any = (f: (l: PageReviewLine) => boolean) => r.src.some((i) => byIndex.has(i) && f(byIndex.get(i)!));
+    return {
+      key: nextKey++,
+      src: [...r.src],
+      text: r.text ?? (r.src.length === 1 ? (first?.text ?? "") : ""),
+      action: r.action as Action,
+      orig: r.src.length === 1 ? (first?.text ?? null) : null,
+      tierA: any((l) => l.tierA),
+      bidiRisk: any((l) => l.bidiRisk),
+      mismatch: any((l) => l.mismatch),
+      ai: any((l) => l.aiDisagrees),
+      aiMissing: any((l) => l.aiMissingNear),
+      looked: r.looked,
+    };
   }
 
   function saveDraft(): void {
     const key = draftKey();
     if (!key || current?.mine) return;
     drafts.set(key, { rows: rows.map((r) => ({ ...r, src: [...r.src] })), readingOrder });
+    queueSave();
   }
 
   function dropDraft(id: number, sha: string): void {
     drafts.delete(`${id}:${sha}`);
   }
 
+  // --- the server draft ----------------------------------------------------------------------------------------
+
+  function showSave(state: SaveState): void {
+    saveState = state;
+    const el = root.querySelector(".savestate") as HTMLElement | null;
+    if (!el) return;
+    el.textContent = SAVE_LABEL[state];
+    el.dataset.state = state;
+  }
+
+  function draftBody(): Record<string, unknown> {
+    return {
+      prefillSha256: view()!.prefillSha256,
+      readingOrder,
+      rows: rows.map((r) => ({ src: r.src, action: r.action, text: TEXTLESS.includes(r.action) || r.action === "correct" ? null : r.text, looked: r.looked })),
+    };
+  }
+
+  /** Save the current page's draft after a pause in typing. */
+  function queueSave(): void {
+    if (!current || current.mine || !view()) return;
+    pending = { id: current.id, body: draftBody() };
+    showSave("saving");
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => void flushSave(), SAVE_DELAY_MS);
+  }
+
+  /** Send the latest unsent draft now (one request at a time); a failure is retried with growing pauses. */
+  function flushSave(): Promise<void> {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+    saveChain = saveChain.then(async () => {
+      const job = pending;
+      pending = null;
+      if (!job) return;
+      try {
+        await put(`/api/proposals/${job.id}/draft`, job.body);
+        retryMs = 0;
+        if (!pending && current?.id === job.id) showSave("saved");
+      } catch (err) {
+        const code = err instanceof ApiFailure ? err.code : "";
+        if (code === "stale_draft") {
+          if (current?.id === job.id) showSave("stale");
+          return;
+        }
+        if (code === "decided" || code === "not_found" || code === "not_open") return; // nothing left to keep
+        pending ??= job;
+        retryMs = Math.min(retryMs ? retryMs * 2 : 2000, 30_000);
+        if (current?.id === job.id) showSave("failed");
+        saveTimer = setTimeout(() => void flushSave(), retryMs);
+      }
+    });
+    return saveChain;
+  }
+
+  /** Before a decision on page `id`: its unsent draft is moot, and any save in flight lands first. */
+  async function settleSaves(id: number): Promise<void> {
+    if (pending?.id === id) {
+      pending = null;
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    await saveChain;
+  }
+
+  const unsaved = (e: BeforeUnloadEvent) => {
+    if (pending || saveState === "saving" || saveState === "failed") e.preventDefault();
+  };
+  window.addEventListener("beforeunload", unsaved);
+
   async function loadNext(): Promise<void> {
+    await flushSave();
     const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next${subset ? `?subset=${encodeURIComponent(subset)}` : ""}`);
     progress = res.progress;
     prefetch(res.prefetch);
@@ -172,6 +287,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   async function open(id: number): Promise<void> {
+    await flushSave();
     const res = await get<{ proposal: ProposalView }>(`/api/proposals/${id}`);
     current = res.proposal;
     render(true);
@@ -184,6 +300,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const sha = view()!.prefillSha256;
     const req = { value, text: JSON.stringify(body) };
     try {
+      await settleSaves(id); // a draft save still in flight must not land after the decision deletes the draft
       try {
         await post(`/api/proposals/${id}/decision`, req);
       } catch (err) {
@@ -195,6 +312,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       if (history[history.length - 1] !== id) history.push(id);
       await loadNext();
     } catch (err) {
+      if (current?.id === id && !current.mine) queueSave(); // not decided: keep the draft
       fail(err);
     } finally {
       busy = false;
@@ -386,7 +504,14 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (!v || !confirm("לחזור לטקסט המוכן ולמחוק את התיקונים בעמוד הזה? / Discard this page's corrections?")) return;
     rows = v.lines.map(rowFrom);
     readingOrder = false;
-    renderLines(rows[0]?.key ?? null);
+    const key = draftKey();
+    if (key) drafts.delete(key);
+    const id = current!.id;
+    void settleSaves(id)
+      .then(() => del(`/api/proposals/${id}/draft`))
+      .then(() => showSave("idle"))
+      .catch(fail);
+    renderLines(rows[0]?.key ?? null, undefined, false);
   }
 
   function focusRow(key: number | null, caret?: number): void {
@@ -623,7 +748,12 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
             v.lines.length === 0 && rows.length === 0
               ? h("p", { class: "muted" }, "אין לעמוד הזה טקסט מוכן: הקלידו את שורותיו. / No pre-fill for this page: type its lines.")
               : null,
-            h("ol", { class: "prlines" }),
+            h("ol", {
+              class: "prlines",
+              onfocusout: () => {
+                if (pending) void flushSave(); // a line was left: save now
+              },
+            }),
             h(
               "div",
               { class: "row" },
@@ -655,6 +785,12 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
                 "אישור: השורות, כפי שתוקנו, הן טקסט העמוד בסדר הקריאה ",
                 h("kbd", { dir: "ltr" }, "Ctrl+Enter"),
               ),
+              h("span", {
+                class: "savestate small",
+                role: "status",
+                "aria-live": "polite",
+                title: "התיקונים נשמרים כטיוטה עד שתאשרו או תפסלו את העמוד. / Corrections are saved as a draft until you confirm or reject the page.",
+              }),
             ),
             h(
               "details",
@@ -708,6 +844,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     watch();
     const firstA = rows.find((r) => mustLook(r) && !r.looked) ?? null;
     renderLines(null, undefined, false); // nothing changed yet: no draft until the reviewer acts
+    showSave(pending?.id === p.id ? saveState : !p.mine && p.draft?.prefillSha256 === v.prefillSha256 ? "saved" : "idle");
     if (firstA) focusRow(firstA.key);
   }
 
@@ -738,6 +875,9 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   (startAt === undefined ? loadNext() : open(startAt)).catch(fail);
   return {
     el: root,
-    dispose: () => {},
+    dispose: () => {
+      window.removeEventListener("beforeunload", unsaved);
+      void flushSave();
+    },
   };
 }

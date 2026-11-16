@@ -175,8 +175,14 @@ The optional `ai_flags.json` (`heocr_midcentury_ai_flags.v0`: `batch_id`, `model
 and per page `unit_id`, `page`, `flagged_i`, `missing_near_i`) names manifest pages, so first-pass pages only, and
 only shown (non-blank) line indices. The hints are not part of a page's content hash, so importing them, or
 changing them, keeps every earlier decision current; each decision records instead the hints its reviewer was
-shown (the browser sends their hash back; none for a page opened before they were imported). Unsaved corrections stay in memory while the app is
-open (nothing is kept in browser storage).
+shown (the browser sends their hash back; none for a page opened before they were imported). Unsaved corrections are saved on the server as a
+draft (`migrations/0004_drafts.sql`; `PUT`/`DELETE /api/proposals/<id>/draft`): after a pause in typing, and at once
+when a line is left, with a status line (נשמר / שומר… / שמירה נכשלה, מנסה שוב) and retries. Opening the page again,
+after a reload or on another device, restores it: the reviewer's own decision first, then the draft, then the
+pre-fill. A draft is per reviewer and page, pinned to the pre-fill it was made on (one made on another pre-fill is
+refused, and deleted when found); it is never exported, never counted in progress, and confirming or rejecting the
+page deletes it. Nothing is kept in browser storage. Decision and draft requests may be up to 512 KB (a whole page's
+lines); other writes stay at 16 KB.
 
 ### Subsets (a filter in the app)
 
