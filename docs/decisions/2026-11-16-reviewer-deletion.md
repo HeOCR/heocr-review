@@ -3,11 +3,13 @@
 - **Decision:** when a reviewer asks to be deleted, we delete their record and credit name from the site. For their
   decisions that are not yet published, **they choose**: we delete them, or we keep them with no link to them (no
   pseudonym and no name), to be published later as an anonymous contribution. **With no choice, the default is to
-  keep them unlinked.** A decision already used in a registered evaluation set is kept in any case, unlinked, so
+  keep them unlinked**, after **14 days** without an answer (set by the maintainer on 2026-11-16). A decision already used in a registered evaluation set is kept in any case, unlinked, so
   published results can be reproduced. Decisions already published in public releases stay there, under the
   pseudonym only. This is **option C**.
 - **Approved by:** the maintainer, on 2026-11-16, relayed word for word by heocr-lead, who also relayed his approval of
   the text below.
+- **Time to choose:** 14 days from when we ask, the same for everyone. heocr-lead put the runbook's placeholder of 14
+  days to the maintainer, who approved it on 2026-11-16 (relayed by heocr-lead).
 - **The alternatives were:**
   - **A**, delete everything not yet published, with no choice;
   - **B**, keep everything not yet published, unlinked, with no choice.
