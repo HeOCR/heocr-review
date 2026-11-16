@@ -37,9 +37,10 @@ Three task types:
 
 When more than one batch is open, the app starts with a task picker (`/app/#b/<batch id>` opens one).
 
-> **Contribution terms, terms of service and privacy policy: version `2026-11-12-v1`**, approved by the maintainer
-> on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)) and changed to CC0 on 2026-11-12
-> ([record](docs/decisions/2026-11-12-cc0.md)). They are the consent text in
+> **Contribution terms and terms of service: version `2026-11-12-v1`; privacy policy: version `2026-11-16-v1`**,
+> approved by the maintainer on 2026-11-07 ([record](docs/decisions/2026-11-07-terms-approved.md)), changed to CC0
+> on 2026-11-12 ([record](docs/decisions/2026-11-12-cc0.md)), and the privacy policy extended to unsaved page
+> corrections on 2026-11-16 ([record](docs/decisions/2026-11-16-drafts-privacy.md)). They are the consent text in
 > [`src/shared/terms.ts`](src/shared/terms.ts) and the pages [`public/terms.html`](public/terms.html) and
 > [`public/privacy.html`](public/privacy.html), each in Hebrew and English. Decisions and edited text are dedicated
 > to the public domain under CC0 1.0 (the volunteer's own contribution; text they start from keeps its own licence),
