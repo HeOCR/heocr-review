@@ -189,4 +189,15 @@ describe("page review", () => {
     const blindLines = blind.view!.lines.map((l) => ({ src: [l.i], action: "correct" }));
     expect((await a.post(`/api/proposals/${blind.proposal!.id}/decision`, { value: "confirm", text: JSON.stringify({ lines: blindLines, ai_flags_sha256: sha }) })).status).toBe(400);
   });
+  it("accepts a whole page's confirm larger than 16 KB (a long page with many retyped lines)", async () => {
+    const c = await reviewer("lena");
+    const n = await next(c);
+    const lines = [
+      ...n.view!.lines.map((l) => ({ src: [l.i], action: "correct" as string, text: null as string | null })),
+      ...Array.from({ length: 20 }, () => ({ src: [] as number[], action: "added", text: "א".repeat(900) })),
+    ];
+    const text = JSON.stringify({ lines, reading_order_verified: n.view!.readingOrderCheck ? true : null });
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(16 * 1024);
+    expect((await c.post(`/api/proposals/${n.proposal!.id}/decision`, { value: "confirm", text })).status).toBe(200);
+  });
 });

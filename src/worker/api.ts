@@ -11,7 +11,7 @@ import { clearSessionCookie, createSessionCookie, readSession } from "./auth/ses
 import { randomId } from "./crypto";
 import { exportRows, getBatch, getProposal, getReviewer, listBatches, type ReviewerRow } from "./db";
 import type { Env } from "./env";
-import { HttpError, assertSameOrigin, json, readJson } from "./http";
+import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import { LIMITS, clientKey, enforce, pruneRateLimits } from "./ratelimit";
 
@@ -231,7 +231,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
   await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
   await enforce(ctx.env.DB, LIMITS.writeDay, reviewer.id, ctx.now);
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
   const normalized = taskType(batch.taskType)!.normalizeDecision(proposal, body.value, body.text);
