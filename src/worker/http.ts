@@ -25,15 +25,20 @@ export function errorResponse(err: HttpError): Response {
 }
 
 export const MAX_BODY_BYTES = 16 * 1024;
+/**
+ * Decisions and drafts: a whole page's lines (page_review) do not fit in 16 KB once many are edited (a 269-line page
+ * with most lines retyped is about 40 KB). The task type's own checks still cap the content.
+ */
+export const MAX_PAGE_BODY_BYTES = 512 * 1024;
 
 /** Parse a small JSON body; refuse other content types (forces a CORS preflight for cross-site callers). */
-export async function readJson(request: Request): Promise<Record<string, unknown>> {
+export async function readJson(request: Request, maxBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
   const type = request.headers.get("content-type") ?? "";
   if (!type.toLowerCase().startsWith("application/json")) throw new HttpError(415, "json_required");
   const length = Number(request.headers.get("content-length") ?? "0");
-  if (length > MAX_BODY_BYTES) throw new HttpError(413, "body_too_large");
+  if (length > maxBytes) throw new HttpError(413, "body_too_large");
   const text = await request.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) throw new HttpError(413, "body_too_large");
+  if (new TextEncoder().encode(text).length > maxBytes) throw new HttpError(413, "body_too_large");
   let value: unknown;
   try {
     value = text ? JSON.parse(text) : {};

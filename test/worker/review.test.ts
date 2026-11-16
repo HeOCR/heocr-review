@@ -140,7 +140,9 @@ describe("review flow", () => {
     expect((await c.post(`/api/proposals/${id}/decision`, { value: "accepted", text: "x" })).status).toBe(400);
     expect((await c.post(`/api/proposals/${id}/decision`, { value: "edited", text: "x".repeat(1001) })).status).toBe(400);
     expect((await c.post(`/api/proposals/${id}/decision`, { value: "edited", text: "a\u0000b" })).status).toBe(400);
-    const big = await c.req("POST", `/api/proposals/${id}/decision`, { value: "edited", text: "x".repeat(20000) });
+    // Decisions take up to 512 KB (a whole page's lines, page_review); the task type's own check refuses long text.
+    expect((await c.req("POST", `/api/proposals/${id}/decision`, { value: "edited", text: "x".repeat(20000) })).status).toBe(400);
+    const big = await c.req("POST", `/api/proposals/${id}/decision`, { value: "edited", text: "x".repeat(600 * 1024) });
     expect(big.status).toBe(413);
     expect((await c.post(`/api/proposals/999999/decision`, { value: "accepted" })).status).toBe(404);
   });
