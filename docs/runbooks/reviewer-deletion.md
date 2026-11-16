@@ -41,8 +41,9 @@ Ask once about the decisions that are not yet published: **delete** them, or **k
 reviewer. Use the policy's own words, in the requester's language. Say that decisions used in a registered evaluation
 set are kept unlinked in any case, and that published releases do not change.
 
-- If there is no answer within **14 days**, the default is **unlink**. The maintainer may set another deadline. Use
-  the same one for everyone and write it in this runbook.
+- If there is no answer within **14 days** of asking, the default is **unlink**. The 14 days were set by the
+  maintainer on 2026-11-16 ([decision record](../decisions/2026-11-16-reviewer-deletion.md)), and they are the same
+  for everyone. Tell the requester the date by which they need to answer.
 - Tell them that signing in again later starts a fresh, empty record under the same pseudonym, and that nothing
   deleted or unlinked comes back.
 
