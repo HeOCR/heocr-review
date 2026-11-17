@@ -23,6 +23,7 @@ import {
   aiFlagsProblems,
   exclusionKeys,
   exclusionsProblems,
+  goldPages,
   goldProblems,
   lineItemsProblems,
   maintainerDecidedProblems,
@@ -112,7 +113,7 @@ export const lineConsensusImporter: TaskImporter = {
     const queued = new Set([...pages.keys()].filter((k) => !excluded.has(k)));
     if (queued.size === 0) out.push("no page is left for volunteers");
     const gold = sidecars?.[GOLD_FILE];
-    if (gold !== undefined) out.push(...goldProblems(gold, pages, queued));
+    if (gold !== undefined) out.push(...goldProblems(gold, pages, queued, goldPages(ex as ExclusionsFile)));
     return out;
   },
 

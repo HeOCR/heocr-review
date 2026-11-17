@@ -49,6 +49,10 @@ describe("line_consensus import", () => {
     const gold = read("gold_v1.json") as { lines: Record<string, unknown>[] };
     const bad = { ...gold, lines: [{ ...gold.lines[0]!, page_key: A, image_sha256: (items().pages as { page_key: string; image_sha256: string }[])[0]!.image_sha256 }] };
     expect(lineConsensusImporter.problems(items(), sidecars({ "gold_v1.json": bad })).join("\n")).toMatch(/is a volunteer page/);
+    // Gold only from the maintainer's interim pages: a page excluded for another reason is refused too.
+    const ex = read("volunteer_exclusions_v1.json") as { pages: { page_key: string; reason: string }[] };
+    const reserve = { ...ex, pages: ex.pages.map((p) => ({ ...p, reason: "reserve" })) };
+    expect(lineConsensusImporter.problems(items(), sidecars({ "volunteer_exclusions_v1.json": reserve })).join("\n")).toMatch(/not one of the maintainer's interim pages/);
     for (const name of ["volunteer_exclusions_v1.json", "maintainer_decided.json", "ai_flags.json"]) {
       const s = sidecars();
       delete (s as Record<string, unknown>)[name];

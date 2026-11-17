@@ -196,7 +196,15 @@ export function maintainerDecidedProblems(raw: unknown): string[] {
   return out;
 }
 
-export function goldProblems(raw: unknown, pages: Map<string, LinePage>, queued: Set<string>): string[] {
+/**
+ * The pages gold may come from: the maintainer's interim pages (his decision of 2026-11-18, gold source (c)), named by
+ * the exclusions file with reason "interim". Dev top-up pages would need registered line items of their own.
+ */
+export function goldPages(raw: ExclusionsFile): Set<string> {
+  return new Set((raw.pages as unknown[]).flatMap((p) => (typeof p === "object" && p !== null && (p as { reason?: string }).reason === "interim" ? [(p as { page_key: string }).page_key] : [])));
+}
+
+export function goldProblems(raw: unknown, pages: Map<string, LinePage>, queued: Set<string>, allowed: Set<string>): string[] {
   if (!isObj(raw)) return [`${GOLD_FILE} must be a JSON object`];
   if (raw.schema !== GOLD_SCHEMA) return [`${GOLD_FILE}: schema must be ${GOLD_SCHEMA}`];
   if (!Array.isArray(raw.lines)) return [`${GOLD_FILE}: lines must be a list`];
@@ -216,6 +224,7 @@ export function goldProblems(raw: unknown, pages: Map<string, LinePage>, queued:
     at.add(where);
     // A gold line's page is never queued: its answer would otherwise also be a volunteer reference.
     if (queued.has(g.page_key)) out.push(`${lat}: ${g.page_key} is a volunteer page; gold comes from pages volunteers are never given`);
+    else if (!allowed.has(g.page_key)) out.push(`${lat}: ${g.page_key} is not one of the maintainer's interim pages, the only gold source`);
     const page = pages.get(g.page_key);
     if (!page) out.push(`${lat}: ${g.page_key} is not in ${LINE_ITEMS_FILE}`);
     else if (g.image_sha256 !== page.image_sha256) out.push(`${lat}: image_sha256 is not the page's`);
