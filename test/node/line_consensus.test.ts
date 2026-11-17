@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerKey, goldHit, neededOf, outcome, standing, type Vote } from "../../src/tasks/line_label/consensus";
+import { answerKey, goldHit, normalizeForAgreement, neededOf, outcome, standing, type Vote } from "../../src/tasks/line_label/consensus";
 
 const PREFILL = "שלום  עולם";
 let t = 0;
@@ -9,6 +9,18 @@ const vote = (reviewerId: string, value: Vote["value"], text: string | null = nu
   text,
   counts,
   firstAt: new Date(Date.UTC(2026, 10, 18, 0, 0, t++)).toISOString(),
+});
+
+describe("eval's norm (§3)", () => {
+  it("deletes bidi formatting, maps every White_Space to a space, collapses and strips", () => {
+    expect(normalizeForAgreement("\u200f א\u00a0\u2003ב\u0085ג\u202a\t ")).toBe("א ב ג");
+    expect(normalizeForAgreement("א\u0085ב")).toBe("א ב");
+  });
+  it("folds nothing else: niqqud, geresh, ZWJ and BOM stay", () => {
+    expect(normalizeForAgreement("שָׁלוֹם")).not.toBe(normalizeForAgreement("שלום"));
+    expect(normalizeForAgreement("צ'")).not.toBe(normalizeForAgreement("צ׳"));
+    expect(normalizeForAgreement("א\ufeffב")).toBe("א\ufeffב");
+  });
 });
 
 describe("answer keys", () => {

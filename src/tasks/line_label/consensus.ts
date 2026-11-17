@@ -18,12 +18,22 @@ export const LINE_VALUES = ["correct", "edit", "unreadable", "not_on_page", "pri
 export type LineValue = (typeof LINE_VALUES)[number];
 export const TEXT_VALUES: readonly LineValue[] = ["edit", "print_has_niqqud"];
 
+/** Invisible bidi formatting characters, deleted before comparing (eval §3 step 2). */
+const BIDI_FORMAT = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/gu;
+
 /**
- * PENDING eval's amendment: NFC, whitespace runs folded to one space, ends trimmed. Replaced with eval's exact
- * definition before any export is used as a reference.
+ * eval's `norm(s)` (heocr-restricted-eval preregistration/midcentury_volunteers_2026-11-18, §3), in its order: NFC;
+ * delete U+200E, U+200F, U+061C, U+202A-U+202E and U+2066-U+2069; every White_Space character becomes U+0020; runs
+ * of spaces collapse to one; strip both ends. Nothing else is folded (niqqud, punctuation, geresh, digits, brackets
+ * are compared as typed).
  */
 export function normalizeForAgreement(text: string): string {
-  return text.normalize("NFC").replace(/\s+/gu, " ").trim();
+  return text
+    .normalize("NFC")
+    .replace(BIDI_FORMAT, "")
+    .replace(/\p{White_Space}/gu, " ")
+    .replace(/ {2,}/gu, " ")
+    .replace(/^ +| +$/gu, "");
 }
 
 export interface Answer {
