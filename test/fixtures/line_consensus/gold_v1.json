@@ -1,0 +1,429 @@
+{
+ "schema": "midcentury_gold.v1",
+ "lines": [
+  {
+   "gold_id": "g00",
+   "page_key": "plenary:K9_9#p9",
+   "i": 0,
+   "box": [
+    100,
+    60,
+    1700,
+    160
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 0 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 0 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g01",
+   "page_key": "plenary:K9_9#p9",
+   "i": 1,
+   "box": [
+    100,
+    180,
+    1700,
+    280
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 1 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 1 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g02",
+   "page_key": "plenary:K9_9#p9",
+   "i": 2,
+   "box": [
+    100,
+    300,
+    1700,
+    400
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 3 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "2",
+    "to": "3"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 2 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g03",
+   "page_key": "plenary:K9_9#p9",
+   "i": 3,
+   "box": [
+    100,
+    420,
+    1700,
+    520
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 3 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 3 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g04",
+   "page_key": "plenary:K9_9#p9",
+   "i": 4,
+   "box": [
+    100,
+    540,
+    1700,
+    640
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 4 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 4 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g05",
+   "page_key": "plenary:K9_9#p9",
+   "i": 5,
+   "box": [
+    100,
+    660,
+    1700,
+    760
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 6 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "5",
+    "to": "6"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 5 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g06",
+   "page_key": "plenary:K9_9#p9",
+   "i": 6,
+   "box": [
+    100,
+    780,
+    1700,
+    880
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 6 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 6 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g07",
+   "page_key": "plenary:K9_9#p9",
+   "i": 7,
+   "box": [
+    100,
+    900,
+    1700,
+    1000
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 7 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 7 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g08",
+   "page_key": "plenary:K9_9#p9",
+   "i": 8,
+   "box": [
+    100,
+    1020,
+    1700,
+    1120
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 9 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "8",
+    "to": "9"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 8 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g09",
+   "page_key": "plenary:K9_9#p9",
+   "i": 9,
+   "box": [
+    100,
+    1140,
+    1700,
+    1240
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 9 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 9 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g10",
+   "page_key": "plenary:K9_9#p9",
+   "i": 10,
+   "box": [
+    100,
+    1260,
+    1700,
+    1360
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 10 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 10 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g11",
+   "page_key": "plenary:K9_9#p9",
+   "i": 11,
+   "box": [
+    100,
+    1380,
+    1700,
+    1480
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 12 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "11",
+    "to": "12"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 11 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g12",
+   "page_key": "plenary:K9_9#p9",
+   "i": 12,
+   "box": [
+    100,
+    1500,
+    1700,
+    1600
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 12 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 12 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g13",
+   "page_key": "plenary:K9_9#p9",
+   "i": 13,
+   "box": [
+    100,
+    1620,
+    1700,
+    1720
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 13 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 13 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g14",
+   "page_key": "plenary:K9_9#p9",
+   "i": 14,
+   "box": [
+    100,
+    1740,
+    1700,
+    1840
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 15 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "14",
+    "to": "15"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 14 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g15",
+   "page_key": "plenary:K9_9#p9",
+   "i": 15,
+   "box": [
+    100,
+    1860,
+    1700,
+    1960
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 15 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 15 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g16",
+   "page_key": "plenary:K9_9#p9",
+   "i": 16,
+   "box": [
+    100,
+    1980,
+    1700,
+    2080
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 16 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 16 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g17",
+   "page_key": "plenary:K9_9#p9",
+   "i": 17,
+   "box": [
+    100,
+    2100,
+    1700,
+    2200
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 18 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "17",
+    "to": "18"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 17 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g18",
+   "page_key": "plenary:K9_9#p9",
+   "i": 18,
+   "box": [
+    100,
+    2220,
+    1700,
+    2320
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 18 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 18 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g19",
+   "page_key": "plenary:K9_9#p9",
+   "i": 19,
+   "box": [
+    100,
+    2340,
+    1700,
+    2440
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 19 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 19 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g20",
+   "page_key": "plenary:K9_9#p9",
+   "i": 20,
+   "box": [
+    100,
+    2460,
+    1700,
+    2560
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 21 בעמוד 9",
+   "planted_error": {
+    "kind": "digit_swap",
+    "from": "20",
+    "to": "21"
+   },
+   "answer": {
+    "action": "correct",
+    "text": "שורה 20 בעמוד 9"
+   }
+  },
+  {
+   "gold_id": "g21",
+   "page_key": "plenary:K9_9#p9",
+   "i": 21,
+   "box": [
+    100,
+    2580,
+    1700,
+    2680
+   ],
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "prefill_shown": "שורה 21 בעמוד 9",
+   "planted_error": null,
+   "answer": {
+    "action": "correct",
+    "text": "שורה 21 בעמוד 9"
+   }
+  }
+ ]
+}

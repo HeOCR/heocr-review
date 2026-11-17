@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 import { buildImportStatements } from "./scripts/lib/importsql";
 import { buildSubsetStatements, interimMembers } from "./scripts/lib/subset";
 import type { TaskImporter } from "./src/tasks/import";
+import { lineConsensusImporter } from "./src/tasks/line_consensus/importer";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
 import { pageReviewImporter } from "./src/tasks/page_review/importer";
 import { referenceAuditImporter } from "./src/tasks/reference_audit/importer";
@@ -23,7 +24,20 @@ function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number
       },
     ]),
   );
-  return buildImportStatements(bundle, media, { minReviewers, importedAt });
+  return buildImportStatements(bundle, media, { minReviewers, importedAt, after: importer.afterImportSql?.(bundle.batch.id, importedAt) });
+}
+
+const LINE_CONSENSUS = "test/fixtures/line_consensus";
+
+/** The volunteer line batch (fixture line items, exclusions, maintainer-decided record, hints and gold). */
+function lineConsensusBatch(): string[] {
+  const side = (n: string) => `${LINE_CONSENSUS}/${n}`;
+  return fixtureBatch(lineConsensusImporter, side("line_items_v1.json"), 1, "2026-11-18T12:00:00.000Z", {
+    "volunteer_exclusions_v1.json": side("volunteer_exclusions_v1.json"),
+    "maintainer_decided.json": side("maintainer_decided.json"),
+    "ai_flags.json": side("ai_flags.json"),
+    "gold_v1.json": side("gold_v1.json"),
+  });
 }
 
 const PAGE_REVIEW = "test/fixtures/page_review";
@@ -74,6 +88,7 @@ export default defineConfig(async () => {
                   TEST_FIXTURE_SQL: fixtureStatements(1),
                   TEST_PAGE_REVIEW_AI_SQL: pageReviewWithAiFlags(1),
                   TEST_SUBSET_SQL: pageReviewSubset(),
+                  TEST_LINE_CONSENSUS_SQL: lineConsensusBatch(),
                 },
               },
             }),

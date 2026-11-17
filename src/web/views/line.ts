@@ -24,7 +24,7 @@ const MAX_SEGMENTS = 4;
  * is wrapped into up to four stacked pieces, right piece first (Hebrew reads right to left), with a little overlap
  * so no letter is lost at a cut. Every piece shows the same image file, so the browser fetches it once.
  */
-function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, onLoad: () => void): HTMLElement {
+export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, onLoad: () => void): HTMLElement {
   const W = img.width;
   const H = img.height;
   const lh = Math.max(1, (box[3] - box[1]) * H);
@@ -66,7 +66,7 @@ function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, o
 }
 
 /** The candidate with attention runs marked; odd spaces (doubled, leading, trailing) and invisible characters shown. */
-function candidateNodes(runs: AttentionRun[]): Node[] {
+export function candidateNodes(runs: AttentionRun[]): Node[] {
   const chars = Array.from(runs.map((r) => r.text).join(""));
   const odd = chars.map((c, i) => c === " " && (i === 0 || i === chars.length - 1 || chars[i - 1] === " " || chars[i + 1] === " "));
   let at = 0;

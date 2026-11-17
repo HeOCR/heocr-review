@@ -121,9 +121,18 @@ In one `--file` run, in this order:
    text, dates and `terms_version` (the CC0 dedication) stay as they are;
 3. if the choice is delete: delete the class U decisions (superseded ones too);
 4. delete the reviewer's `drafts`, `skips`, `assignments`, `consent_events` and their `rate_limits` rows (key suffix
-   `:<pseudonym>`);
+   `:<pseudonym>`). Their `agreement_exclusions` rows go with the record (`ON DELETE CASCADE`);
 5. delete the `reviewers` row. D1 enforces the foreign keys, so this fails if anything still points at it. A failure
    means stop. Don't fix forward: report to heocr-lead.
+
+**Volunteer line batches** (task type `line_consensus`, `migrations/0005_line_consensus.sql`):
+- A volunteer's gold-line decisions decide whether their other decisions count. When unlinking, move the gold
+  decisions to `deleted-N` with the rest, so the placeholder keeps the volunteer's standing. When deleting, delete them
+  with the rest.
+- Then recompute the line states of the lines they decided. Toggling the admin exclusion switch on `deleted-N` and back
+  recomputes them; with the delete choice, run that on any counting reviewer who decided the same lines. Lines that
+  lose a counted decision go back to the queue.
+- `maintainer_decisions` holds only the maintainer's decisions, never a volunteer's.
 
 Before the production run, rehearse the same file on the preview database (`--env=preview`) with a test reviewer.
 

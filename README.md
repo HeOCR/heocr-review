@@ -93,7 +93,9 @@ When more than one batch is open, the app starts with a task picker (`/app/#b/<b
 Writes need a session and a same-origin JSON request. Per-reviewer fixed-window limits apply: 60 decisions or skips
 a minute and 3,000 a day, 300 reads a minute, and 20 sign-ins a minute per client (its address is stored only as a
 keyed hash). Bodies are capped at 16 KB and edited text at 1,000 characters. Control characters and malformed
-display names are refused.
+display names are refused. Volunteer lines fall under the same per-reviewer limits. A line can be decided only by a
+reviewer it was served to, and only once. An admin can exclude a reviewer from agreement in a batch (their decisions are
+kept, never counted) or block the account.
 
 ## Develop
 
@@ -202,6 +204,34 @@ confirm with every line excluded, which leaves no reference line), it serves the
 queue serves those pages in rank order, and progress counts strata. Only the subset tables change
 (`migrations/0003_subsets.sql`): proposals, content hashes, decisions and exports are untouched, and decisions made in
 the filter are ordinary decisions on the same proposals.
+
+### Volunteer line review (preview only)
+
+```sh
+npm run maintainer-decided -- --out <bundle dir> --target production --yes-production   # read-only: page keys only
+npm run import -- --task line_consensus --bundle <bundle dir> --target local|preview
+```
+
+Community volunteers review the mid-century pages one printed line at a time (task type `line_consensus`; maintainer's
+decision and eval's amendment of 2026-11-18, heocr-restricted-eval `preregistration/midcentury_volunteers_2026-11-18`).
+The bundle holds eval's registered `line_items_v1.json` and `volunteer_exclusions_v1.json` (their sha256 must be the
+registered ones, `REGISTERED_SHA256` in `src/tasks/line_consensus/schema.ts`), `maintainer_decided.json` (the pages the
+maintainer had decided, which keep his references), the batch's `ai_flags.json`, `pages/` and, once registered,
+`gold_v1.json`.
+
+- **Routing:** every line with a box goes to two volunteers who never see each other's decision. A disagreement sends
+  that line alone to a third. Three different answers send it to the maintainer, who gets it from the pre-fill only.
+  Lines with no box go straight to the maintainer.
+- **Agreement:** eval's `agreement.py`, ported in `src/tasks/line_consensus/consensus.ts` and tested on its cases.
+- **Gold lines:** come from pages volunteers are never given. One in 10 over a volunteer's first 100 lines, then one
+  in 20, at a point seeded by `sha256("gold|" + reviewer_id)`, each at most once.
+- **Who counts:** a volunteer's decisions count once they have 20 gold lines at 95% or better, past ones included.
+  Below that, or excluded by an admin's switch, none count and their lines reopen.
+- **Final decisions:** a decision is final, and the progress shown counts only the volunteer's own lines.
+- **The browser cuts each line** from the page image, so there is no file per line.
+- **The export** is `line_consensus_decisions.v0`, which eval's ingest recomputes with `agreement.py`.
+- **Off unless switched on:** the whole task is off unless `CONSENSUS_ENABLED=1` (set for preview in
+  `wrangler.jsonc`), until the maintainer approves the privacy text for gold lines and accuracy.
 
 ## Decisions out
 

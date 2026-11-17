@@ -1,0 +1,470 @@
+{
+ "schema": "midcentury_line_items.v1",
+ "batch_manifest_sha256": "a6ac294f10f53d2dc9fcf17ff2ecc9217c3b96e57238b051de666072a17b767a",
+ "rule": "fixture",
+ "stats": {},
+ "pages": [
+  {
+   "page_key": "plenary:K1_1#p1",
+   "image": "eval-domains/capture/midcentury/pages/plenary_K1_1_p0001.png",
+   "image_sha256": "98ed8b010090f79f67cf1359d306aa839bb34666d3f4d4395980e8fc59a86214",
+   "image_size": [
+    1888,
+    2867
+   ],
+   "prefill_source": "pdf_text_layer pdftotext -raw",
+   "prefill_from_stock": false,
+   "lines": [
+    {
+     "i": 0,
+     "prefill": "שורה 0 בעמוד 1",
+     "box": [
+      100,
+      100,
+      1700,
+      160
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": true,
+     "bidi_risk": false
+    },
+    {
+     "i": 1,
+     "prefill": "שורה 1 בעמוד 1",
+     "box": [
+      100,
+      180,
+      1700,
+      240
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 2,
+     "prefill": "שורה 2 בעמוד 1",
+     "box": [
+      100,
+      260,
+      1700,
+      320
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 3,
+     "prefill": "שורה בלי תיבה",
+     "box": null,
+     "box_status": "no_match",
+     "match": null,
+     "tier_a": true,
+     "bidi_risk": false
+    },
+    {
+     "i": 4,
+     "prefill": "",
+     "box": null,
+     "box_status": "blank",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
+    }
+   ]
+  },
+  {
+   "page_key": "reshumot_scanned:sefer_hachukim_2#p3",
+   "image": "eval-domains/capture/midcentury/pages/reshumot_scanned_sefer_hachukim_2_p0003.png",
+   "image_sha256": "d110b73be5d71991afbada6221a5d639bea69c811d27987b5bb023aad51ec881",
+   "image_size": [
+    1888,
+    2867
+   ],
+   "prefill_source": "pdf_text_layer pdftotext -raw",
+   "prefill_from_stock": false,
+   "lines": [
+    {
+     "i": 0,
+     "prefill": "שורה 0 בעמוד 3",
+     "box": [
+      100,
+      100,
+      1700,
+      160
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": true,
+     "bidi_risk": false
+    },
+    {
+     "i": 1,
+     "prefill": "שורה 1 בעמוד 3",
+     "box": [
+      100,
+      180,
+      1700,
+      240
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    }
+   ]
+  },
+  {
+   "page_key": "plenary:K9_9#p9",
+   "image": "eval-domains/capture/midcentury/pages/plenary_K9_9_p0009.png",
+   "image_sha256": "95daa2c3c0b31fbac438630a3c4548d53ca4819dff3a0b5bfb97569895172310",
+   "image_size": [
+    1888,
+    2867
+   ],
+   "prefill_source": "pdf_text_layer pdftotext -raw",
+   "prefill_from_stock": false,
+   "lines": [
+    {
+     "i": 0,
+     "prefill": "שורה 0 בעמוד 9",
+     "box": [
+      100,
+      60,
+      1700,
+      160
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": true,
+     "bidi_risk": false
+    },
+    {
+     "i": 1,
+     "prefill": "שורה 1 בעמוד 9",
+     "box": [
+      100,
+      180,
+      1700,
+      280
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 2,
+     "prefill": "שורה 2 בעמוד 9",
+     "box": [
+      100,
+      300,
+      1700,
+      400
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 3,
+     "prefill": "שורה 3 בעמוד 9",
+     "box": [
+      100,
+      420,
+      1700,
+      520
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 4,
+     "prefill": "שורה 4 בעמוד 9",
+     "box": [
+      100,
+      540,
+      1700,
+      640
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 5,
+     "prefill": "שורה 5 בעמוד 9",
+     "box": [
+      100,
+      660,
+      1700,
+      760
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 6,
+     "prefill": "שורה 6 בעמוד 9",
+     "box": [
+      100,
+      780,
+      1700,
+      880
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 7,
+     "prefill": "שורה 7 בעמוד 9",
+     "box": [
+      100,
+      900,
+      1700,
+      1000
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 8,
+     "prefill": "שורה 8 בעמוד 9",
+     "box": [
+      100,
+      1020,
+      1700,
+      1120
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 9,
+     "prefill": "שורה 9 בעמוד 9",
+     "box": [
+      100,
+      1140,
+      1700,
+      1240
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 10,
+     "prefill": "שורה 10 בעמוד 9",
+     "box": [
+      100,
+      1260,
+      1700,
+      1360
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 11,
+     "prefill": "שורה 11 בעמוד 9",
+     "box": [
+      100,
+      1380,
+      1700,
+      1480
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 12,
+     "prefill": "שורה 12 בעמוד 9",
+     "box": [
+      100,
+      1500,
+      1700,
+      1600
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 13,
+     "prefill": "שורה 13 בעמוד 9",
+     "box": [
+      100,
+      1620,
+      1700,
+      1720
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 14,
+     "prefill": "שורה 14 בעמוד 9",
+     "box": [
+      100,
+      1740,
+      1700,
+      1840
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 15,
+     "prefill": "שורה 15 בעמוד 9",
+     "box": [
+      100,
+      1860,
+      1700,
+      1960
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 16,
+     "prefill": "שורה 16 בעמוד 9",
+     "box": [
+      100,
+      1980,
+      1700,
+      2080
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 17,
+     "prefill": "שורה 17 בעמוד 9",
+     "box": [
+      100,
+      2100,
+      1700,
+      2200
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 18,
+     "prefill": "שורה 18 בעמוד 9",
+     "box": [
+      100,
+      2220,
+      1700,
+      2320
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 19,
+     "prefill": "שורה 19 בעמוד 9",
+     "box": [
+      100,
+      2340,
+      1700,
+      2440
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 20,
+     "prefill": "שורה 20 בעמוד 9",
+     "box": [
+      100,
+      2460,
+      1700,
+      2560
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    },
+    {
+     "i": 21,
+     "prefill": "שורה 21 בעמוד 9",
+     "box": [
+      100,
+      2580,
+      1700,
+      2680
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": false,
+     "bidi_risk": false
+    }
+   ]
+  },
+  {
+   "page_key": "reshumot_scanned:kovetz_hatakanot_4#p4",
+   "image": "eval-domains/capture/midcentury/pages/reshumot_scanned_kovetz_hatakanot_4_p0004.png",
+   "image_sha256": "f2e93cde8ac75476f44ff9ecfd795544e1b4fbf663ea184a6d15298d24cdfec6",
+   "image_size": [
+    1888,
+    2867
+   ],
+   "prefill_source": "pdf_text_layer pdftotext -raw",
+   "prefill_from_stock": false,
+   "lines": [
+    {
+     "i": 0,
+     "prefill": "שורה 0 בעמוד 4",
+     "box": [
+      100,
+      100,
+      1700,
+      160
+     ],
+     "box_status": "matched",
+     "match": 100.0,
+     "tier_a": true,
+     "bidi_risk": false
+    }
+   ]
+  }
+ ]
+}

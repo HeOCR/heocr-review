@@ -10,6 +10,11 @@ export interface Env {
   REVIEWER_ID_SECRET?: string;
   /** Secret or var: comma-separated reviewer ids (rv_...) that may see progress and export. */
   ADMIN_REVIEWER_IDS?: string;
+  /**
+   * "1" switches on volunteer line review (task type line_consensus): preview only, until the maintainer approves
+   * the privacy text for gold lines and accuracy.
+   */
+  CONSENSUS_ENABLED?: string;
   /** .dev.vars only. */
   DEV_AUTH_BYPASS?: string;
 }

@@ -15,6 +15,17 @@ import type { Env } from "./env";
 import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
+import {
+  afterLineDecision,
+  assertConsensusEnabled,
+  consensusProgress,
+  exportExtras,
+  isConsensus,
+  lineOpenTo,
+  nextLine,
+  setExclusion,
+  volunteerReport,
+} from "./consensus";
 import { LIMITS, clientKey, enforce, pruneRateLimits } from "./ratelimit";
 
 const PROVIDERS: Record<string, IdentityProvider> = { google: googleProvider, dev: devProvider };
@@ -159,12 +170,13 @@ export async function batches(ctx: Ctx): Promise<Response> {
   for (const b of list) {
     const type = taskType(b.taskType);
     if (!type) continue;
+    if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     out.push({
       id: b.id,
       taskType: b.taskType,
       taskLabel: type.label,
       title: b.title,
-      progress: await progressFor(ctx.env.DB, b, reviewer.id, ctx.now),
+      progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now),
       subsets: await subsetsOf(ctx.env.DB, b.id),
     });
   }
@@ -174,6 +186,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
 async function openBatch(ctx: Ctx, id: string) {
   const batch = await getBatch(ctx.env.DB, id);
   if (!batch || batch.status !== "open" || !taskType(batch.taskType)) throw new HttpError(404, "not_found");
+  if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   return batch;
 }
 
@@ -181,6 +194,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
+  if (isConsensus(batch)) return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now));
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
   const subsetId = new URL(ctx.request.url).searchParams.get("subset");
   let filter = null;
@@ -196,6 +210,11 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   const proposal = Number.isSafeInteger(id) ? await getProposal(ctx.env.DB, id) : null;
   if (!proposal || !proposal.active) throw new HttpError(404, "not_found");
   const batch = await openBatch(ctx, proposal.batchId);
+  // A volunteer line: only one this reviewer was served (or decided); the maintainer's: only one that went to them.
+  if (isConsensus(batch)) {
+    if (!(await lineOpenTo(ctx.env.DB, proposal, reviewerId, isAdmin(ctx.env, reviewerId)))) throw new HttpError(409, "not_open", "this line is not open to you");
+    return { proposal, batch };
+  }
   // A gated page (a reserve, a blind second pass) is not shown or decided by link before it opens to this reviewer,
   // unless they already decided it (going back to change a decision).
   if (!(await isOpenTo(ctx.env.DB, proposal, reviewerId, ctx.now))) {
@@ -243,6 +262,8 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     .prepare("SELECT id, value, text, proposal_sha256 FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
     .bind(proposal.id, reviewer.id)
     .first<{ id: string; value: string; text: string | null; proposal_sha256: string }>();
+  // Volunteer lines: a decision is final (only a reviewer's first decision on a line could count).
+  if (existing && isConsensus(batch)) throw new HttpError(409, "decided", "this line is decided");
   let decisionId: string;
   if (
     existing &&
@@ -269,6 +290,10 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   }
   // The page is decided: its draft is done with (page_review).
   await db.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
+  if (isConsensus(batch)) {
+    await afterLineDecision(db, batch, proposal, decisionId, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now);
+    return json({ decisionId, value: normalized.value, text: normalized.text, progress: await consensusProgress(db, batch, reviewer.id, true) });
+  }
   return json({
     decisionId,
     value: normalized.value,
@@ -329,6 +354,7 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
   await ctx.env.DB.prepare("INSERT OR IGNORE INTO skips (reviewer_id, proposal_id, created_at) VALUES (?1, ?2, ?3)")
     .bind(reviewer.id, proposal.id, iso(ctx.now))
     .run();
+  if (isConsensus(batch)) return json({ ok: true, progress: await consensusProgress(ctx.env.DB, batch, reviewer.id, true) });
   return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
 }
 
@@ -353,8 +379,10 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
   await requireAdmin(ctx);
   const out = [];
   for (const batch of await listBatches(ctx.env.DB, false)) {
+    if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
-    const result = buildExport({ batch, ...rows, exportedAt: iso(ctx.now) });
+    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+    const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
     const perReviewer = new Map<string, number>();
     for (const d of rows.decisions) if (d.supersededAt === null) perReviewer.set(d.reviewerId, (perReviewer.get(d.reviewerId) ?? 0) + 1);
     out.push({
@@ -374,11 +402,40 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   await requireAdmin(ctx);
   const batch = await getBatch(ctx.env.DB, batchId);
   if (!batch) throw new HttpError(404, "not_found");
+  if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
-  const result = buildExport({ batch, ...rows, exportedAt: iso(ctx.now) });
+  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+  const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
   return json({
     counts: result.counts,
     problems: result.problems,
     files: { [result.decisionsFile.fileName]: result.decisionsFile.content, [result.ledgerFile.fileName]: result.ledgerFile.content },
   });
+}
+
+async function consensusBatch(ctx: Ctx, batchId: string) {
+  assertConsensusEnabled(ctx.env);
+  const batch = await getBatch(ctx.env.DB, batchId);
+  if (!batch || !isConsensus(batch)) throw new HttpError(404, "not_found");
+  return batch;
+}
+
+/** Admin: a volunteer batch's line states, and each volunteer's gold record and standing (never shown to volunteers). */
+export async function adminVolunteers(ctx: Ctx, batchId: string): Promise<Response> {
+  await requireAdmin(ctx);
+  const batch = await consensusBatch(ctx, batchId);
+  return json(await volunteerReport(ctx.env.DB, batch));
+}
+
+/** Admin: exclude a volunteer from agreement in a batch, or include them again ({excluded: boolean}). */
+export async function adminExclusion(ctx: Ctx, batchId: string, reviewerId: string): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const admin = await requireAdmin(ctx);
+  await enforce(ctx.env.DB, LIMITS.writeMinute, admin.id, ctx.now);
+  const batch = await consensusBatch(ctx, batchId);
+  const body = await readJson(ctx.request);
+  if (typeof body.excluded !== "boolean") throw new HttpError(400, "invalid_request", "excluded must be true or false");
+  if (!(await getReviewer(ctx.env.DB, reviewerId))) throw new HttpError(404, "not_found");
+  await setExclusion(ctx.env.DB, batch, reviewerId, body.excluded, ctx.now);
+  return json(await volunteerReport(ctx.env.DB, batch));
 }

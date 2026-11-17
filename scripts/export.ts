@@ -13,7 +13,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildExport, formatJson } from "../src/tasks/export";
-import { EXPORT_SQL, toBatch, toCredit, toDecision, toProposal, type BatchRow, type CreditRow, type DecisionRow, type ProposalRow } from "../src/tasks/rows";
+import { CONSENSUS_EXPORT_SQL, EXPORT_SQL, toBatch, toCredit, toDecision, toProposal, type BatchRow, type CreditRow, type DecisionRow, type ProposalRow } from "../src/tasks/rows";
 import { parseArgs, str, target } from "./lib/args";
 import { inline } from "./lib/sql";
 import { d1Query } from "./lib/wrangler";
@@ -31,6 +31,12 @@ function main(): void {
     proposals: one<ProposalRow>(EXPORT_SQL.proposals).map(toProposal),
     decisions: one<DecisionRow>(EXPORT_SQL.decisions).map(toDecision),
     credits: one<CreditRow>(EXPORT_SQL.credits).map(toCredit),
+    ...(batchRow.task_type === "line_consensus"
+      ? {
+          exclusions: one<{ reviewer_id: string; excluded_at: string }>(CONSENSUS_EXPORT_SQL.exclusions).map((r) => ({ reviewerId: r.reviewer_id, excludedAt: r.excluded_at })),
+          maintainerDecisions: one<{ decision_id: string }>(CONSENSUS_EXPORT_SQL.maintainer).map((r) => r.decision_id),
+        }
+      : {}),
     exportedAt: new Date().toISOString(),
   });
   if (result.problems.length) throw new Error(`the export does not validate:\n  ${result.problems.slice(0, 20).join("\n  ")}`);

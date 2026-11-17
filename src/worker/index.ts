@@ -24,6 +24,8 @@ const ROUTES: [string, RegExp, Handler][] = [
   ["DELETE", /^\/api\/proposals\/(\d+)\/draft$/, (c, id) => api.clearDraft(c, int(id!))],
   ["GET", /^\/api\/admin\/progress$/, (c) => api.adminProgress(c)],
   ["GET", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/export$/, (c, b) => api.adminExport(c, b!)],
+  ["GET", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/volunteers$/, (c, b) => api.adminVolunteers(c, b!)],
+  ["PUT", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/reviewers\/(rv_[0-9a-f]{8})\/exclusion$/, (c, b, r) => api.adminExclusion(c, b!, r!)],
 ];
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
