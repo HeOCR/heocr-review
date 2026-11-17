@@ -1,0 +1,12 @@
+{
+ "schema": "midcentury_volunteer_exclusions.v1",
+ "batch_manifest_sha256": "a6ac294f10f53d2dc9fcf17ff2ecc9217c3b96e57238b051de666072a17b767a",
+ "rule": "fixture",
+ "count": 1,
+ "pages": [
+  {
+   "page_key": "plenary:K9_9#p9",
+   "reason": "interim"
+  }
+ ]
+}

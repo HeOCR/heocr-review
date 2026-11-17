@@ -89,6 +89,14 @@ export interface ExportFile {
   content: unknown;
 }
 
+/** What an export may need beyond the decisions (line_consensus: who is excluded, which are maintainer decisions). */
+export interface ExportExtra {
+  exportedAt: string;
+  exclusions: { reviewerId: string; excludedAt: string }[];
+  /** Ids of decisions an admin made in a volunteer batch (migrations/0005_line_consensus.sql). */
+  maintainerDecisions: string[];
+}
+
 export interface TaskType {
   id: string;
   label: Label;
@@ -98,7 +106,7 @@ export interface TaskType {
   toView(proposal: ProposalRecord): ProposalViewBody;
   normalizeDecision(proposal: ProposalRecord, value: string, text: unknown): NormalizedDecision;
   /** The consumer's decisions file, built from the resolved proposals. */
-  exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[]): ExportFile;
+  exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[], extra?: ExportExtra): ExportFile;
   /** Problems with an exported decisions file (empty when valid), checked against the batch's proposals. */
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[];
 }

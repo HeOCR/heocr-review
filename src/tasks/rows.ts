@@ -101,6 +101,13 @@ export function toCredit(r: CreditRow): Credit {
 }
 
 /** The three export queries for a batch; `?1` is the batch id. */
+/** line_consensus: the export's extra inputs (migrations/0005_line_consensus.sql). */
+export const CONSENSUS_EXPORT_SQL = {
+  exclusions: "SELECT reviewer_id, excluded_at FROM agreement_exclusions WHERE batch_id = ?1",
+  maintainer: `SELECT m.decision_id FROM maintainer_decisions m JOIN decisions d ON d.id = m.decision_id
+    JOIN proposals p ON p.id = d.proposal_id WHERE p.batch_id = ?1`,
+};
+
 export const EXPORT_SQL = {
   batch: `${BATCH_SQL} WHERE id = ?1`,
   proposals: `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.batch_id = ?1 ORDER BY p.rank`,

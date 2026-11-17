@@ -17,6 +17,7 @@ import { ApiFailure, del, get, post, put } from "../api";
 import { h, mount } from "../dom";
 import { failureHandler, prefetch, progressBar, type ReviewHooks, type ReviewScreen } from "./common";
 import { viewer } from "./viewer";
+import { CONVENTIONS } from "./conventions";
 
 type Action = "correct" | "edit" | "print_has_niqqud" | "not_on_page" | "unreadable" | "merge" | "split" | "added";
 
@@ -70,21 +71,6 @@ const ACTION_LABEL: Record<Action, string> = {
 };
 
 /** The typing conventions (eval, 2026-11-12): what to type for marks that have no key of their own. */
-const CONVENTIONS: [string, string][] = [
-  ["מקף ומקף עליון (גם מקף בסוף שורה, כמו שהוא מודפס)", "-"],
-  ["קו מפריד בין מילים, עם רווחים", "– (כפתור, או Alt+-)"],
-  ["גרש וגרשיים", "' ו־\" מהמקלדת"],
-  ["מירכאות מכל צורה („ \" “ ” וגם בודדות)", "\" ו־'"],
-  ["שורת נקודות בטבלה או בתוכן עניינים, בכל אורך", "... (שלוש נקודות בדיוק)"],
-  ["מספרים ותאריכים", "כמו שמודפס, למשל 18.11.1952"],
-  ["סוגריים", "כמו שמקלידים רגיל, (א); לא להעתיק סוגריים הפוכים"],
-  ["ניקוד בשורה", "לא מקלידים ניקוד; מסמנים \"ניקוד בדפוס\""],
-  ["מילים במרווח (ר ח ב ה)", "בלי המרווחים: רחבה"],
-  [
-    "הערת שוליים",
-    "כשורות נפרדות (שורה לכל שורה מודפסת), מיד לפני השורה שלידה היא עומדת, ולהסיר אותה מהשורה הראשית. חסרה? + שורה (Alt+A, נוספת מתחת) והזזה בכפתורי ↑/↓ (Alt+↑/↓)",
-  ],
-];
 
 /** Unsaved corrections per page while the app is open (memory only, gone on reload). */
 const drafts = new Map<string, Draft>();

@@ -13,6 +13,8 @@ declare global {
       TEST_PAGE_REVIEW_AI_SQL: string[];
       /** The page review fixture's interim subset (subset tables only). */
       TEST_SUBSET_SQL: string[];
+      /** The volunteer line batch (line_consensus). */
+      TEST_LINE_CONSENSUS_SQL: string[];
     }
   }
 }

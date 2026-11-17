@@ -1,6 +1,6 @@
 /** JSON shapes shared by the Worker API and the frontend. */
 import type { AttentionRun } from "./attention";
-import type { ImageView } from "./media";
+import type { Box, ImageView } from "./media";
 
 export interface ConfigResponse {
   environment: string;
@@ -95,7 +95,28 @@ export interface PageReviewView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView;
+/** One line of a volunteer line review (task type line_consensus): the crop, the pre-fill and the "look here" hints. */
+export interface LineConsensusView {
+  kind: "line_consensus";
+  /** The pre-fill line shown (the registered line; never AI or vendor text). */
+  prefill: string;
+  tierA: boolean;
+  bidiRisk: boolean;
+  /** Claude's hints for this line (eval's registered ai_flags.json): where to look, never a reading. */
+  aiDisagrees: boolean;
+  aiMissingNear: boolean;
+  series: { id: string; label: Label };
+  attribution: string;
+  textLicense: string;
+  /** The page image with the line's box, from which the browser cuts the line; null for a line with no box. */
+  crop: ImageView | null;
+  /** The band around the line (a little more than a line above and below), as fractions of the page. */
+  context: Box | null;
+  /** The whole page, with the line's box. */
+  page: ImageView | null;
+}
+
+export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView;
 
 export interface DecisionOption {
   value: string;
@@ -141,6 +162,11 @@ export interface Progress {
   skippedByMe: number;
   /** Proposals still open to this reviewer (not decided by them, not skipped, below the target). */
   remainingForMe: number;
+  /**
+   * Volunteer batches (line_consensus): only the reviewer's own count is real. total, covered and remainingForMe
+   * are 0, so nothing about other volunteers' work is shown.
+   */
+  ownOnly?: boolean;
 }
 
 export interface BatchSummary {

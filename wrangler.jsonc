@@ -38,7 +38,9 @@
       "preview_urls": false,
       "vars": {
         "ENVIRONMENT": "preview",
-        "GOOGLE_CLIENT_ID": ""
+        "GOOGLE_CLIENT_ID": "",
+        // Volunteer line review: preview only until the maintainer approves its privacy text.
+        "CONSENSUS_ENABLED": "1"
       },
       "d1_databases": [
         {

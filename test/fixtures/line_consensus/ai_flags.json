@@ -1,0 +1,17 @@
+{
+ "schema": "heocr_midcentury_ai_flags.v0",
+ "batch_id": "newprinted_midcentury_v0",
+ "model": "fixture",
+ "created_at": "2026-11-14T00:00:00Z",
+ "manifest_sha256": "a6ac294f10f53d2dc9fcf17ff2ecc9217c3b96e57238b051de666072a17b767a",
+ "pages": [
+  {
+   "unit_id": "plenary:K1_1",
+   "page": 1,
+   "flagged_i": [
+    1
+   ],
+   "missing_near_i": []
+  }
+ ]
+}

@@ -12,10 +12,13 @@ export function contentSha256(contentKey: unknown): string {
  * new content hash, so earlier decisions on it become stale (kept, never exported). Proposals that the new file
  * no longer has are deactivated, not deleted.
  */
+/** Above this many proposals the import deactivates the batch first instead of listing every id it keeps. */
+export const LARGE_BATCH = 2000;
+
 export function buildImportStatements(
   bundle: ImportBundle,
   media: Map<string, ProposalMedia>,
-  opts: { minReviewers: number; importedAt: string },
+  opts: { minReviewers: number; importedAt: string; after?: string[] },
 ): string[] {
   const { batch } = bundle;
   const b = lit(batch.id);
@@ -36,11 +39,19 @@ export function buildImportStatements(
   ON CONFLICT (batch_id, external_id) DO UPDATE SET item_id = excluded.item_id, category = excluded.category, confidence = excluded.confidence, rank = excluded.rank, payload_json = excluded.payload_json, media_json = excluded.media_json, content_sha256 = excluded.content_sha256, active = 1, gate_kind = excluded.gate_kind, gate_ref = excluded.gate_ref;`,
     );
   }
-  const keep = bundle.proposals.map((p) => lit(p.externalId)).join(", ");
-  out.push(`UPDATE proposals SET active = 0 WHERE batch_id = ${b}${keep ? ` AND external_id NOT IN (${keep})` : ""};`);
+  // Proposals the bundle no longer has are deactivated. A list of every id would pass D1's statement size limit for a
+  // large batch (line_consensus has 18,000 lines), so there the batch is deactivated first and each upsert above
+  // (active = 1) brings its proposal back, in the same file.
+  if (bundle.proposals.length > LARGE_BATCH) {
+    out.splice(1 + bundle.items.length, 0, `UPDATE proposals SET active = 0 WHERE batch_id = ${b};`);
+  } else {
+    const keep = bundle.proposals.map((p) => lit(p.externalId)).join(", ");
+    out.push(`UPDATE proposals SET active = 0 WHERE batch_id = ${b}${keep ? ` AND external_id NOT IN (${keep})` : ""};`);
+  }
+  out.push(...(opts.after ?? []));
   return out;
 }
 
-export function buildImportSql(bundle: ImportBundle, media: Map<string, ProposalMedia>, opts: { minReviewers: number; importedAt: string }): string {
+export function buildImportSql(bundle: ImportBundle, media: Map<string, ProposalMedia>, opts: { minReviewers: number; importedAt: string; after?: string[] }): string {
   return buildImportStatements(bundle, media, opts).join("\n") + "\n";
 }

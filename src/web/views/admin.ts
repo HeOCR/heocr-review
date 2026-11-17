@@ -1,4 +1,4 @@
-import { get } from "../api";
+import { get, put } from "../api";
 import { h } from "../dom";
 
 interface AdminBatch {
@@ -22,6 +22,74 @@ function download(name: string, content: unknown): void {
   }, 1000);
 }
 
+interface VolunteerRow {
+  id: string;
+  lines: number;
+  goldSeen: number;
+  goldHits: number;
+  accuracy: number | null;
+  plantedSeen: number;
+  plantedHits: number;
+  standing: string;
+  excludedAt: string | null;
+}
+
+interface VolunteerReport {
+  states: Record<string, number>;
+  volunteers: VolunteerRow[];
+}
+
+/**
+ * A volunteer batch (line_consensus): line states, and per volunteer their gold record and standing, with the
+ * switch that excludes a volunteer from agreement. Admins only; never shown to volunteers.
+ */
+function volunteerPanel(batchId: string): HTMLElement {
+  const box = h("div", { class: "volunteers" }, h("p", { class: "small muted" }, "Loading volunteers…"));
+  const path = `/api/admin/batches/${encodeURIComponent(batchId)}`;
+  const draw = (r: VolunteerReport) => {
+    const pct = (v: number | null) => (v === null ? "–" : `${Math.round(v * 1000) / 10}%`);
+    box.replaceChildren(
+      h("p", { class: "small" }, "Line states: ", Object.entries(r.states).map(([k, v]) => `${k} ${v}`).join(" · ") || "none"),
+      h(
+        "table",
+        { class: "small" },
+        h("thead", {}, h("tr", {}, ...["Reviewer", "Lines", "Gold", "Accuracy", "Planted", "Standing", ""].map((t) => h("th", {}, t)))),
+        h(
+          "tbody",
+          {},
+          ...r.volunteers.map((v) =>
+            h(
+              "tr",
+              {},
+              h("td", { class: "mono" }, v.id),
+              h("td", { class: "mono" }, String(v.lines)),
+              h("td", { class: "mono" }, `${v.goldHits}/${v.goldSeen}`),
+              h("td", { class: "mono" }, pct(v.accuracy)),
+              h("td", { class: "mono" }, `${v.plantedHits}/${v.plantedSeen}`),
+              h("td", {}, v.standing),
+              h(
+                "td",
+                {},
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "small",
+                    onclick: () => void put<VolunteerReport>(`${path}/reviewers/${v.id}/exclusion`, { excluded: v.excludedAt === null }).then(draw, () => undefined),
+                  },
+                  v.excludedAt === null ? "Exclude from agreement" : "Include again",
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+  get<VolunteerReport>(`${path}/volunteers`).then(draw, () => box.replaceChildren(h("p", { class: "small muted" }, "Volunteer review is off here.")));
+  return box;
+}
+
 export function adminView(): HTMLElement {
   const root = h("section", { class: "card", dir: "ltr", lang: "en" }, h("p", {}, "Loading…"));
   get<{ batches: AdminBatch[] }>("/api/admin/progress")
@@ -39,7 +107,9 @@ export function adminView(): HTMLElement {
               {},
               h("tbody", {}, ...Object.entries(b.counts).map(([k, v]) => h("tr", {}, h("th", {}, k), h("td", { class: "mono" }, String(v))))),
             ),
-            h("p", { class: "small" }, "Reviewers: ", b.reviewers.map((r) => `${r.id} (${r.decisions})`).join(", ") || "none"),
+            b.taskType === "line_consensus"
+              ? volunteerPanel(b.id)
+              : h("p", { class: "small" }, "Reviewers: ", b.reviewers.map((r) => `${r.id} (${r.decisions})`).join(", ") || "none"),
             h(
               "button",
               {
