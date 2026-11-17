@@ -3,9 +3,11 @@
  * it, five actions as big buttons, and the page around the line on request. A volunteer never sees another
  * volunteer's decision or any count of others' work; decisions are final, so there is no "back". The maintainer gets
  * the same screen for the lines that went to them, from the pre-fill only.
- * Keys: Enter correct · E edit · N print has niqqud · U unreadable · X not on the page · S skip · +/− zoom · P page.
+ * Keys: Enter correct · E edit · N print has niqqud · S skip · +/− zoom · P page. Unreadable and not on the page have
+ * buttons only: decisions are final, and a stray key in a Hebrew layout must not make one.
  */
 import type { BatchSummary, LineConsensusView, NextResponse, Progress, ProposalView } from "../../shared/api";
+import type { Box, ImageView } from "../../shared/media";
 import { hasNiqqud } from "../../shared/niqqud";
 import { ApiFailure, get, post } from "../api";
 import { h, mount } from "../dom";
@@ -21,12 +23,31 @@ const KEYS: [string, string, string][] = [
   ["Enter", "נכון", "correct"],
   ["E", "תיקון", "edit"],
   ["N", "בדפוס יש ניקוד", "print has niqqud"],
-  ["U", "לא קריא", "unreadable"],
-  ["X", "לא בעמוד", "not on the page"],
   ["S", "דילוג", "skip"],
   ["+/−", "זום", "zoom"],
   ["P", "עמוד מלא", "page"],
 ];
+
+/**
+ * The band around the line, cut from the page image (the image is the page; `region` and the line's box are page
+ * fractions), at most the holder's width and 160 px high, with the line outlined.
+ */
+function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
+  const rw = (region[2] - region[0]) * img.width;
+  const rh = (region[3] - region[1]) * img.height;
+  const scale = Math.min(width / rw, 160 / rh);
+  const image = h("img", { src: img.url, alt: "השורה עם השורות שלפניה ואחריה / the line with its neighbours", decoding: "async", draggable: "false" });
+  image.style.cssText = `position:absolute;max-width:none;width:${img.width * scale}px;left:${-region[0] * img.width * scale}px;top:${-region[1] * img.height * scale}px`;
+  const band = h("div", { class: "frame ctxband" }, image);
+  band.style.cssText = `position:relative;overflow:hidden;width:${rw * scale}px;height:${rh * scale}px`;
+  const b = img.box;
+  if (b) {
+    const hl = h("div", { class: "hl" });
+    hl.style.cssText = `left:${((b[0] - region[0]) / (region[2] - region[0])) * 100}%;top:${((b[1] - region[1]) / (region[3] - region[1])) * 100}%;width:${((b[2] - b[0]) / (region[2] - region[0])) * 100}%;height:${((b[3] - b[1]) / (region[3] - region[1])) * 100}%`;
+    band.append(hl);
+  }
+  return band;
+}
 
 /** Shown before a volunteer's first line, and on request: what to do, the conventions, and that checks exist. */
 function onboarding(onStart: () => void): HTMLElement {
@@ -217,21 +238,7 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
       holder.replaceChildren(viewer(null, v.page).el, h("div", { class: "row" }, toggle));
       return;
     }
-    const c = v.crop;
-    const band = c
-      ? h(
-          "div",
-          { class: "frame ctxband" },
-          h("img", { src: c.url, width: c.width, height: c.height, alt: "השורה עם השורות שלפניה ואחריה / the line with its neighbours", decoding: "async", draggable: "false" }),
-          c.box
-            ? h("div", {
-                class: "hl",
-                style: `left:${c.box[0] * 100}%;top:${c.box[1] * 100}%;width:${(c.box[2] - c.box[0]) * 100}%;height:${(c.box[3] - c.box[1]) * 100}%`,
-              })
-            : null,
-        )
-      : null;
-    if (band && c) band.style.width = `min(100%, ${Math.round((150 * c.width) / Math.max(1, c.height))}px)`;
+    const band = v.crop && v.context ? contextBand(v.crop, v.context, Math.max(200, holder.clientWidth || root.clientWidth || 360)) : null;
     holder.replaceChildren(h("div", { class: "ctxscroll", dir: "ltr" }, band), h("div", { class: "row" }, toggle));
   }
 
@@ -270,7 +277,7 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
         "button",
         { type: "button", class: `act ${cls}`, onclick, "data-value": value, title: o?.label.en ?? value, disabled: p.mine !== null },
         h("span", {}, o?.label.he ?? value),
-        h("kbd", { dir: "ltr" }, key),
+        key ? h("kbd", { dir: "ltr" }, key) : null,
       );
     };
     const mine = p.mine ? option(p.mine.value) : undefined;
@@ -302,8 +309,8 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
         btn("correct", "Enter", "ok", () => void act("correct")),
         btn("edit", "E", "edit", () => startEdit()),
         btn("print_has_niqqud", "N", "ok pointed", () => startEdit(true)),
-        btn("unreadable", "U", "bad", () => void act("unreadable")),
-        btn("not_on_page", "X", "bad", () => void act("not_on_page")),
+        btn("unreadable", "", "bad", () => void act("unreadable")),
+        btn("not_on_page", "", "bad", () => void act("not_on_page")),
         h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
       ),
       h(
@@ -362,10 +369,6 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
       KeyE: () => startEdit(),
       Digit2: () => startEdit(),
       KeyN: () => startEdit(true),
-      KeyU: () => void act("unreadable"),
-      Digit3: () => void act("unreadable"),
-      KeyX: () => void act("not_on_page"),
-      Digit4: () => void act("not_on_page"),
       KeyS: () => void doSkip(),
       Digit5: () => void doSkip(),
       Equal: () => setZoom(1),

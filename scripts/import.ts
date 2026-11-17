@@ -132,7 +132,7 @@ async function main(): Promise<void> {
     const stem = item.imageStem ?? safeSegment(item.externalId);
     if (item.bundleImage && task.fullPages) {
       const page = await readingPage(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path));
-      for (const p of proposals) media.set(p.externalId, { page });
+      for (const p of proposals) media.set(p.externalId, { page: { ...page, box: p.pageBox } });
       continue;
     }
     if (item.bundleImage) {

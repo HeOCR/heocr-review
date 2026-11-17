@@ -9,6 +9,7 @@
 import type { Box } from "../../shared/media";
 import type { ImportBundle, ImportItem, ImportProposal, TaskImporter } from "../import";
 import { SERIES_LABELS } from "../page_review/index";
+import { BIDI_RISK } from "../page_review/schema";
 import { TASK_TYPE_ID, type LineConsensusPayload, type LineConsensusSource } from "./index";
 import {
   AI_FILE,
@@ -86,6 +87,9 @@ export const lineConsensusImporter: TaskImporter = {
   sidecars: [EXCLUSIONS_FILE, MAINTAINER_FILE, AI_FILE, GOLD_FILE],
   registeredSha256: REGISTERED_SHA256,
   mustBeRegistered: [LINE_ITEMS_FILE, EXCLUSIONS_FILE, GOLD_FILE],
+  // One reading-resolution image per page; the browser cuts each line from it (no file per line: 18,000 crops
+  // would pass the static-asset file limit).
+  fullPages: true,
   manifestSha256: BATCH_MANIFEST_SHA256,
   afterImportSql: (batchId: string, importedAt: string) => [initialStateSql(batchId, importedAt)],
 
@@ -141,8 +145,10 @@ export const lineConsensusImporter: TaskImporter = {
         i: line.i,
         prefill: shown.prefill,
         box_status: g ? "matched" : line.box_status,
-        tier_a: line.tier_a === true,
-        bidi_risk: line.bidi_risk === true,
+        // A line with no flags entry (fewer than 4 Hebrew letters: page numbers, short headers) is tier A when it has a
+        // digit or a bracket, as on the page review (page_review/schema.ts prefillLines, eval 2026-11-12).
+        tier_a: line.tier_a ?? BIDI_RISK.test(shown.prefill),
+        bidi_risk: line.bidi_risk ?? BIDI_RISK.test(shown.prefill),
         match: line.match,
         ai_flagged: hints ? hints.flagged.has(line.i) : null,
         ai_missing_near: hints ? hints.missing.has(line.i) : null,
@@ -151,10 +157,14 @@ export const lineConsensusImporter: TaskImporter = {
         prefill_from_stock: p.prefill_from_stock,
         image_sha256: p.image_sha256,
         order: proposals.length,
+        page_box: null,
+        context_box: null,
         gold: g,
       };
       const externalId = `${p.page_key}#l${line.i}`;
       const b = shown.box ? boxes(shown.box, p.image_size) : null;
+      payload.page_box = b?.pageBox ?? null;
+      payload.context_box = b?.contextBox ?? null;
       proposals.push({
         externalId,
         itemExternalId: p.page_key,

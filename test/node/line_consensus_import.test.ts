@@ -177,3 +177,16 @@ describe("line_consensus_decisions.v0", () => {
     expect(file.reviewers.find((r) => r.reviewer === ra)!.planted_seen).toBe(golds.filter((p) => payloadOf(p).gold!.planted_error).length);
   });
 });
+
+describe("a large import", () => {
+  it("keeps every statement under D1's size limit (deactivate first, then upsert)", async () => {
+    const { buildImportStatements, LARGE_BATCH } = await import("../../scripts/lib/importsql");
+    const b = lineConsensusImporter.bundle(items(), sidecars());
+    const one = b.proposals[0]!;
+    const many = { ...b, proposals: Array.from({ length: LARGE_BATCH + 1 }, (_, k) => ({ ...one, externalId: `${one.externalId}x${k}` })) };
+    const stmts = buildImportStatements(many, new Map(), { minReviewers: 1, importedAt: "2026-11-18T00:00:00.000Z" });
+    expect(Math.max(...stmts.map((s) => s.length))).toBeLessThan(100_000);
+    const deactivate = stmts.findIndex((s) => s.startsWith("UPDATE proposals SET active = 0"));
+    expect(deactivate).toBeLessThan(stmts.findIndex((s) => s.startsWith("INSERT INTO proposals")));
+  });
+});

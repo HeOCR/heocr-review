@@ -95,9 +95,11 @@ const lineState = async (id: number) => env.DB.prepare("SELECT state, needed FRO
 describe("volunteer line review", () => {
   it("is off unless switched on (preview only): not listed, not served", async () => {
     const c = await volunteer("off");
-    const list = await c.get<{ batches: { id: string }[] }>("/api/batches");
-    expect(list.body.batches.map((b) => b.id)).not.toContain(LINES);
-    expect((await c.get(`/api/batches/${LINES}/next`)).status).toBe(404);
+    const off = { ...env, CONSENSUS_ENABLED: undefined };
+    const req = (path: string) => handle(new Request(ORIGIN + path, { headers: { origin: ORIGIN, cookie: c.cookie } }), off, exec);
+    const list = (await (await req("/api/batches")).json()) as { batches: { id: string }[] };
+    expect(list.batches.map((b) => b.id)).not.toContain(LINES);
+    expect((await req(`/api/batches/${LINES}/next`)).status).toBe(404);
   });
 
   it("serves only boxed lines of volunteer pages: never excluded, maintainer-decided, no-box or blank lines", async () => {

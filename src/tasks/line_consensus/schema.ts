@@ -164,7 +164,8 @@ export function lineItemsProblems(raw: unknown): string[] {
       else if (l.box_status !== "blank" && l.prefill.trim() === "") out.push(`${lat}: a non-blank status needs a pre-fill line`);
       if (oneOf(SHOWN_STATUSES, l.box_status)) out.push(...boxProblems(lat, l.box, size));
       else if (l.box !== null && l.box !== undefined) out.push(`${lat}: a ${String(l.box_status)} line has no box`);
-      if (l.box_status !== "blank" && (typeof l.tier_a !== "boolean" || typeof l.bidi_risk !== "boolean")) out.push(`${lat}: tier_a and bidi_risk must be booleans`);
+      // null: the line has no flags entry (fewer than 4 Hebrew letters); the import applies the page review's rule.
+      if (!(l.tier_a === null || typeof l.tier_a === "boolean") || !(l.bidi_risk === null || typeof l.bidi_risk === "boolean")) out.push(`${lat}: tier_a and bidi_risk must be booleans or null`);
       if (!(l.match === null || isNum(l.match))) out.push(`${lat}: match must be a number or null`);
     }
   }

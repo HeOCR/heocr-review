@@ -11,7 +11,7 @@
  * one per reviewer per line, so `current` is every decision.
  */
 import type { DecisionOption, Label, LineConsensusView } from "../../shared/api";
-import { imageUrl } from "../../shared/media";
+import { imageUrl, type Box } from "../../shared/media";
 import { hasNiqqud } from "../../shared/niqqud";
 import { SERIES_LABELS } from "../page_review/index";
 import { lineTextProblems } from "../page_review/schema";
@@ -53,6 +53,9 @@ export interface LineConsensusPayload {
   prefill_from_stock: boolean;
   image_sha256: string;
   order: number;
+  /** The line's box and its context band, as fractions of the page image (null: no box). */
+  page_box: Box | null;
+  context_box: Box | null;
   gold: null | { gold_id: string; answer: LineDecision; planted_error: null | { kind: string; from: string; to: string } };
 }
 
@@ -258,7 +261,7 @@ export const lineConsensus: TaskType = {
   id: TASK_TYPE_ID,
   label: { he: "בדיקת שורות בידי מתנדבים", en: "Volunteer line review" },
   options: OPTIONS,
-  prefetch: ["crop"],
+  prefetch: ["page"],
 
   toView(p: ProposalRecord): LineConsensusView {
     const x = payloadOf(p);
@@ -272,8 +275,10 @@ export const lineConsensus: TaskType = {
       series: { id: x.series, label: (SERIES_LABELS[x.series] as Label | undefined) ?? { he: x.series, en: x.series } },
       attribution: ATTRIBUTION[x.series] ?? "",
       textLicense: TEXT_LICENSE,
-      crop: imageView(p.media.crop),
-      page: imageView(p.media.page),
+      // The line is cut from the page image in the browser.
+      crop: x.page_box && p.media.page ? { ...imageView(p.media.page)!, box: x.page_box } : null,
+      context: x.context_box,
+      page: p.media.page ? { ...imageView(p.media.page)!, box: x.page_box } : null,
     };
   },
 

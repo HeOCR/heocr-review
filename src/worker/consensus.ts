@@ -209,7 +209,7 @@ export async function nextLine(db: D1Database, batch: BatchRecord, reviewerId: s
     .run();
   const prefetch = rows
     .slice(1)
-    .flatMap((r) => (r.media.crop ? [imageUrl(r.media.crop.ref)] : []));
+    .flatMap((r) => (r.media.page ? [imageUrl(r.media.page.ref)] : []));
   return { proposal: await proposalView(db, batch, first, reviewerId), progress, prefetch: [...new Set(prefetch)] };
 }
 

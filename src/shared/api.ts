@@ -1,6 +1,6 @@
 /** JSON shapes shared by the Worker API and the frontend. */
 import type { AttentionRun } from "./attention";
-import type { ImageView } from "./media";
+import type { Box, ImageView } from "./media";
 
 export interface ConfigResponse {
   environment: string;
@@ -108,8 +108,10 @@ export interface LineConsensusView {
   series: { id: string; label: Label };
   attribution: string;
   textLicense: string;
-  /** The line, with some context above and below; null for a line with no box (maintainer only). */
+  /** The page image with the line's box, from which the browser cuts the line; null for a line with no box. */
   crop: ImageView | null;
+  /** The band around the line (a little more than a line above and below), as fractions of the page. */
+  context: Box | null;
   /** The whole page, with the line's box. */
   page: ImageView | null;
 }
