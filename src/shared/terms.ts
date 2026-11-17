@@ -5,8 +5,9 @@
  * contributions relicensed to CC0 1.0 on 2026-11-12 as version 2026-11-12-v1 (docs/decisions/2026-11-12-cc0.md).
  * Privacy policy 2026-11-16-v1: unsaved page corrections kept on the server (docs/decisions/2026-11-16-drafts-privacy.md);
  * privacy policy 2026-11-16-v2: what a deletion on request does with unpublished decisions
- * (docs/decisions/2026-11-16-reviewer-deletion.md). Both times the terms are unchanged, so nobody is asked to accept
- * again.
+ * (docs/decisions/2026-11-16-reviewer-deletion.md); privacy policy 2026-11-18-v3: check lines and accuracy in the
+ * volunteer line review (docs/decisions/2026-11-18-check-lines.md). Each time the terms are unchanged, so nobody is
+ * asked to accept again.
  * Any change to this text, public/terms.html or public/privacy.html needs the maintainer's approval and a new
  * version; on a new TERMS_VERSION every reviewer is asked again before their next decision.
  */
@@ -15,7 +16,7 @@ export const TERMS_VERSION = "2026-11-12-v1";
 export const TERMS_LICENSE = "CC0 1.0";
 export const TERMS_LICENSE_URL = "https://creativecommons.org/publicdomain/zero/1.0/";
 /** The public pages carry the same versions (test/node/pages.test.ts checks them). */
-export const PRIVACY_VERSION = "2026-11-16-v2";
+export const PRIVACY_VERSION = "2026-11-18-v3";
 export const CONTACT_EMAIL = "heocrproject@gmail.com";
 
 export interface TermsText {
