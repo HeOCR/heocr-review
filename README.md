@@ -231,6 +231,9 @@ maintainer had decided, which keep his references), the batch's `ai_flags.json`,
 - **Final decisions:** a decision is final, and the progress shown counts only the volunteer's own lines.
 - **The browser cuts each line** from the page image, so there is no file per line.
 - **The export** is `line_consensus_decisions.v0`, which eval's ingest recomputes with `agreement.py`.
+- **The maintainer's own queue:** once a volunteer batch has a page, the maintainer's page review leaves it out of
+  "all pages", so the two sets of references never overlap. A filter that names it (the blind audit) still serves it.
+  The interim pages, which supply the gold lines, stay his.
 - **Off unless switched on:** the whole task is off unless `CONSENSUS_ENABLED=1` (set for preview in
   `wrangler.jsonc`), until the maintainer approves the privacy text for gold lines and accuracy.
 
