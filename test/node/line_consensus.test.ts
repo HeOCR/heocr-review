@@ -61,9 +61,12 @@ describe("a line's routing", () => {
     expect(lineState([vote("a", C), vote("b", U), vote("c", U)], "x")).toMatchObject({ state: "majority", reviewers: ["a", "b", "c"] });
     expect(lineState([vote("a", C), vote("b", U), vote("c", N)], "x")).toMatchObject({ state: "to_maintainer" });
   });
-  it("a provisional volunteer holds a slot, but the line waits for their standing", () => {
-    expect(lineState([vote("a", C), vote("p", C, "provisional")], "x")).toEqual({ state: "waiting", needed: 0 });
-    expect(lineState([vote("p", C, "provisional")], "x")).toEqual({ state: "open", needed: 1 });
+  it("a provisional volunteer's decision does not fill a slot, and counts in decision order once they reach the floor", () => {
+    const p = vote("p", C, "provisional");
+    const a = vote("a", C);
+    expect(lineState([p, a], "x")).toEqual({ state: "open", needed: 1 });
+    const b = vote("b", U);
+    expect(lineState([{ ...p, standing: "counting" }, a, b], "x")).toMatchObject({ state: "agreed", reviewers: ["p", "a"] });
   });
   it("a volunteer below the floor or excluded gives the slot back, past decisions included", () => {
     expect(lineState([vote("a", C), vote("x", C, "below_floor")], "x")).toEqual({ state: "open", needed: 1 });

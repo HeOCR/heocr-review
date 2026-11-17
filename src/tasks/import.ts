@@ -45,7 +45,18 @@ export interface TaskImporter {
   bundleFile: string;
   /** Problems with the source file (empty when valid). */
   problems(raw: unknown, sidecars?: Record<string, unknown>): string[];
-  bundle(raw: unknown, sidecars?: Record<string, unknown>): ImportBundle;
+  /** `fileSha256`: each file's sha256 as read (the bundle file and the sidecars present), for the batch's record. */
+  bundle(raw: unknown, sidecars?: Record<string, unknown>, fileSha256?: Record<string, string>): ImportBundle;
+  /**
+   * Registered inputs (line_consensus): a file named here must have exactly this sha256, and a file named in
+   * `mustBeRegistered` is refused when present but not named here.
+   */
+  registeredSha256?: Record<string, string>;
+  mustBeRegistered?: string[];
+  /** SQL to run after the import's own statements (line_consensus: each new line's first routing state). */
+  afterImportSql?: (batchId: string, importedAt: string) => string[];
+  /** The sha256 that sidecars' `manifest_sha256` must name (default: the bundle file's). */
+  manifestSha256?: string;
   /** Further files the bundle may hold next to bundleFile, parsed and passed in by name (absent ones are left out). */
   sidecars?: string[];
   /** Show each page whole at reading resolution, with no line crops (page_review). */

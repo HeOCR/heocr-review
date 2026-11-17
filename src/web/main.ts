@@ -3,6 +3,7 @@ import { ApiFailure, get } from "./api";
 import { h, mount } from "./dom";
 import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
+import { lineConsensusView } from "./views/consensus";
 import { lineVerifyView } from "./views/line";
 import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
@@ -88,7 +89,9 @@ async function route(): Promise<void> {
     const view: ReviewScreen =
       batch.taskType === "page_review"
         ? pageReviewView(batch, hooks, startAt, subset?.id)
-        : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
+        : batch.taskType === "line_consensus"
+          ? lineConsensusView(batch, hooks, startAt)
+          : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
     show(
       h(
         "div",

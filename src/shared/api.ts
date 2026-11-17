@@ -95,7 +95,26 @@ export interface PageReviewView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView;
+/** One line of a volunteer line review (task type line_consensus): the crop, the pre-fill and the "look here" hints. */
+export interface LineConsensusView {
+  kind: "line_consensus";
+  /** The pre-fill line shown (the registered line; never AI or vendor text). */
+  prefill: string;
+  tierA: boolean;
+  bidiRisk: boolean;
+  /** Claude's hints for this line (eval's registered ai_flags.json): where to look, never a reading. */
+  aiDisagrees: boolean;
+  aiMissingNear: boolean;
+  series: { id: string; label: Label };
+  attribution: string;
+  textLicense: string;
+  /** The line, with some context above and below; null for a line with no box (maintainer only). */
+  crop: ImageView | null;
+  /** The whole page, with the line's box. */
+  page: ImageView | null;
+}
+
+export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView;
 
 export interface DecisionOption {
   value: string;
@@ -141,6 +160,11 @@ export interface Progress {
   skippedByMe: number;
   /** Proposals still open to this reviewer (not decided by them, not skipped, below the target). */
   remainingForMe: number;
+  /**
+   * Volunteer batches (line_consensus): only the reviewer's own count is real. total, covered and remainingForMe
+   * are 0, so nothing about other volunteers' work is shown.
+   */
+  ownOnly?: boolean;
 }
 
 export interface BatchSummary {

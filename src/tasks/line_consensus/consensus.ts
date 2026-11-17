@@ -82,9 +82,10 @@ export const GOLD_FLOOR = 0.95;
 export const GOLD_MIN = 20;
 
 /**
- * counting: their decisions count. provisional: fewer than 20 gold lines so far, so none count yet, but they hold a
- * reviewer slot so a line is not handed out without end. below_floor and excluded: none count, past ones included,
- * and their slots reopen.
+ * counting: their decisions count. provisional: fewer than 20 gold lines so far, so none count yet (they will, in
+ * decision order, once the volunteer reaches the floor). below_floor and excluded: none count, past ones included.
+ * Only counting volunteers fill a line's slots: a line goes on being offered until it settles on counted decisions,
+ * so a volunteer who stops before their 20th gold line never holds a line back.
  */
 export type StandingState = "counting" | "provisional" | "below_floor" | "excluded";
 
@@ -117,41 +118,30 @@ export interface Vote extends LineDecision {
 }
 
 export type LineState =
-  /** `needed` more volunteers should get the line. */
+  /** `needed` more counting volunteers should decide the line. */
   | { state: "open"; needed: 1 | 2 }
-  /** Two or three volunteers hold the line, and a provisional one's standing decides it: wait. */
-  | { state: "waiting"; needed: 0 }
   | { state: "agreed" | "majority"; needed: 0; reviewers: string[] }
-  /** Three counting volunteers and no majority: the maintainer's tie-break queue. */
+  /** Three counted decisions and no majority: the maintainer's tie-break queue. */
   | { state: "to_maintainer"; needed: 0; reviewers: string[] };
-
-const holdsSlot = (v: Vote) => v.standing === "counting" || v.standing === "provisional";
 
 function inOrder(votes: Vote[]): Vote[] {
   return votes.slice().sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.reviewerId.localeCompare(b.reviewerId)));
 }
 
-/**
- * The line's state for routing. Votes from counting and provisional volunteers hold the slots, in decision order; a
- * line settles only when the deciding votes all count (resolve() over them), and waits while a provisional
- * volunteer's vote would decide it.
- */
-export function lineState(votes: Vote[], prefill: string): LineState {
-  const held = inOrder(votes.filter(holdsSlot));
-  if (held.length < 2) return { state: "open", needed: held.length === 0 ? 2 : 1 };
-  const firstTwoAgree = agree(held[0]!, held[1]!, prefill);
-  if (!firstTwoAgree && held.length < 3) return { state: "open", needed: 1 };
-  const deciding = held.slice(0, firstTwoAgree ? 2 : 3);
-  if (!deciding.every((v) => v.standing === "counting")) return { state: "waiting", needed: 0 };
-  const r = resolve(deciding, prefill);
-  const reviewers = deciding.map((v) => v.reviewerId);
-  if (r.status === "agreed" || r.status === "majority") return { state: r.status, needed: 0, reviewers };
-  return { state: "to_maintainer", needed: 0, reviewers };
-}
-
 /** The counted decisions in decision order (what eval's resolve() takes). */
 export function counted(votes: Vote[]): Vote[] {
   return inOrder(votes.filter((v) => v.standing === "counting"));
+}
+
+/** The line's state: resolve() over its counted decisions, in decision order. */
+export function lineState(votes: Vote[], prefill: string): LineState {
+  const c = counted(votes);
+  const r = resolve(c, prefill);
+  if (r.status === "pending") return { state: "open", needed: c.length === 0 ? 2 : 1 };
+  if (r.status === "needs_third") return { state: "open", needed: 1 };
+  const reviewers = c.slice(0, r.status === "agreed" ? 2 : 3).map((v) => v.reviewerId);
+  if (r.status === "agreed" || r.status === "majority") return { state: r.status, needed: 0, reviewers };
+  return { state: "to_maintainer", needed: 0, reviewers };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

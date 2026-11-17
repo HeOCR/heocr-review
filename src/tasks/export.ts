@@ -29,6 +29,9 @@ export interface ExportInput {
   decisions: DecisionRecord[];
   credits: Credit[];
   exportedAt: string;
+  /** line_consensus: reviewers an admin excluded from agreement in this batch, and the maintainer's decisions. */
+  exclusions?: { reviewerId: string; excludedAt: string }[];
+  maintainerDecisions?: string[];
 }
 
 export interface ExportResult {
@@ -85,7 +88,7 @@ export function buildExport(input: ExportInput): ExportResult {
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
   const resolved = resolveProposals(batch, proposals, decisions);
-  const decisionsFile = type.exportDecisions(batch, resolved);
+  const decisionsFile = type.exportDecisions(batch, resolved, { exportedAt, exclusions: input.exclusions ?? [], maintainerDecisions: input.maintainerDecisions ?? [] });
   const problems = type.validateExport(batch, proposals, decisionsFile.content);
   const count = (status: ResolvedProposal["status"]) => resolved.filter((r) => r.status === status).length;
   const reviewers = new Set(decisions.map((d) => d.reviewerId));

@@ -15,7 +15,7 @@ export function contentSha256(contentKey: unknown): string {
 export function buildImportStatements(
   bundle: ImportBundle,
   media: Map<string, ProposalMedia>,
-  opts: { minReviewers: number; importedAt: string },
+  opts: { minReviewers: number; importedAt: string; after?: string[] },
 ): string[] {
   const { batch } = bundle;
   const b = lit(batch.id);
@@ -38,9 +38,10 @@ export function buildImportStatements(
   }
   const keep = bundle.proposals.map((p) => lit(p.externalId)).join(", ");
   out.push(`UPDATE proposals SET active = 0 WHERE batch_id = ${b}${keep ? ` AND external_id NOT IN (${keep})` : ""};`);
+  out.push(...(opts.after ?? []));
   return out;
 }
 
-export function buildImportSql(bundle: ImportBundle, media: Map<string, ProposalMedia>, opts: { minReviewers: number; importedAt: string }): string {
+export function buildImportSql(bundle: ImportBundle, media: Map<string, ProposalMedia>, opts: { minReviewers: number; importedAt: string; after?: string[] }): string {
   return buildImportStatements(bundle, media, opts).join("\n") + "\n";
 }

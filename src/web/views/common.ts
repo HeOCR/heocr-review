@@ -26,6 +26,8 @@ export function prefetch(urls: string[]): void {
 }
 
 export function progressBar(p: Progress): HTMLElement {
+  // A volunteer batch shows the volunteer's own count only: nothing about other volunteers' work.
+  if (p.ownOnly) return h("div", { class: "progress", role: "status" }, h("span", { class: "small" }, `החלטת על ${p.decidedByMe} שורות / You decided ${p.decidedByMe} lines`));
   const pct = p.total ? Math.round((p.covered / p.total) * 100) : 0;
   return h(
     "div",

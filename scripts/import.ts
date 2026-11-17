@@ -9,6 +9,9 @@
  *   npm run import -- --task line_verify --bundle <B> [--target ...]
  *   # page_review, from eval's mid-century batch (batch_manifest.json, pages/, optional blind_prefill.json):
  *   npm run import -- --task page_review --bundle <B> [--target ...]
+ *   # line_consensus, the volunteer line batch (line_items_v1.json, volunteer_exclusions_v1.json,
+ *   # maintainer_decided.json, ai_flags.json, optional gold_v1.json, and pages/; this script cuts the line crops):
+ *   npm run import -- --task line_consensus --bundle <B> [--target local|preview]
  *   options: [--min-reviewers 1] [--title <batch title shown in the app>] [--dry-run]
  *
  * --pages-dir holds one image per item, named by the item id after its source prefix
@@ -66,6 +69,7 @@ async function main(): Promise<void> {
   const proposalsPath = bundleDir ? join(bundleDir, task.bundleFile) : str(flags, "proposals");
   const pagesDir = typeof flags["pages-dir"] === "string" ? flags["pages-dir"] : null;
   if (taskId === "line_verify" && !bundleDir) throw new Error("line_verify imports a bundle: give --bundle <dir with items.json and pages/>");
+  if (taskId === "line_consensus" && !bundleDir) throw new Error("line_consensus imports a bundle: give --bundle <dir with line_items_v1.json, its sidecars and pages/>");
   if (taskId === "page_review" && !bundleDir) throw new Error("page_review imports a bundle: give --bundle <dir with batch_manifest.json and pages/>");
   if (!bundleDir && !pagesDir) throw new Error("give --bundle, or --proposals with --pages-dir");
   const t = target(flags);
@@ -76,6 +80,17 @@ async function main(): Promise<void> {
   if (pagesDir) assertOpenSource(pagesDir);
 
   const raw: unknown = JSON.parse(readFileSync(proposalsPath, "utf8"));
+  const fileSha256: Record<string, string> = { [task.bundleFile]: sha256File(proposalsPath) };
+  for (const name of task.sidecars ?? []) {
+    const path = bundleDir ? join(bundleDir, name) : null;
+    if (path && existsSync(path)) fileSha256[name] = sha256File(path);
+  }
+  // Registered inputs: exactly the registered content, and nothing unregistered where registration is required.
+  for (const [name, sha] of Object.entries(fileSha256)) {
+    const want = task.registeredSha256?.[name];
+    if (want !== undefined && want !== sha) throw new Error(`${name} is not the registered file (sha256 ${sha}, registered ${want})`);
+    if (want === undefined && task.mustBeRegistered?.includes(name)) throw new Error(`${name} is not registered yet (sha256 ${sha}): add it to the task's REGISTERED_SHA256 with its SHA256SUMS entry`);
+  }
   // Sidecar files next to the bundle file (page_review: the blind second pass's pre-fill). One that names the
   // bundle file's sha256 must name this exact file.
   const sidecars: Record<string, unknown> = {};
@@ -83,14 +98,14 @@ async function main(): Promise<void> {
     const path = bundleDir ? join(bundleDir, name) : null;
     if (!path || !existsSync(path)) continue;
     const side = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    if (typeof side.manifest_sha256 === "string" && side.manifest_sha256 !== sha256File(proposalsPath)) {
+    if (typeof side.manifest_sha256 === "string" && side.manifest_sha256 !== (task.manifestSha256 ?? sha256File(proposalsPath))) {
       throw new Error(`${name} was made for another ${task.bundleFile} (manifest_sha256 differs)`);
     }
     sidecars[name] = side;
   }
   const problems = task.problems(raw, sidecars);
   if (problems.length) throw new Error(`invalid ${taskId} file:\n  ${problems.slice(0, 20).join("\n  ")}`);
-  const bundle = task.bundle(raw, sidecars);
+  const bundle = task.bundle(raw, sidecars, fileSha256);
   // Two batches of one task type need different titles in the app (e.g. unpointed and pointed lines).
   if (typeof flags.title === "string" && flags.title.trim()) bundle.batch.title = flags.title.trim();
 
@@ -153,7 +168,8 @@ async function main(): Promise<void> {
   }
   if (missing.length) throw new Error(`no crop or page image for ${missing.length} item(s)/proposal(s): ${missing.slice(0, 5).join(", ")}`);
 
-  const sql = buildImportSql(bundle, media, { minReviewers, importedAt: new Date().toISOString() });
+  const importedAt = new Date().toISOString();
+  const sql = buildImportSql(bundle, media, { minReviewers, importedAt, after: task.afterImportSql?.(bundle.batch.id, importedAt) });
   mkdirSync(join(ROOT, ".import"), { recursive: true });
   const sqlPath = join(ROOT, ".import", `${safeSegment(bundle.batch.id)}.sql`);
   writeFileSync(sqlPath, sql);
