@@ -101,8 +101,21 @@ export async function subsetsOf(db: D1Database, batchId: string): Promise<{ id: 
   return results;
 }
 
-/** SQL: proposal p is in the filter bound at ?n (a JSON array of ids), or there is no filter (null). */
-const inFilter = (n: number) => `(?${n} IS NULL OR p.id IN (SELECT value FROM json_each(?${n})))`;
+/**
+ * SQL: proposal p's page is a volunteer page: an item of a volunteer line batch (line_consensus) with an active line
+ * that is not gold. The maintainer's page-review queue leaves those pages out unless a filter names them (the
+ * blind audit), so his references and the volunteers' never cover the same page (heocr-lead, 2026-11-18). The
+ * interim pages, which give the volunteers' gold lines, stay his.
+ */
+const VOLUNTEER_PAGE = `EXISTS (SELECT 1 FROM items vi JOIN batches vb ON vb.id = vi.batch_id JOIN proposals vp ON vp.item_id = vi.id
+    WHERE vb.task_type = 'line_consensus' AND vi.external_id = (SELECT external_id FROM items WHERE id = p.item_id)
+      AND vp.active = 1 AND json_extract(vp.payload_json, '$.gold') IS NULL)`;
+
+/**
+ * SQL: proposal p is in the filter bound at ?n (a JSON array of ids); with no filter (null), any proposal whose page is
+ * not a volunteer page.
+ */
+const inFilter = (n: number) => `(CASE WHEN ?${n} IS NULL THEN NOT ${VOLUNTEER_PAGE} ELSE p.id IN (SELECT value FROM json_each(?${n})) END)`;
 
 /**
  * Open to reviewer ?2: active, not decided by them, not skipped by them, and below the batch's reviewer target.

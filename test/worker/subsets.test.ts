@@ -103,3 +103,51 @@ describe("subset filter (interim set)", () => {
     expect(JSON.parse(withSubset)[0].content.decisions).toHaveLength(2);
   });
 });
+
+/** A volunteer line batch whose pages are `real` (non-gold lines) and `gold` (gold lines only). */
+async function volunteerBatch(real: string[], gold: string[]) {
+  const b = "fixture_volunteers";
+  const stmts = [
+    env.DB.prepare("INSERT INTO batches (id, task_type, title, source_json, min_reviewers, status, imported_at) VALUES (?1, 'line_consensus', 't', '{}', 1, 'open', '2026-11-18T00:00:00Z')").bind(b),
+  ];
+  for (const [k, page] of [...real, ...gold].entries()) {
+    const isGold = gold.includes(page);
+    stmts.push(env.DB.prepare("INSERT INTO items (batch_id, external_id, title, payload_json) VALUES (?1, ?2, 't', '{}')").bind(b, page));
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO proposals (batch_id, item_id, external_id, category, confidence, rank, payload_json, media_json, content_sha256, active)
+         VALUES (?1, (SELECT id FROM items WHERE batch_id = ?1 AND external_id = ?2), ?3, 'x', 'matched', ?4, ?5, '{}', 'h', 1)`,
+      ).bind(b, page, `${page}#l0`, k, JSON.stringify({ gold: isGold ? { gold_id: "g" } : null })),
+    );
+  }
+  await env.DB.batch(stmts);
+}
+
+describe("volunteer pages and the maintainer's queue", () => {
+  it("leaves a volunteer page out of 'all pages', but a filter that names it still serves it; a gold-only page stays", async () => {
+    const before: string[] = [];
+    const c = await reviewer("ivy");
+    for (;;) {
+      const n = await next(c, null);
+      if (!n.proposal) break;
+      before.push(n.proposal.externalId);
+      await c.post(`/api/proposals/${n.proposal.id}/skip`);
+    }
+    expect(before).toContain(PICK);
+    expect(before).toContain(PLENARY);
+    await volunteerBatch([PICK], [PLENARY]);
+    await loadSubset();
+    const d = await reviewer("ivy-2");
+    const after: string[] = [];
+    for (;;) {
+      const n = await next(d, null);
+      if (!n.proposal) break;
+      after.push(n.proposal.externalId);
+      await d.post(`/api/proposals/${n.proposal.id}/skip`);
+    }
+    expect(after).not.toContain(PICK);
+    expect(after).toContain(PLENARY);
+    expect(after).toHaveLength(before.length - 1);
+    expect((await next(d)).proposal!.externalId).toBe(PICK);
+  });
+});
