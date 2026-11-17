@@ -1,99 +1,110 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { answerKey, goldHit, normalizeForAgreement, neededOf, outcome, standing, type Vote } from "../../src/tasks/line_label/consensus";
+import {
+  agree,
+  goldDue,
+  goldHit,
+  goldNext,
+  lineState,
+  norm,
+  resolve,
+  standing,
+  type LineDecision,
+  type Vote,
+} from "../../src/tasks/line_consensus/consensus";
 
-const PREFILL = "שלום  עולם";
+/** eval's agreement.py: its CASES verbatim, and its norm() on 400 seeded strings (generated in Python). */
+const REF = JSON.parse(readFileSync("test/fixtures/line_consensus/agreement_reference.json", "utf8")) as {
+  cases: [LineDecision, LineDecision, string, boolean][];
+  norm_vectors: [string, string][];
+};
+
+describe("the port of eval's agreement.py", () => {
+  it.each(REF.cases.map((c, k) => [k + 1, ...c] as const))("case %i", (_k, d1, d2, prefill, want) => {
+    expect(agree(d1, d2, prefill)).toBe(want);
+  });
+  it("norm() gives Python's result on every vector", () => {
+    for (const [s, want] of REF.norm_vectors) expect([s, norm(s)]).toEqual([s, want]);
+  });
+  it("resolve(): agreement.py's two resolution cases, and the rest of its states", () => {
+    expect(resolve([{ action: "correct" }, { action: "edit", text: "y" }, { action: "correct" }], "x").status).toBe("majority");
+    expect(resolve([{ action: "correct" }, { action: "edit", text: "y" }, { action: "unreadable" }], "x").status).toBe("to_maintainer");
+    expect(resolve([{ action: "correct" }], "x").status).toBe("pending");
+    expect(resolve([{ action: "correct" }, { action: "edit", text: "x " }], "x").status).toBe("agreed");
+    expect(resolve([{ action: "correct" }, { action: "unreadable" }], "x").status).toBe("needs_third");
+  });
+  it("gold_hit compares with the pre-fill shown, so accepting a planted error is a miss", () => {
+    const gold = { action: "correct" as const, text: "סעיף 3 (א)" };
+    expect(goldHit({ action: "correct" }, gold, "סעיף 3 (א)")).toBe(true);
+    expect(goldHit({ action: "correct" }, gold, "סעיף 8 (א)")).toBe(false);
+    expect(goldHit({ action: "edit", text: "סעיף 3 (א)" }, gold, "סעיף 8 (א)")).toBe(true);
+  });
+});
+
 let t = 0;
-const vote = (reviewerId: string, value: Vote["value"], text: string | null = null, counts = true): Vote => ({
+const vote = (reviewerId: string, d: LineDecision, s: Vote["standing"] = "counting"): Vote => ({
+  ...d,
   reviewerId,
-  value,
-  text,
-  counts,
-  firstAt: new Date(Date.UTC(2026, 10, 18, 0, 0, t++)).toISOString(),
+  standing: s,
+  at: new Date(Date.UTC(2026, 10, 18, 0, 0, t++)).toISOString(),
 });
+const C = { action: "correct" } as const;
+const U = { action: "unreadable" } as const;
+const N = { action: "not_on_page" } as const;
 
-describe("eval's norm (§3)", () => {
-  it("deletes bidi formatting, maps every White_Space to a space, collapses and strips", () => {
-    expect(normalizeForAgreement("\u200f א\u00a0\u2003ב\u0085ג\u202a\t ")).toBe("א ב ג");
-    expect(normalizeForAgreement("א\u0085ב")).toBe("א ב");
+describe("a line's routing", () => {
+  it("two volunteers, then a third only on disagreement, then the maintainer", () => {
+    expect(lineState([], "x")).toEqual({ state: "open", needed: 2 });
+    expect(lineState([vote("a", C)], "x")).toEqual({ state: "open", needed: 1 });
+    expect(lineState([vote("a", C), vote("b", { action: "edit", text: "x" })], "x")).toMatchObject({ state: "agreed", reviewers: ["a", "b"] });
+    expect(lineState([vote("a", C), vote("b", U)], "x")).toEqual({ state: "open", needed: 1 });
+    expect(lineState([vote("a", C), vote("b", U), vote("c", U)], "x")).toMatchObject({ state: "majority", reviewers: ["a", "b", "c"] });
+    expect(lineState([vote("a", C), vote("b", U), vote("c", N)], "x")).toMatchObject({ state: "to_maintainer" });
   });
-  it("folds nothing else: niqqud, geresh, ZWJ and BOM stay", () => {
-    expect(normalizeForAgreement("שָׁלוֹם")).not.toBe(normalizeForAgreement("שלום"));
-    expect(normalizeForAgreement("צ'")).not.toBe(normalizeForAgreement("צ׳"));
-    expect(normalizeForAgreement("א\ufeffב")).toBe("א\ufeffב");
+  it("a provisional volunteer holds a slot, but the line waits for their standing", () => {
+    expect(lineState([vote("a", C), vote("p", C, "provisional")], "x")).toEqual({ state: "waiting", needed: 0 });
+    expect(lineState([vote("p", C, "provisional")], "x")).toEqual({ state: "open", needed: 1 });
   });
-});
-
-describe("answer keys", () => {
-  it("correct agrees with an edit that normalises to the pre-fill", () => {
-    expect(answerKey(PREFILL, { value: "correct", text: null })).toBe(answerKey(PREFILL, { value: "edit", text: " שלום עולם " }));
+  it("a volunteer below the floor or excluded gives the slot back, past decisions included", () => {
+    expect(lineState([vote("a", C), vote("x", C, "below_floor")], "x")).toEqual({ state: "open", needed: 1 });
+    expect(lineState([vote("a", C), vote("x", C, "excluded"), vote("b", C)], "x")).toMatchObject({ state: "agreed", reviewers: ["a", "b"] });
   });
-  it("print_has_niqqud is its own class, with or without corrected letters", () => {
-    const k = answerKey(PREFILL, { value: "print_has_niqqud", text: null });
-    expect(k).not.toBe(answerKey(PREFILL, { value: "correct", text: null }));
-    expect(k).toBe(answerKey(PREFILL, { value: "print_has_niqqud", text: "שלום עולם" }));
-  });
-  it("unreadable and not_on_page agree only with themselves", () => {
-    expect(answerKey(PREFILL, { value: "unreadable", text: null })).not.toBe(answerKey(PREFILL, { value: "not_on_page", text: null }));
-  });
-  it("NFC: precomposed and decomposed text agree", () => {
-    const composed = "שׁ";
-    const decomposed = "שׁ"; // SHIN WITH SHIN DOT, which NFC decomposes to the same sequence
-    expect(answerKey("", { value: "edit", text: composed })).toBe(answerKey("", { value: "edit", text: decomposed }));
+  it("orders by decision time whatever the input order, and a late extra vote never undoes an agreement", () => {
+    const a = vote("a", C);
+    const b = vote("b", C);
+    const c = vote("c", U);
+    expect(lineState([c, b, a], "x")).toMatchObject({ state: "agreed", reviewers: ["a", "b"] });
   });
 });
 
-describe("outcome: two agree, a third decides, else the admin", () => {
-  it("needs two reviewers, then one more", () => {
-    expect(outcome(PREFILL, [], null)).toEqual({ state: "pending", needed: 2, counted: 0 });
-    expect(outcome(PREFILL, [vote("a", "correct")], null)).toMatchObject({ state: "pending", needed: 1 });
+describe("standing (§4)", () => {
+  it("nothing counts before 20 gold lines", () => {
+    expect(standing(19, 19, false).state).toBe("provisional");
   });
-  it("two agreeing votes make a reference", () => {
-    const o = outcome(PREFILL, [vote("a", "correct"), vote("b", "edit", "שלום עולם")], null);
-    expect(o).toMatchObject({ state: "agreed", reviewers: ["a", "b"], answer: { value: "correct" } });
-    expect(neededOf(o)).toBe(0);
-  });
-  it("a disagreement asks for a third, who decides", () => {
-    const two = [vote("a", "correct"), vote("b", "edit", "שלום עולמ")];
-    expect(outcome(PREFILL, two, null)).toEqual({ state: "pending", needed: 1, counted: 2 });
-    const o = outcome(PREFILL, [...two, vote("c", "edit", "שלום עולמ")], null);
-    expect(o).toMatchObject({ state: "majority", answer: { value: "edit", text: "שלום עולמ" }, reviewers: ["a", "b", "c"] });
-  });
-  it("three different answers go to the admin queue; the admin's decision is final", () => {
-    const three = [vote("a", "correct"), vote("b", "unreadable"), vote("c", "not_on_page")];
-    expect(outcome(PREFILL, three, null)).toMatchObject({ state: "admin_queue" });
-    expect(neededOf(outcome(PREFILL, three, null))).toBe(0);
-    expect(outcome(PREFILL, three, { value: "unreadable", text: null })).toMatchObject({ state: "admin", answer: { value: "unreadable" } });
-  });
-  it("votes that do not count are ignored, and the line needs another reviewer", () => {
-    const o = outcome(PREFILL, [vote("a", "correct"), vote("x", "correct", null, false)], null);
-    expect(o).toMatchObject({ state: "pending", needed: 1, counted: 1 });
-  });
-  it("only the first counting decisions decide: a late extra vote never undoes an agreement", () => {
-    const o = outcome(PREFILL, [vote("a", "correct"), vote("b", "correct"), vote("c", "unreadable")], null);
-    expect(o).toMatchObject({ state: "agreed", reviewers: ["a", "b"] });
-  });
-  it("orders votes by when each reviewer first decided, whatever the input order", () => {
-    const a = vote("a", "correct");
-    const b = vote("b", "unreadable");
-    const c = vote("c", "correct");
-    expect(outcome(PREFILL, [c, b, a], null)).toMatchObject({ state: "majority", reviewers: ["a", "b", "c"] });
-  });
-});
-
-describe("standing on gold lines", () => {
-  const rule = { floor: 0.8, minGold: 5 };
-  it("counts until enough gold is answered", () => {
-    expect(standing([false, false], rule, false)).toMatchObject({ counts: true, reason: "too_few_gold", accuracy: 0 });
-  });
-  it("stops counting below the floor, and counts again above it", () => {
-    expect(standing([true, true, true, false, false], rule, false)).toMatchObject({ counts: false, reason: "below_floor" });
-    expect(standing([true, true, true, true, false], rule, false)).toMatchObject({ counts: true, reason: "ok", accuracy: 0.8 });
+  it("95% from 20 on: 19 of 20 counts, 18 of 20 does not", () => {
+    expect(standing(20, 19, false).state).toBe("counting");
+    expect(standing(20, 18, false).state).toBe("below_floor");
+    expect(standing(40, 38, false).state).toBe("counting");
   });
   it("an admin exclusion always wins", () => {
-    expect(standing([true, true, true, true, true], rule, true)).toMatchObject({ counts: false, reason: "excluded" });
+    expect(standing(40, 40, true).state).toBe("excluded");
   });
-  it("a gold hit uses the same answer key", () => {
-    expect(goldHit(PREFILL, { value: "edit", text: "שלום עולם" }, { value: "correct", text: null })).toBe(true);
-    expect(goldHit(PREFILL, { value: "unreadable", text: null }, { value: "correct", text: null })).toBe(false);
+});
+
+describe("gold placement (§4)", () => {
+  it("1 in 10 over the first 100 lines, then 1 in 20", () => {
+    expect(goldDue(100)).toBe(10);
+    expect(goldDue(300)).toBe(20);
+  });
+  it("serves about the due number of gold lines, wherever the seed puts them", () => {
+    for (const offset of [0, 0.37, 0.99]) {
+      let lines = 0;
+      let gold = 0;
+      for (let k = 0; k < 1100; k++) {
+        if (goldNext(lines, gold, offset)) gold++;
+        else lines++;
+      }
+      expect(Math.abs(gold - goldDue(lines))).toBeLessThanOrEqual(1);
+    }
   });
 });
