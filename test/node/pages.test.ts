@@ -6,9 +6,9 @@ import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved ones: terms 2026-11-12-v1, privacy 2026-11-16-v2", () => {
+  it("versions are the approved ones: terms 2026-11-12-v1, privacy 2026-11-18-v3", () => {
     expect(TERMS_VERSION).toBe("2026-11-12-v1");
-    expect(PRIVACY_VERSION).toBe("2026-11-16-v2");
+    expect(PRIVACY_VERSION).toBe("2026-11-18-v3");
   });
 
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
@@ -69,6 +69,23 @@ describe("public pages (Google branding URLs)", () => {
     }
     expect(html).not.toContain("2026-11-16-v1");
     expect(readFileSync("public/index.html", "utf8")).toContain(PRIVACY_VERSION);
+  });
+
+  it("the check-lines item says what is compared, who sees it and what stops counting, in both languages (2026-11-18-v3)", () => {
+    const html = page("privacy.html");
+    for (const fact of [
+      "חלק מהשורות הן שורות שהתשובה עליהן ידועה",
+      "הדיוק גלוי רק למנהלים ולא מתפרסם",
+      "ההחלטות שלכם לא נספרות בהסכמה בין מתנדבים (הן נשמרות, ואפשר לשוב ולהיספר)",
+      "some lines have a known answer",
+      "It is visible to admins only and never published.",
+      "your decisions stop counting toward agreement between volunteers (they are kept, and you can count again)",
+    ]) {
+      expect(html).toContain(fact);
+    }
+    // After "Contributions are public", in each language.
+    expect(html.indexOf("Check lines")).toBeGreaterThan(html.indexOf("Contributions are public"));
+    expect(html.indexOf("שורות בדיקה")).toBeGreaterThan(html.indexOf("התרומות ציבוריות"));
   });
 
   it("the terms carry the contribution terms", () => {
