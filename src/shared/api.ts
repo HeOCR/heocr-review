@@ -131,6 +131,8 @@ export interface LineTranscribeView {
   crop: ImageView | null;
   context: Box | null;
   page: ImageView | null;
+  /** Every box on the page (page fractions), outlined around the current one so a split line's pieces show. */
+  boxes: Box[];
 }
 
 export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView | LineTranscribeView;

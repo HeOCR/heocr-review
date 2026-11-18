@@ -64,6 +64,7 @@ export const lineTranscribeImporter: TaskImporter = {
         continue;
       }
       const m = manifest.get(p.page_key)!;
+      const pageBoxes = p.lines.map((l) => transcribeBoxes(l.box, p.image_size).pageBox);
       items.push({
         externalId: p.page_key,
         title: `${p.page_key}${STRATUM_TITLE[p.stratum] ?? ""}`,
@@ -90,6 +91,7 @@ export const lineTranscribeImporter: TaskImporter = {
           box: line.box,
           page_box: b.pageBox,
           context_box: b.contextBox,
+          page_boxes: pageBoxes,
         };
         const externalId = `${p.page_key}#l${line.i}`;
         proposals.push({

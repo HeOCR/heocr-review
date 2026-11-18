@@ -285,6 +285,18 @@ export interface HExportJoin {
   reason: "unattached" | null;
 }
 
+/**
+ * Per page, over lines with two counted decisions: how many of those first two disagreed, and how many of those look
+ * like a split line read two ways (one typed the line, the other chose continued; or one typed a fragment of the
+ * other's line). Where the boxes confuse transcribers (data-collection).
+ */
+export interface HExportPageDisagreements {
+  page_key: string;
+  lines_compared: number;
+  disagreements: number;
+  split_disagreements: number;
+}
+
 export interface HExportPageFlag {
   page_key: string;
   kind: PageFlagKind;
@@ -316,6 +328,7 @@ export interface HDecisionsFile {
   page_flags: HExportPageFlag[];
   /** Pages of the box file not in the queue, and why (no_hebrew_text: until eval rules; no_boxes: nothing to type). */
   held_pages: { page_key: string; reason: string }[];
+  page_disagreements: HExportPageDisagreements[];
   reviewers: HExportReviewer[];
   admin_exclusions: { reviewer: string; excluded_at: string }[];
 }
@@ -327,7 +340,9 @@ export function hDecisionsFileProblems(raw: unknown, batchId: string, known: Set
   if (raw.batch_id !== batchId) out.push(`batch_id must be ${batchId}`);
   if (typeof raw.exported_at !== "string" || !ISO.test(raw.exported_at)) out.push("exported_at must be an ISO time");
   if (!Array.isArray(raw.decisions) || !Array.isArray(raw.lines) || !Array.isArray(raw.reviewers)) return [...out, "decisions, lines and reviewers must be arrays"];
-  if (!Array.isArray(raw.joins) || !Array.isArray(raw.page_flags) || !Array.isArray(raw.held_pages)) out.push("joins, page_flags and held_pages must be arrays");
+  if (!Array.isArray(raw.joins) || !Array.isArray(raw.page_flags) || !Array.isArray(raw.held_pages) || !Array.isArray(raw.page_disagreements)) {
+    out.push("joins, page_flags, held_pages and page_disagreements must be arrays");
+  }
   const ids = new Set<string>();
   raw.decisions.forEach((d: unknown, k: number) => {
     const at = `decisions[${k}]`;

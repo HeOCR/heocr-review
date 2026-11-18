@@ -260,7 +260,8 @@ Page images are stored upright with EXIF orientation applied, because boxes are 
   unreadable. `[?]` marks one illegible span inside a line.
 - **Box problems:** the boxes are machine-made and fragment on dense or faded pages. All three box problems are
   `not_on_page` for `agreement.py`. The export keeps which one the volunteer meant as `box_reason`:
-  - *part of a line in another box* (`continued`): the whole line is typed in its first, rightmost piece;
+  - *continued* (`continued`): the whole line is typed in its first, rightmost piece. Every line shows the rule,
+    and the band around it outlines all the page's boxes with the current one highlighted;
   - *no text* (`no_text`): a false box;
   - *box doesn't hold one line* (`not_on_page`): two lines merged in one box.
 

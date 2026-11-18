@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { joinsOf, normalizeTranscription, requiredLanguages } from "../../src/tasks/line_transcribe";
+import { joinsOf, normalizeTranscription, requiredLanguages, splitDisagreement } from "../../src/tasks/line_transcribe";
 import { lineTranscribeImporter } from "../../src/tasks/line_transcribe/importer";
 import { H_MANIFESTS, MANIFEST_FILES, REGISTERED_SHA256, agreementAction, hLineItemsProblems } from "../../src/tasks/line_transcribe/schema";
 
@@ -72,6 +72,14 @@ describe("h_line_items.v1", () => {
 });
 
 describe("box problems", () => {
+  it("count a split line read two ways as a split disagreement", () => {
+    const t = (text: string) => ({ value: "edit", text });
+    expect(splitDisagreement(t("שורה בדויה ארוכה"), { value: "continued", text: null })).toBe(true);
+    expect(splitDisagreement(t("שורה בדויה ארוכה"), t("שורה בדויה"))).toBe(true);
+    expect(splitDisagreement(t("שורה בדויה"), t("שורה אחרת"))).toBe(false);
+    expect(splitDisagreement({ value: "no_text", text: null }, { value: "continued", text: null })).toBe(false);
+  });
+
   it("are all not_on_page for agreement.py, with the reason kept", () => {
     expect(agreementAction("no_text")).toBe("not_on_page");
     expect(agreementAction("continued")).toBe("not_on_page");
@@ -132,21 +140,57 @@ describe("terms for transcription", () => {
 });
 
 describe("page images", () => {
-  it("are stored upright (EXIF orientation applied), so boxes in the displayed frame line up", async () => {
+  // Each page is drawn in its displayed frame (200x120, white, a black mark at MARK), then stored as the camera would:
+  // the pixels turned back and the EXIF orientation set. Stored upright, the mark must be where the box says.
+  const W = 200;
+  const H = 120;
+  const MARK = { left: 130, top: 20, width: 50, height: 30 };
+  /** sharp's clockwise turn that undoes each orientation's display turn (3: 180°, 6: 90° cw, 8: 90° ccw). */
+  const STORE_TURN: Record<number, number> = { 1: 0, 3: 180, 6: 270, 8: 90 };
+
+  it.each([1, 3, 6, 8])("orientation %i: the image is stored upright and the displayed-frame box lands on the mark", async (orientation) => {
     const { mkdtempSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const sharp = (await import("sharp")).default;
     const { readingPage } = await import("../../scripts/lib/media");
+    const { boxes } = await import("../../src/tasks/line_consensus/importer");
+    const displayed = await sharp({ create: { width: W, height: H, channels: 3, background: "#fff" } })
+      .composite([{ input: { create: { width: MARK.width, height: MARK.height, channels: 3, background: "#000" } }, left: MARK.left, top: MARK.top }])
+      .png()
+      .toBuffer();
+    const stored = await sharp(displayed).rotate(STORE_TURN[orientation]).jpeg({ quality: 95 }).withMetadata({ orientation }).toBuffer();
+    expect((await sharp(stored).metadata()).orientation ?? 1).toBe(orientation);
     const dir = mkdtempSync(join(tmpdir(), "heocr-exif-"));
-    // Stored 40x20, shown 20x40 (orientation 8: rotate 90° counter-clockwise).
-    const src = join(dir, "turned.jpg");
-    writeFileSync(src, await sharp({ create: { width: 40, height: 20, channels: 3, background: "#fff" } }).jpeg().withMetadata({ orientation: 8 }).toBuffer());
-    const page = await readingPage(dir, "b", "p", src, { width: 20, height: 40 });
-    expect([page.width, page.height]).toEqual([20, 40]);
+    const src = join(dir, `o${orientation}.jpg`);
+    writeFileSync(src, stored);
+    const page = await readingPage(dir, "b", `p${orientation}`, src, { width: W, height: H });
+    expect([page.width, page.height]).toEqual([W, H]);
     if (page.ref.source !== "static") throw new Error("expected a static page image");
-    const meta = await sharp(join(dir, page.ref.path)).metadata();
-    expect([meta.width, meta.height, meta.orientation ?? 1]).toEqual([20, 40, 1]);
-    await expect(readingPage(dir, "b", "q", src, { width: 40, height: 20 })).rejects.toThrow(/as displayed/);
+    const out = sharp(join(dir, page.ref.path));
+    expect([(await out.metadata()).width, (await out.metadata()).height, (await out.metadata()).orientation ?? 1]).toEqual([W, H, 1]);
+    const { data, info } = await out.greyscale().raw().toBuffer({ resolveWithObject: true });
+    const at = (fx: number, fy: number) => data[Math.floor(fy * info.height) * info.width + Math.floor(fx * info.width)]!;
+    // The box as the importer stores it (page fractions), from the mark in displayed pixels.
+    const { pageBox } = boxes([MARK.left, MARK.top, MARK.left + MARK.width, MARK.top + MARK.height], [W, H]);
+    expect(at((pageBox[0] + pageBox[2]) / 2, (pageBox[1] + pageBox[3]) / 2)).toBeLessThan(60);
+    expect(at(0.1, 0.8)).toBeGreaterThan(200);
+    // A declared size in the stored frame (unturned) is refused for the turned ones.
+    if (orientation >= 5) await expect(readingPage(dir, "b", `q${orientation}`, src, { width: H, height: W })).rejects.toThrow(/as displayed/);
+  });
+
+  it("orientation 1 comes out byte for byte as before the change (nothing already imported would differ)", async () => {
+    const { mkdtempSync, writeFileSync, readFileSync: read } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const sharp = (await import("sharp")).default;
+    const { readingPage, READING_PAGE_MAX_WIDTH } = await import("../../scripts/lib/media");
+    const dir = mkdtempSync(join(tmpdir(), "heocr-exif1-"));
+    const src = join(dir, "plain.jpg");
+    writeFileSync(src, await sharp({ create: { width: 300, height: 400, channels: 3, background: "#eee" } }).jpeg().toBuffer());
+    const page = await readingPage(dir, "b", "p", src);
+    if (page.ref.source !== "static") throw new Error("expected a static page image");
+    const before = await sharp(read(src)).resize({ width: Math.min(READING_PAGE_MAX_WIDTH, 300) }).greyscale().png({ palette: true, colors: 16, compressionLevel: 9 }).toBuffer();
+    expect(read(join(dir, page.ref.path)).equals(before)).toBe(true);
   });
 });

@@ -308,4 +308,26 @@ describe("handwriting transcription", () => {
     ]);
     expect(f.held_pages.map((h) => h.reason)).toEqual(["no_hebrew_text", "no_boxes"]);
   });
+
+  it("outlines the page's other boxes, and counts a split line read two ways as a disagreement per page", async () => {
+    const [a, b] = [await counting("t-sp1"), await counting("t-sp2")];
+    const l0 = await serveUntil(a, `${P1}#l0`);
+    const shown = (await call<{ proposal: { view: LineTranscribeView } }>(a, "GET", `/api/proposals/${l0}`)).body.proposal.view;
+    expect(shown.boxes).toHaveLength(1);
+    // One types the whole line, the other takes the box for a later piece: an ordinary disagreement, to a third.
+    await decide(a, l0, "edit", "שורה בדויה ארוכה");
+    await decide(b, await serveUntil(b, `${P1}#l0`), "continued");
+    expect(await lineState(l0)).toEqual({ state: "open", needed: 1 });
+    const l1 = await serveUntil(a, `${P1}#l1`);
+    await decide(a, l1, "edit", "שורה בדויה");
+    await decide(b, await serveUntil(b, `${P1}#l1`), "edit", "שורה בדויה");
+    const m = new Client();
+    admins = await m.signIn("t-sp-adm");
+    await m.acceptTerms();
+    type File = { page_disagreements: unknown[] };
+    const exp = await call<{ files: Record<string, File>; problems: string[] }>(m, "GET", `/api/admin/batches/${H}/export`);
+    expect(exp.body.problems).toEqual([]);
+    expect(exp.body.files["h_line_transcriptions.json"]!.page_disagreements).toEqual([{ page_key: P1, lines_compared: 2, disagreements: 1, split_disagreements: 1 }]);
+  });
 });
+

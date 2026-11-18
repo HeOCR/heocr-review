@@ -27,6 +27,11 @@ import { lineStrip } from "./line";
 import { viewer } from "./viewer";
 
 const LINE_HEIGHTS = [48, 64, 84, 108, 140, 180];
+/** Shown on every line (lead, 2026-11-18): the boxes around the marked one are outlined in the band below it. */
+const SPLIT_RULE = {
+  he: "אם במסגרת הזאת יש תחילת שורה (החלק הימני שלה) שממשיכה במסגרות אחרות, הקלידו את כל השורה. אם יש בה חלק מאוחר יותר של השורה, בחרו \"המשך שורה\".",
+  en: "If this box holds the start (rightmost part) of a line that continues in other boxes, type the whole line. If it holds a later part, choose 'continued'.",
+};
 const LANGS_KEY = "heocr.transcribe.languages";
 /** Latin letters in a Hebrew-script transcription usually mean the keyboard is in the wrong layout. */
 const LATIN = /[A-Za-z]/;
@@ -43,7 +48,7 @@ const H_CONVENTIONS: [string, string][] = [
   ["כתיב", "בדיוק כמו שכתוב, גם כתיב חסר, קיצורים וטעויות. לא מתקנים ולא משלימים"],
   ["קטע שאי אפשר לקרוא בתוך שורה", "[?] (כפתור), פעם אחת לכל קטע, בכל אורך"],
   ["כל השורה לא קריאה", "הכפתור \"כל השורה לא קריאה\""],
-  ["שורה שמחולקת לכמה מסגרות", "מקלידים את כל השורה במסגרת הראשונה שלה (הימנית ביותר). בשאר המסגרות: \"חלק משורה במסגרת אחרת\""],
+  ["שורה שמחולקת לכמה מסגרות", "מקלידים את כל השורה במסגרת הראשונה שלה (הימנית ביותר). בשאר המסגרות: \"המשך שורה\""],
   ["מסגרת על כתם, חותמת או דיו שעבר מהצד השני", "\"אין כאן טקסט\""],
   ["מסגרת על שתי שורות", "\"המסגרת לא מכילה שורה אחת\""],
   ["שורה בלי מסגרת", "\"יש כאן שורה בלי מסגרת\", ואז ממשיכים להקליד את השורה המסומנת"],
@@ -88,14 +93,14 @@ function onboarding(langs: Set<string>, onStart: () => void): HTMLElement {
       {},
       h("li", {}, "בכל פעם מוצגת שורה אחת מכתב יד. מקלידים אותה מאפס, בדיוק כמו שהיא כתובה."),
       h("li", {}, "קטע שאי אפשר לקרוא: הכפתור [?]. כל השורה לא קריאה: \"כל השורה לא קריאה\"."),
-      h("li", {}, "המסגרות סומנו במחשב ולפעמים טועות. שורה שמחולקת לכמה מסגרות מקלידים כולה במסגרת הימנית שלה, ובשאר המסגרות בוחרים \"חלק משורה במסגרת אחרת\". מסגרת בלי טקסט, מסגרת על שתי שורות ושורה בלי מסגרת: הכפתורים בשורה \"בעיה במסגרת\"."),
+      h("li", {}, "המסגרות סומנו במחשב ולפעמים טועות. שורה שמחולקת לכמה מסגרות מקלידים כולה במסגרת הימנית שלה, ובשאר המסגרות בוחרים \"המשך שורה\". מסגרת בלי טקסט, מסגרת על שתי שורות ושורה בלי מסגרת: הכפתורים בשורה \"בעיה במסגרת\"."),
       h("li", {}, "יש ניקוד: מקלידים אותיות בלבד ומסמנים \"יש ניקוד\"."),
       h("li", {}, "כל שורה מתועתקת בנפרד בידי כמה מתנדבים, וההחלטה שלכם סופית. לא רואים כאן תעתיקים של אחרים."),
     ),
     h(
       "p",
       { lang: "en", dir: "ltr", class: "muted small" },
-      "One handwritten line at a time: type it from scratch, exactly as written. Use [?] for a part you can't read, or mark the whole line unreadable. The boxes are machine-made: if a line is split over several boxes, type the whole line in its first (rightmost) box and mark the others \"part of a line in another box\". Use the box-problem buttons for a box with no text, a box over two lines, or a line with no box. Several volunteers transcribe each line independently, and your transcription is final.",
+      "One handwritten line at a time: type it from scratch, exactly as written. Use [?] for a part you can't read, or mark the whole line unreadable. The boxes are machine-made: if a line is split over several boxes, type the whole line in its first (rightmost) box and choose \"continued\" on the others. Use the box-problem buttons for a box with no text, a box over two lines, or a line with no box. Several volunteers transcribe each line independently, and your transcription is final.",
     ),
     h("h3", {}, "מקלדת / Keyboard"),
     h("p", { class: "small" }, "העבירו את המקלדת לעברית לפני שמתחילים. בטלפון: מקש הגלובוס או החלפת השפה במקלדת.", h("span", { class: "muted block", lang: "en", dir: "ltr" }, "Switch your keyboard to Hebrew first. On a phone: the globe or language key.")),
@@ -303,7 +308,7 @@ export function lineTranscribeView(batch: BatchSummary, hooks: ReviewHooks, star
       holder.replaceChildren(viewer(null, v.page).el, h("div", { class: "row" }, toggle));
       return;
     }
-    const band = v.crop && v.context ? contextBand(v.crop, v.context, Math.max(200, holder.clientWidth || root.clientWidth || 360)) : null;
+    const band = v.crop && v.context ? contextBand(v.crop, v.context, Math.max(200, holder.clientWidth || root.clientWidth || 360), v.boxes) : null;
     holder.replaceChildren(h("div", { class: "ctxscroll", dir: "ltr" }, band), h("div", { class: "row" }, toggle));
   }
 
@@ -345,6 +350,12 @@ export function lineTranscribeView(batch: BatchSummary, hooks: ReviewHooks, star
           { class: "ask" },
           "הקלידו את השורה המסומנת בדיוק כמו שהיא כתובה.",
           h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Type the marked line exactly as written."),
+        ),
+        h(
+          "p",
+          { class: "small split" },
+          SPLIT_RULE.he,
+          h("span", { class: "muted block", lang: "en", dir: "ltr" }, SPLIT_RULE.en),
         ),
         h("div", { class: "linebox" }),
         mine ? h("p", { class: "mine" }, `ההחלטה שלך: ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "", " · החלטה סופית.") : typingBox(p),

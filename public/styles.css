@@ -190,6 +190,7 @@ mark.attn { background: var(--attn-bg); outline: 1px solid var(--attn-line); }
 .ctxbox { margin-top: 12px; }
 .ctxscroll { background: var(--scan-bg); border: 1px solid var(--line); border-radius: 8px; text-align: center; overflow: hidden; }
 .ctxband { width: 100%; }
+.ctxband .ob { position: absolute; border: 1px dashed var(--attn-line); box-sizing: border-box; pointer-events: none; opacity: 0.8; }
 .attrib { margin: 10px 0 0; overflow-wrap: anywhere; }
 .actions.five { grid-template-columns: repeat(5, 1fr); }
 .actions.six { grid-template-columns: repeat(6, 1fr); }

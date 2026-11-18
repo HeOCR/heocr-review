@@ -17,7 +17,7 @@ import type { DecisionOption, LineTranscribeView } from "../../shared/api";
 import { imageUrl } from "../../shared/media";
 import { hasNiqqud } from "../../shared/niqqud";
 import { lineTextProblems } from "../page_review/schema";
-import { GOLD_FLOOR, GOLD_MIN, notCountedReason, standing, value, type LineAction, type StandingState } from "../line_consensus/consensus";
+import { GOLD_FLOOR, GOLD_MIN, norm, notCountedReason, standing, value, type LineAction, type StandingState } from "../line_consensus/consensus";
 import { routeLine, standingOf, type StandingRow } from "../line_consensus/index";
 import { AGREEMENT_PY_SHA256 } from "../line_consensus/schema";
 import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType } from "../types";
@@ -35,6 +35,7 @@ import {
   type HAction,
   type HAppAction,
   type HExportJoin,
+  type HExportPageDisagreements,
   type HExportPageFlag,
   type PageFlagKind,
   type PixelBox,
@@ -68,6 +69,8 @@ export interface LineTranscribePayload {
   box: PixelBox;
   page_box: Box;
   context_box: Box;
+  /** Every box on the page, in reading order (page fractions). */
+  page_boxes: Box[];
 }
 
 export interface LineTranscribeSource {
@@ -90,7 +93,7 @@ const OPTIONS: DecisionOption[] = [
   { value: "edit", label: { he: "שמירה", en: "Save" }, withText: true },
   { value: "print_has_niqqud", label: { he: "יש ניקוד (הקלדתי בלעדיו)", en: "Has niqqud (typed without)" }, withText: true },
   { value: "unreadable", label: { he: "כל השורה לא קריאה", en: "Whole line unreadable" }, withText: false },
-  { value: "continued", label: { he: "חלק משורה במסגרת אחרת", en: "Part of a line in another box" }, withText: false },
+  { value: "continued", label: { he: "המשך שורה", en: "Continued" }, withText: false },
   { value: "no_text", label: { he: "אין כאן טקסט", en: "No text here" }, withText: false },
   { value: "not_on_page", label: { he: "המסגרת לא מכילה שורה אחת", en: "Box doesn't hold one line" }, withText: false },
 ];
@@ -178,6 +181,20 @@ export function joinsOf(lines: { page_key: string; i: number; box: PixelBox; rol
   return out.sort((a, b) => a.page_key.localeCompare(b.page_key) || (a.first ?? -1) - (b.first ?? -1));
 }
 
+const TYPED = new Set(["edit", "print_has_niqqud"]);
+
+/**
+ * Whether two disagreeing decisions on a box look like a split line read two ways: one transcriber typed the line
+ * and the other marked the box continued, or one typed a fragment of what the other typed.
+ */
+export function splitDisagreement(a: { value: string; text: string | null }, b: { value: string; text: string | null }): boolean {
+  const [ta, tb] = [TYPED.has(a.value), TYPED.has(b.value)];
+  if ((a.value === "continued" && tb) || (b.value === "continued" && ta)) return true;
+  if (!ta || !tb) return false;
+  const [x, y] = [norm(a.text ?? ""), norm(b.text ?? "")];
+  return x !== y && (x.includes(y) || y.includes(x));
+}
+
 function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: ExportExtra): HDecisionsFile {
   const src = sourceOf(batch);
   const maintainer = new Set(extra.maintainerDecisions);
@@ -186,6 +203,7 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
   const decisions: HExportDecision[] = [];
   const lines: HExportLine[] = [];
   const strata: Record<string, Record<string, number>> = {};
+  const perPage = new Map<string, HExportPageDisagreements>();
   const sorted = resolved.slice().sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order);
   for (const r of sorted) {
     const x = payloadOf(r.proposal);
@@ -225,6 +243,18 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
       const m = maint[maint.length - 1]!;
       reference = { action: agreementAction(m.value) as HAction, text: m.text, box_reason: boxReasonOf(m.value) };
     } else if (routed.state === "to_maintainer") outcome = "to_maintainer";
+    // The first two counted decisions (what resolve() compares first): disagreements per page, for data-collection.
+    const firstTwo = vol.filter((d) => notCountedReason(standingOf(standings, d.reviewerId).state) === null).slice(0, 2);
+    if (firstTwo.length === 2) {
+      const pg = perPage.get(x.page_key) ?? { page_key: x.page_key, lines_compared: 0, disagreements: 0, split_disagreements: 0 };
+      pg.lines_compared++;
+      const [a, b] = firstTwo as [DecisionRecord, DecisionRecord];
+      if (value(asLine(a), "") !== value(asLine(b), "")) {
+        pg.disagreements++;
+        if (splitDisagreement(a, b)) pg.split_disagreements++;
+      }
+      perPage.set(x.page_key, pg);
+    }
     const tally = (strata[x.stratum] ??= {});
     tally[outcome] = (tally[outcome] ?? 0) + 1;
     lines.push({ page_key: x.page_key, i: x.i, eval_set: x.eval_set, stratum: x.stratum, languages: x.languages, box: x.box, outcome, reference, decision_ids: ds.map((d) => d.id) });
@@ -265,6 +295,7 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
       }),
     ),
     held_pages: src.held_pages ?? [],
+    page_disagreements: [...perPage.values()].sort((a, b) => a.page_key.localeCompare(b.page_key)),
     reviewers,
     admin_exclusions: [...excluded].map(([reviewer, excluded_at]) => ({ reviewer, excluded_at })).sort((a, b) => a.reviewer.localeCompare(b.reviewer)),
   };
@@ -290,6 +321,7 @@ export const lineTranscribe: TaskType = {
       crop: page ? { ...page, box: x.page_box } : null,
       context: x.context_box,
       page: page ? { ...page, box: x.page_box } : null,
+      boxes: (x.page_boxes ?? []).filter((b) => b.some((v, k) => v !== x.page_box[k])),
     };
   },
 
