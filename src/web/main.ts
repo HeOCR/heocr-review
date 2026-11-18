@@ -4,6 +4,7 @@ import { h, mount } from "./dom";
 import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
 import { lineConsensusView } from "./views/consensus";
+import { lineTranscribeView } from "./views/transcribe";
 import { lineVerifyView } from "./views/line";
 import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
@@ -91,7 +92,9 @@ async function route(): Promise<void> {
         ? pageReviewView(batch, hooks, startAt, subset?.id)
         : batch.taskType === "line_consensus"
           ? lineConsensusView(batch, hooks, startAt)
-          : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
+          : batch.taskType === "line_transcribe"
+            ? lineTranscribeView(batch, hooks, startAt)
+            : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
     show(
       h(
         "div",

@@ -2,6 +2,7 @@ import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
 import { cleanDisplayName, displayNameProblem } from "../shared/displayName";
 import { TERMS_STATUS, TERMS_VERSION } from "../shared/terms";
 import { buildExport } from "../tasks/export";
+import { PAGE_FLAG_KINDS, TRANSCRIBE_TERMS_VERSION, termsCoverTranscription } from "../tasks/line_transcribe/schema";
 import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { taskType } from "../tasks/registry";
 import { devAuthEnabled, devProvider } from "./auth/dev";
@@ -17,12 +18,16 @@ import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import {
   afterLineDecision,
+  answerPageFlag,
   assertConsensusEnabled,
   consensusProgress,
   exportExtras,
+  flaggedPages,
   isConsensus,
+  isTranscribe,
   lineOpenTo,
   nextLine,
+  reportPageFlag,
   setExclusion,
   volunteerReport,
 } from "./consensus";
@@ -171,6 +176,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
+    if (isTranscribe(b) && !transcribeOpenTo(ctx, reviewer)) continue;
     out.push({
       id: b.id,
       taskType: b.taskType,
@@ -181,6 +187,13 @@ export async function batches(ctx: Ctx): Promise<Response> {
     });
   }
   return json({ batches: out });
+}
+
+/** Transcription is open to the maintainer, and to reviewers whose accepted terms cover typing handwritten pages. */
+function transcribeOpenTo(ctx: Ctx, reviewer: ReviewerRow): boolean {
+  if (isAdmin(ctx.env, reviewer.id)) return true;
+  const dev = ctx.env.ENVIRONMENT === "development" ? ctx.env.DEV_TRANSCRIBE_TERMS_VERSION : undefined;
+  return termsCoverTranscription(reviewer.terms_version, dev ?? TRANSCRIBE_TERMS_VERSION);
 }
 
 async function openBatch(ctx: Ctx, id: string) {
@@ -194,7 +207,14 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
-  if (isConsensus(batch)) return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now));
+  if (isTranscribe(batch) && !transcribeOpenTo(ctx, reviewer)) throw new HttpError(404, "not_found");
+  if (isConsensus(batch)) {
+    // ?languages=jrb,lad: languages besides Hebrew the volunteer says they read, for this session only (never stored).
+    const raw = new URL(ctx.request.url).searchParams.get("languages") ?? "";
+    const languages = raw === "" ? [] : raw.split(",");
+    if (languages.length > 8 || !languages.every((l) => /^[a-z]{2,3}$/.test(l))) throw new HttpError(400, "invalid_languages", "languages must be language codes");
+    return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now, languages));
+  }
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
   const subsetId = new URL(ctx.request.url).searchParams.get("subset");
   let filter = null;
@@ -212,6 +232,8 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   const batch = await openBatch(ctx, proposal.batchId);
   // A volunteer line: only one this reviewer was served (or decided); the maintainer's: only one that went to them.
   if (isConsensus(batch)) {
+    const reviewer = await getReviewer(ctx.env.DB, reviewerId);
+    if (isTranscribe(batch) && (!reviewer || !transcribeOpenTo(ctx, reviewer))) throw new HttpError(404, "not_found");
     if (!(await lineOpenTo(ctx.env.DB, proposal, reviewerId, isAdmin(ctx.env, reviewerId)))) throw new HttpError(409, "not_open", "this line is not open to you");
     return { proposal, batch };
   }
@@ -358,6 +380,23 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
   return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
 }
 
+/**
+ * line_transcribe: report that the page of a line you were served has a text line no box covers. Recorded once per
+ * volunteer and page; the line in front of you stays yours to type.
+ */
+export async function flagPage(ctx: Ctx, id: number): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
+  const body = await readJson(ctx.request);
+  if (!(PAGE_FLAG_KINDS as readonly unknown[]).includes(body.kind)) throw new HttpError(400, "invalid_request", `kind must be one of ${PAGE_FLAG_KINDS.join(", ")}`);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (!isTranscribe(batch)) throw new HttpError(404, "not_found");
+  await reportPageFlag(ctx.env.DB, proposal, reviewer.id, body.kind as string, ctx.now);
+  return json({ ok: true });
+}
+
 export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
@@ -381,7 +420,7 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
   for (const batch of await listBatches(ctx.env.DB, false)) {
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
-    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch) : {};
     const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
     const perReviewer = new Map<string, number>();
     for (const d of rows.decisions) if (d.supersededAt === null) perReviewer.set(d.reviewerId, (perReviewer.get(d.reviewerId) ?? 0) + 1);
@@ -404,7 +443,7 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   if (!batch) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
-  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch) : {};
   const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
   return json({
     counts: result.counts,
@@ -438,4 +477,30 @@ export async function adminExclusion(ctx: Ctx, batchId: string, reviewerId: stri
   if (!(await getReviewer(ctx.env.DB, reviewerId))) throw new HttpError(404, "not_found");
   await setExclusion(ctx.env.DB, batch, reviewerId, body.excluded, ctx.now);
   return json(await volunteerReport(ctx.env.DB, batch));
+}
+
+async function transcribeBatch(ctx: Ctx, batchId: string) {
+  const batch = await consensusBatch(ctx, batchId);
+  if (!isTranscribe(batch)) throw new HttpError(404, "not_found");
+  return batch;
+}
+
+/** Admin: the maintainer's queue of pages volunteers reported as having text outside the boxes. */
+export async function adminPageFlags(ctx: Ctx, batchId: string): Promise<Response> {
+  await requireAdmin(ctx);
+  const batch = await transcribeBatch(ctx, batchId);
+  return json({ pages: await flaggedPages(ctx.env.DB, batch) });
+}
+
+/** Admin: answer a reported page ({kind, answer: "confirmed" | "dismissed" | null}). */
+export async function adminPageFlagAnswer(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const admin = await requireAdmin(ctx);
+  await enforce(ctx.env.DB, LIMITS.writeMinute, admin.id, ctx.now);
+  const batch = await transcribeBatch(ctx, batchId);
+  const body = await readJson(ctx.request);
+  if (!(PAGE_FLAG_KINDS as readonly unknown[]).includes(body.kind)) throw new HttpError(400, "invalid_request", `kind must be one of ${PAGE_FLAG_KINDS.join(", ")}`);
+  if (!(body.answer === "confirmed" || body.answer === "dismissed" || body.answer === null)) throw new HttpError(400, "invalid_request", "answer must be confirmed, dismissed or null");
+  if (!(await answerPageFlag(ctx.env.DB, batch, itemId, body.kind as string, body.answer, admin.id, ctx.now))) throw new HttpError(404, "not_found");
+  return json({ pages: await flaggedPages(ctx.env.DB, batch) });
 }

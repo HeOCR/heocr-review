@@ -30,9 +30,10 @@ const KEYS: [string, string, string][] = [
 
 /**
  * The band around the line, cut from the page image (the image is the page; `region` and the line's box are page
- * fractions), at most the holder's width and 160 px high, with the line outlined.
+ * fractions), at most the holder's width and 160 px high, with the line outlined. `others`: the page's other boxes,
+ * outlined thinly (handwriting transcription: a split line's pieces are in view).
  */
-function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
+export function contextBand(img: ImageView, region: Box, width: number, others: Box[] = []): HTMLElement {
   const rw = (region[2] - region[0]) * img.width;
   const rh = (region[3] - region[1]) * img.height;
   const scale = Math.min(width / rw, 160 / rh);
@@ -40,6 +41,14 @@ function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
   image.style.cssText = `position:absolute;max-width:none;width:${img.width * scale}px;left:${-region[0] * img.width * scale}px;top:${-region[1] * img.height * scale}px`;
   const band = h("div", { class: "frame ctxband" }, image);
   band.style.cssText = `position:relative;overflow:hidden;width:${rw * scale}px;height:${rh * scale}px`;
+  const at = (b: Box) =>
+    `left:${((b[0] - region[0]) / (region[2] - region[0])) * 100}%;top:${((b[1] - region[1]) / (region[3] - region[1])) * 100}%;width:${((b[2] - b[0]) / (region[2] - region[0])) * 100}%;height:${((b[3] - b[1]) / (region[3] - region[1])) * 100}%`;
+  for (const o of others) {
+    if (o[3] <= region[1] || o[1] >= region[3]) continue;
+    const ob = h("div", { class: "ob" });
+    ob.style.cssText = at(o);
+    band.append(ob);
+  }
   const b = img.box;
   if (b) {
     const hl = h("div", { class: "hl" });

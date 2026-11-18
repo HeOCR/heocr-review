@@ -190,6 +190,7 @@ mark.attn { background: var(--attn-bg); outline: 1px solid var(--attn-line); }
 .ctxbox { margin-top: 12px; }
 .ctxscroll { background: var(--scan-bg); border: 1px solid var(--line); border-radius: 8px; text-align: center; overflow: hidden; }
 .ctxband { width: 100%; }
+.ctxband .ob { position: absolute; border: 1px dashed var(--attn-line); box-sizing: border-box; pointer-events: none; opacity: 0.8; }
 .attrib { margin: 10px 0 0; overflow-wrap: anywhere; }
 .actions.five { grid-template-columns: repeat(5, 1fr); }
 .actions.six { grid-template-columns: repeat(6, 1fr); }
@@ -262,6 +263,22 @@ main:has(.pagereview) { max-width: 1500px; }
   .prline input.lt { font-size: 19px; }
   .conventions dl { grid-template-columns: 1fr; }
 }
+
+/* Handwriting transcription (line_transcribe) */
+.transcribe .typebox { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.transcribe textarea.typed { font-size: 22px; line-height: 1.5; width: 100%; box-sizing: border-box; }
+.transcribe .warn { color: var(--attn-line); margin: 0; }
+.transcribe .keys-row { gap: 6px; flex-wrap: wrap; }
+.transcribe .kbdhint { margin: 0; }
+.actions.four { grid-template-columns: repeat(4, 1fr); }
+.transcribe .boxproblems { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.transcribe .boxproblems .act { padding: 6px 10px; min-height: 40px; }
+.flagged { display: grid; gap: 12px; }
+.flagged figure { margin: 0; position: relative; max-width: 420px; }
+.flagged figure img { width: 100%; height: auto; display: block; }
+.flagged figure .fbox { position: absolute; border: 1px solid var(--attn-line); box-sizing: border-box; pointer-events: none; }
+.actions.four .act { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; }
+@media (max-width: 520px) { .actions.four { grid-template-columns: repeat(2, 1fr); } .actions.four .act { min-height: 52px; } }
 
 /* Volunteer line review (line_consensus) */
 .consensus .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }

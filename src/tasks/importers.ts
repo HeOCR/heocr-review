@@ -1,5 +1,6 @@
 import type { TaskImporter } from "./import";
 import { lineConsensusImporter } from "./line_consensus/importer";
+import { lineTranscribeImporter } from "./line_transcribe/importer";
 import { lineVerifyImporter } from "./line_verify/importer";
 import { pageReviewImporter } from "./page_review/importer";
 import { referenceAuditImporter } from "./reference_audit/importer";
@@ -9,6 +10,7 @@ const IMPORTERS: Record<string, TaskImporter> = {
   [lineVerifyImporter.taskType]: lineVerifyImporter,
   [pageReviewImporter.taskType]: pageReviewImporter,
   [lineConsensusImporter.taskType]: lineConsensusImporter,
+  [lineTranscribeImporter.taskType]: lineTranscribeImporter,
 };
 
 export function importer(taskType: string): TaskImporter | undefined {

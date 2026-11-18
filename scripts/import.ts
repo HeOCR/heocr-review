@@ -70,6 +70,7 @@ async function main(): Promise<void> {
   const pagesDir = typeof flags["pages-dir"] === "string" ? flags["pages-dir"] : null;
   if (taskId === "line_verify" && !bundleDir) throw new Error("line_verify imports a bundle: give --bundle <dir with items.json and pages/>");
   if (taskId === "line_consensus" && !bundleDir) throw new Error("line_consensus imports a bundle: give --bundle <dir with line_items_v1.json, its sidecars and pages/>");
+  if (taskId === "line_transcribe" && !bundleDir) throw new Error("line_transcribe imports a bundle: give --bundle <dir with h_line_items_v1.json, h_eval_v1/manifest.jsonl, h_eval_v1_1/manifest.jsonl and the page images at their HASH paths>");
   if (taskId === "page_review" && !bundleDir) throw new Error("page_review imports a bundle: give --bundle <dir with batch_manifest.json and pages/>");
   if (!bundleDir && !pagesDir) throw new Error("give --bundle, or --proposals with --pages-dir");
   const t = target(flags);
@@ -97,7 +98,13 @@ async function main(): Promise<void> {
   for (const name of task.sidecars ?? []) {
     const path = bundleDir ? join(bundleDir, name) : null;
     if (!path || !existsSync(path)) continue;
-    const side = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const text = readFileSync(path, "utf8");
+    // A .jsonl sidecar (a registered manifest) is passed in as its list of rows.
+    if (name.endsWith(".jsonl")) {
+      sidecars[name] = text.split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as unknown);
+      continue;
+    }
+    const side = JSON.parse(text) as Record<string, unknown>;
     if (typeof side.manifest_sha256 === "string" && side.manifest_sha256 !== (task.manifestSha256 ?? sha256File(proposalsPath))) {
       throw new Error(`${name} was made for another ${task.bundleFile} (manifest_sha256 differs)`);
     }
@@ -131,7 +138,8 @@ async function main(): Promise<void> {
     const proposals = byItem.get(item.externalId) ?? [];
     const stem = item.imageStem ?? safeSegment(item.externalId);
     if (item.bundleImage && task.fullPages) {
-      const page = await readingPage(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path));
+      const { width, height } = item.bundleImage;
+      const page = await readingPage(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path), width && height ? { width, height } : undefined);
       for (const p of proposals) media.set(p.externalId, { page: { ...page, box: p.pageBox } });
       continue;
     }
