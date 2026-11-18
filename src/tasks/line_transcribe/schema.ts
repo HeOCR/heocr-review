@@ -26,6 +26,17 @@ export const H_MANIFESTS: Record<string, string> = {
 };
 export const H_BATCH_ID = "h_eval_v1_transcribe_v0";
 /**
+ * The first contribution terms whose scope covers typing text from handwritten pages (drafted separately, held for
+ * the maintainer). Until a volunteer has accepted these or later terms, this task is listed and served to the
+ * maintainer only: a matter of the terms, not of accuracy (lead, 2026-11-18).
+ */
+export const TRANSCRIBE_TERMS_VERSION = "2026-11-18-v1";
+
+/** Whether accepted terms `accepted` cover transcription (versions are date-ordered strings). */
+export function termsCoverTranscription(accepted: string | null, required: string = TRANSCRIBE_TERMS_VERSION): boolean {
+  return accepted !== null && accepted >= required;
+}
+/**
  * Whose transcriptions count: volunteers counting in the mid-century volunteer batch (95% on at least 20 gold
  * lines). Anyone may transcribe; other decisions are kept and do not count (lead, 2026-11-18: a counting rule, not
  * an access gate). Handwriting gold comes with a later amendment.

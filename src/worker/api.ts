@@ -2,6 +2,7 @@ import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
 import { cleanDisplayName, displayNameProblem } from "../shared/displayName";
 import { TERMS_STATUS, TERMS_VERSION } from "../shared/terms";
 import { buildExport } from "../tasks/export";
+import { TRANSCRIBE_TERMS_VERSION, termsCoverTranscription } from "../tasks/line_transcribe/schema";
 import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { taskType } from "../tasks/registry";
 import { devAuthEnabled, devProvider } from "./auth/dev";
@@ -21,6 +22,7 @@ import {
   consensusProgress,
   exportExtras,
   isConsensus,
+  isTranscribe,
   lineOpenTo,
   nextLine,
   setExclusion,
@@ -171,6 +173,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
+    if (isTranscribe(b) && !transcribeOpenTo(ctx, reviewer)) continue;
     out.push({
       id: b.id,
       taskType: b.taskType,
@@ -181,6 +184,13 @@ export async function batches(ctx: Ctx): Promise<Response> {
     });
   }
   return json({ batches: out });
+}
+
+/** Transcription is open to the maintainer, and to reviewers whose accepted terms cover typing handwritten pages. */
+function transcribeOpenTo(ctx: Ctx, reviewer: ReviewerRow): boolean {
+  if (isAdmin(ctx.env, reviewer.id)) return true;
+  const dev = ctx.env.ENVIRONMENT === "development" ? ctx.env.DEV_TRANSCRIBE_TERMS_VERSION : undefined;
+  return termsCoverTranscription(reviewer.terms_version, dev ?? TRANSCRIBE_TERMS_VERSION);
 }
 
 async function openBatch(ctx: Ctx, id: string) {
@@ -194,6 +204,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
+  if (isTranscribe(batch) && !transcribeOpenTo(ctx, reviewer)) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) {
     // ?languages=jrb,lad: languages besides Hebrew the volunteer says they read, for this session only (never stored).
     const raw = new URL(ctx.request.url).searchParams.get("languages") ?? "";
@@ -218,6 +229,8 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   const batch = await openBatch(ctx, proposal.batchId);
   // A volunteer line: only one this reviewer was served (or decided); the maintainer's: only one that went to them.
   if (isConsensus(batch)) {
+    const reviewer = await getReviewer(ctx.env.DB, reviewerId);
+    if (isTranscribe(batch) && (!reviewer || !transcribeOpenTo(ctx, reviewer))) throw new HttpError(404, "not_found");
     if (!(await lineOpenTo(ctx.env.DB, proposal, reviewerId, isAdmin(ctx.env, reviewerId)))) throw new HttpError(409, "not_open", "this line is not open to you");
     return { proposal, batch };
   }

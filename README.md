@@ -257,6 +257,10 @@ data-collection makes and eval registers) and `pages/`. The import refuses the b
   batch (95% on at least 20 gold lines) count toward agreement. Other decisions are kept and don't count, so a line
   is offered until counted decisions settle it. A change in a volunteer's standing there, or an admin's exclusion,
   is applied to their H lines. There is no handwriting gold yet.
+- **Terms first:** until a volunteer has accepted terms that cover typing handwritten pages (`TRANSCRIBE_TERMS_VERSION`
+  in `src/tasks/line_transcribe/schema.ts`, held for the maintainer), the task is listed and served to the maintainer
+  only, on preview too. Tests and local dev may set `DEV_TRANSCRIBE_TERMS_VERSION`; preview and production ignore it.
+- **The maintainer** only breaks ties in this batch; he is not a transcriber.
 - **Strata kept apart:** `primary`, `seen_writer` and `other_hebrew_script` are on every line of the export
   (`h_line_transcriptions.v0`), with counts per stratum. Volunteers are not told a page is a seen writer's.
 - **Other languages:** `other_hebrew_script` lines are served only when the volunteer ticks, for the session, that

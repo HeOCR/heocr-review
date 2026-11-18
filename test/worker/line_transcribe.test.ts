@@ -14,10 +14,13 @@ const JRB = "nli__fixture003__p0002";
 const LAD = "nli__fixture004__p0001";
 const exec = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
 let admins = "";
+/** The terms version that covers transcription in these tests (development override); undefined: the real one. */
+let devTerms: string | undefined;
 
 beforeEach(async () => {
   await env.DB.batch([...env.TEST_LINE_CONSENSUS_SQL, ...env.TEST_LINE_TRANSCRIBE_SQL].map((s) => env.DB.prepare(s)));
   admins = "";
+  devTerms = TERMS_VERSION;
 });
 
 async function call<T = Record<string, unknown>>(c: Client, method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
@@ -25,7 +28,7 @@ async function call<T = Record<string, unknown>>(c: Client, method: string, path
   if (body !== undefined) headers["content-type"] = "application/json";
   const res = await handle(
     new Request(ORIGIN + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }),
-    { ...env, CONSENSUS_ENABLED: "1", ADMIN_REVIEWER_IDS: admins },
+    { ...env, CONSENSUS_ENABLED: "1", ADMIN_REVIEWER_IDS: admins, DEV_TRANSCRIBE_TERMS_VERSION: devTerms },
     exec,
   );
   return { status: res.status, body: (await res.json()) as T };
@@ -96,6 +99,22 @@ async function serveUntil(c: Client, externalId: string): Promise<number> {
 }
 
 describe("handwriting transcription", () => {
+  it("is served to the maintainer only until a volunteer has accepted terms that cover typing handwritten pages", async () => {
+    devTerms = undefined;
+    const a = await counting("t-terms");
+    const list = await call<{ batches: { id: string }[] }>(a, "GET", "/api/batches");
+    expect(list.body.batches.map((b) => b.id)).not.toContain(H);
+    expect((await call(a, "GET", `/api/batches/${H}/next`)).status).toBe(404);
+    const id = (await env.DB.prepare("SELECT id FROM proposals WHERE batch_id = ?1 LIMIT 1").bind(H).first<{ id: number }>())!.id;
+    expect((await call(a, "GET", `/api/proposals/${id}`)).status).toBe(404);
+    expect((await call(a, "POST", `/api/proposals/${id}/decision`, { value: "unreadable" })).status).toBe(404);
+    const m = new Client();
+    admins = await m.signIn("t-terms-admin");
+    await m.acceptTerms();
+    expect((await call<{ batches: { id: string }[] }>(m, "GET", "/api/batches")).body.batches.map((b) => b.id)).toContain(H);
+    expect((await call(m, "GET", `/api/batches/${H}/next`)).status).toBe(200);
+  });
+
   it("is open to anyone, but only volunteers at the mid-century floor count toward agreement", async () => {
     const [none, low, few] = [await volunteer("t-none"), await volunteer("t-low"), await volunteer("t-few")];
     await giveGold(low.id, 18, 2);

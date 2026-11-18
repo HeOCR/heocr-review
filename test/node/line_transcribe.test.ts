@@ -51,3 +51,14 @@ describe("transcriptions", () => {
     expect(requiredLanguages({ stratum: "primary", languages: ["he", "jrb"] })).toEqual([]);
   });
 });
+
+describe("terms for transcription", () => {
+  it("cover it only from TRANSCRIBE_TERMS_VERSION on", async () => {
+    const { TRANSCRIBE_TERMS_VERSION, termsCoverTranscription } = await import("../../src/tasks/line_transcribe/schema");
+    const { TERMS_VERSION } = await import("../../src/shared/terms");
+    expect(termsCoverTranscription(TERMS_VERSION)).toBe(TERMS_VERSION >= TRANSCRIBE_TERMS_VERSION);
+    expect(termsCoverTranscription(null)).toBe(false);
+    expect(termsCoverTranscription("2026-11-12-v1")).toBe(false);
+    expect(termsCoverTranscription(TRANSCRIBE_TERMS_VERSION)).toBe(true);
+  });
+});
