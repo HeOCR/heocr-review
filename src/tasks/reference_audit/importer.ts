@@ -2,9 +2,7 @@
 import type { ImportBundle, TaskImporter } from "../import";
 import { CATEGORY_PRIORITY, CONFIDENCE_PRIORITY, DECISIONS_DESCRIPTION, TASK_TYPE_ID, type ReferenceAuditPayload, type ReferenceAuditSource } from "./index";
 import { proposalsFileProblems, type RaProposalsFile } from "./schema";
-
-/** Only openly licensed text may be imported (Wikisource is CC BY-SA 4.0). */
-const OPEN_LICENSE = /\b(CC BY-SA|CC BY|CC0|public domain)\b/i;
+import { OPEN_LICENCE_PROBLEM, isOpenLicence } from "../../shared/licence";
 
 /** The serving order (see CATEGORY_PRIORITY): category, then lower confidence first, then position for stability. */
 export function priority(p: RaProposalsFile["proposals"][number]): (string | number)[] {
@@ -29,9 +27,8 @@ export const referenceAuditImporter: TaskImporter = {
     const problems = proposalsFileProblems(raw);
     if (problems.length) return problems;
     const file = raw as RaProposalsFile;
-    if (!file.text_license || !OPEN_LICENSE.test(file.text_license)) {
-      problems.push("text_license must name an open licence (CC BY-SA, CC BY, CC0 or public domain)");
-    }
+    // Only openly licensed text may be imported (Wikisource is CC BY-SA 4.0).
+    if (!isOpenLicence(file.text_license)) problems.push(OPEN_LICENCE_PROBLEM);
     return problems;
   },
 

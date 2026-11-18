@@ -50,6 +50,13 @@ export interface LineVerifyView {
   pageLabel: string;
   attribution: string;
   textLicense: string;
+  /** The page's typeface (v1.1 batches): Rashi script is its own stratum. */
+  script: { id: string; label: Label } | null;
+  /**
+   * The agent pre-check thinks the candidate is likely wrong, and why (pass 1 of a flagged v1.1 line). Only where to
+   * look: it never proposes a text. A flagged line is not marked exact before the full page has been looked at.
+   */
+  precheck: { reasons: { id: string; label: Label }[] } | null;
   /** The context band (about one line above and below) with the line's ink box. */
   crop: ImageView | null;
   /** The reduced full page with the line's ink box. */

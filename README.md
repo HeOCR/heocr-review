@@ -17,6 +17,13 @@ Three task types:
   `line_verify_decisions.v1.1` (v1 plus `pointed_print`), and hocrgen's attestation policy decides
   what a verified line becomes. The contract is HeOCR planning's
   `tasks/real-source-mapping/outputs/line_verify_contract.md`; `src/tasks/line_verify/schema.ts` implements it.
+  Items v1.1 (data-collection's old-print eval hold-out, 2026-11-18) adds candidates from published edition text
+  (Sefaria, Project Gutenberg, Ben-Yehuda, Wikisource; never OCR), the page's script (square or Rashi), the agent
+  pre-check's "look here" (a reason, never a text; a flagged line cannot be marked exact before the full page is
+  opened) and a blind second pass for listed lines, gated as in page review below: it opens to a reviewer 24 hours
+  after their own text answer (exact, edited or print has niqqud), with no pre-check and no marks, and closes their
+  pass-1 line until it is decided. A v1.1 batch exports `line_verify_decisions.v1.2`: each decision's `pass`, and on
+  a blind line's pass 1 revised after pass 2, `revised_after_pass2` and the pass-1 answer that stood then.
 - **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
   layer, or stock Tesseract; never a HeOCR model), corrects it line by line (edit, print has niqqud, not on the page,
   unreadable, merge, split, move, add) and confirms that the lines, as corrected, are the page's text in reading
@@ -148,7 +155,8 @@ Only openly licensed pages may be imported: Wikisource scans and text are fine. 
 npm run import -- --task line_verify --bundle <dir with items.json and pages/> --target local|preview
 ```
 
-The script validates `items.json` (`line_verify_items.v1`: open `text_license`, an attribution, boxes inside the
+The script validates `items.json` (`line_verify_items.v1` or `.v1.1`: an open `text_license` (CC0, public domain,
+CC BY or CC BY-SA; NonCommercial and NoDerivatives are refused), an attribution, boxes inside the
 page, NFC single-line candidates, attention spans as code-point offsets, a URL-safe `batch_id`), checks every page
 image's SHA-256 and aspect ratio, and cuts with `sharp`, per line, one JPEG of its context band (the union of `box`
 and `context_box` plus a little air, at the scan's resolution up to 1,800 px wide, quality 85) and, per page, a
@@ -160,7 +168,8 @@ shipping full-resolution pages. A decision is pinned to the line's text, boxes a
 any of them, earlier decisions on that line become stale (kept, never exported).
 
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
-`npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan).
+`npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan). `test/fixtures/line_verify_v11/` is
+the same lines as a v1.1 file, for the Worker tests only (it ships no page images).
 
 ### Page review batches
 

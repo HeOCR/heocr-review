@@ -187,6 +187,8 @@ mark.edit { background: var(--edit-bg); outline: 1px solid var(--edit); }
 mark.attn { background: var(--attn-bg); outline: 1px solid var(--attn-line); }
 .caret.attn { color: var(--attn-line); font-weight: 700; padding: 0 1px; }
 .legend { margin: 2px 0 0; }
+.lineverify .precheck { margin: 6px 0 0; padding: 6px 10px; border-inline-start: 3px solid var(--attn-line, #b08800); background: var(--attn-bg, #fff6d6); border-radius: 6px; }
+.lineverify .tag.script-rashi { border-color: var(--attn-line, #b08800); }
 .ctxbox { margin-top: 12px; }
 .ctxscroll { background: var(--scan-bg); border: 1px solid var(--line); border-radius: 8px; text-align: center; overflow: hidden; }
 .ctxband { width: 100%; }
