@@ -139,8 +139,8 @@ describe("line verification v1.2: typed lines", () => {
     expect(Object.keys(file)).toEqual(["schema_version", "batch_id", "pass2_reviewer", "blind_second_pass", "two_typings", "pages", "decisions"]);
     expect(file.two_typings).toEqual({ groups: [], set_at: null });
     expect(file.pages).toEqual([
-      { page_id: "benyehuda_nli_aligned:fixture_pby_42__p0003", book_group: "early", kraken_lines: 4, resolved: 4, done: true },
-      { page_id: "wikisource_he_proofread:fixture_lines__p0001", book_group: "later", kraken_lines: 7, resolved: 6, done: false },
+      { page_id: "benyehuda_nli_aligned:fixture_pby_42__p0003", book_group: "early", kraken_lines: 4, resolved: 4, done: true, unreadable: 0 },
+      { page_id: "wikisource_he_proofread:fixture_lines__p0001", book_group: "later", kraken_lines: 7, resolved: 6, done: false, unreadable: 0 },
     ]);
     for (const d of file.decisions) expect(["verify", "type"]).toContain(d.kind);
     const box = file.decisions.find((d) => d.item_id === "benyehuda_nli_aligned:fixture_pby_42__p0003#L002")!;
@@ -162,5 +162,26 @@ describe("line verification v1.2: typed lines", () => {
     const out = decisionsFileProblems(bad, V12, items).join("\n");
     expect(out).toContain("box_reason");
     expect(out).toContain("kind must be the item's");
+  });
+
+  it("on a verify line, misaligned carries the line as typed, opens the blind pass, and exports with its text", async () => {
+    const c = await reviewer("v12-misaligned");
+    const first = (await next(c)).proposal!;
+    expect(first.externalId).toBe("wikisource_he_proofread:fixture_lines__p0001#L002");
+    expect(first.options.find((o) => o.value === "misaligned")).toMatchObject({ withText: true });
+    const url = `/api/proposals/${first.id}/decision`;
+    for (const bad of [{ value: "misaligned" }, { value: "misaligned", text: " " }, { value: "misaligned", text: "שָׁלוֹם" }]) {
+      expect((await c.post(url, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect((await c.post<{ value: string; text: string }>(url, { value: "misaligned", text: " שורה אחרת " })).body).toMatchObject({ value: "misaligned", text: "שורה אחרת" });
+    await decideAll(c, (id) => (id.endsWith("p0003#L002") ? { value: "unreadable" } : { value: "typed", text: "שורה" }));
+    // A typed misaligned answer is a text answer: the line's blind pass opens 24 hours later.
+    await age("wikisource_he_proofread:fixture_lines__p0001#L002", DAY_AGO());
+    expect((await next(c)).proposal!.externalId).toBe("wikisource_he_proofread:fixture_lines__p0001#L002@pass2");
+    const { problems, file } = await exportFile();
+    expect(problems).toEqual([]);
+    expect(file.decisions.find((d) => d.decision === "misaligned")).toMatchObject({ kind: "verify", pass: 1, text: "שורה אחרת" });
+    // The unreadable line is resolved, and counted on its page.
+    expect((file.pages as Record<string, unknown>[]).find((p) => String(p.page_id).endsWith("p0003"))).toMatchObject({ resolved: 4, done: true, unreadable: 1 });
   });
 });

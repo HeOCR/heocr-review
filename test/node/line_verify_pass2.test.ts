@@ -80,7 +80,7 @@ describe("typed lines (v1.3)", () => {
     pass2_reviewer: { mode: "same", set_at: null },
     blind_second_pass: { count: 0, sha256: blindListSha256([]), sha256_of: "x" },
     two_typings: { groups: [], set_at: null },
-    pages: [{ page_id: "p", book_group: "early", kraken_lines: 1, resolved: 1, done: true }],
+    pages: [{ page_id: "p", book_group: "early", kraken_lines: 1, resolved: 1, done: true, unreadable: 0 }],
     decisions: [{ decision_id: `decision:${T}:rv_1a2b3c4d`, item_id: T, reviewer: "rv_1a2b3c4d", pass: 1, kind: "type", decided_at: "2026-11-18", checked_by: "human", ...d }],
   });
   it.each([[{ decision: "typed", text: "שורה" }], [{ decision: "not_on_page", box_reason: "continued" }], [{ decision: "unreadable" }], [{ decision: "pointed_print", text: "שורה" }]])(

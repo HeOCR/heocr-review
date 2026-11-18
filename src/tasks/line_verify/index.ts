@@ -119,6 +119,11 @@ const OPTIONS: DecisionOption[] = [
   { value: "pointed_print", label: { he: "בדפוס יש ניקוד", en: "Print has niqqud" }, withText: false },
 ];
 
+/** A v1.2 verify line: misaligned carries the line as typed (heocr-eval: every line needs a text). */
+const OPTIONS_V12: DecisionOption[] = OPTIONS.map((o) =>
+  o.value === "misaligned" ? { ...o, label: { he: "לא תואם (הקלדה)", en: "Misaligned (type the line)" }, withText: true } : o,
+);
+
 /** A typed line (v1.2 kind "type"), either pass: typed from a blank box, or one of H's box problems. */
 const TYPE_OPTIONS: DecisionOption[] = [
   { value: "typed", label: { he: "הקלדה", en: "Type" }, withText: true },
@@ -154,6 +159,8 @@ const label = (labels: Record<string, Label>, id: string): Label => labels[id] ?
 const passOf = (p: ProposalRecord): 1 | 2 => payloadOf(p).pass ?? 1;
 export const isPass2 = (p: ProposalRecord) => passOf(p) === 2;
 const kindOf = (p: ProposalRecord): "verify" | "type" => payloadOf(p).kind ?? "verify";
+/** A line of a v1.2 batch (its payload says its kind). */
+const isV12Line = (p: ProposalRecord) => payloadOf(p).kind !== undefined;
 /** Typed from a blank box: a typed line (either pass), or any line's blind second pass. */
 const typedFromBlank = (p: ProposalRecord) => kindOf(p) === "type" || isPass2(p);
 /** How many current decisions a line needs: two on a typed line's pass 1 in a group switched to two typings. */
@@ -177,7 +184,7 @@ function body(d: DecisionRecord): Pick<LvDecision, "decision" | "text" | "box_re
   if ((BOX_REASONS as readonly string[]).includes(d.value)) return { decision: "not_on_page", box_reason: d.value as LvDecision["box_reason"] };
   return {
     decision: d.value as LvDecision["decision"],
-    ...(d.value === "edited" || d.value === "typed" ? { text: d.text ?? "" } : d.value === "pointed_print" && d.text ? { text: d.text } : {}),
+    ...(d.value === "edited" || d.value === "typed" ? { text: d.text ?? "" } : (d.value === "pointed_print" || d.value === "misaligned") && d.text ? { text: d.text } : {}),
   };
 }
 
@@ -227,14 +234,16 @@ export function normalizeLineDecision(candidate: string, value: string, text: un
   return { ok: true, value: "edited", text: edited };
 }
 
-/** v1.3's pages list: per page, its segmenter lines and how many have enough current pass-1 decisions. */
+/** v1.3's pages list: per page, its segmenter lines, how many have enough current pass-1 decisions, and how many are unreadable. */
 function pagesOf(batch: BatchRecord, resolved: ResolvedProposal[]) {
-  const pages = new Map<string, { page_id: string; book_group: string | null; kraken_lines: number; resolved: number }>();
+  const pages = new Map<string, { page_id: string; book_group: string | null; kraken_lines: number; resolved: number; unreadable: number }>();
   for (const r of resolved) {
     if (passOf(r.proposal) !== 1) continue;
     const x = payloadOf(r.proposal);
-    const page = pages.get(x.page_id) ?? { page_id: x.page_id, book_group: x.page.book_group ?? null, kraken_lines: x.page.kraken_lines ?? 0, resolved: 0 };
+    const page = pages.get(x.page_id) ?? { page_id: x.page_id, book_group: x.page.book_group ?? null, kraken_lines: x.page.kraken_lines ?? 0, resolved: 0, unreadable: 0 };
     if (r.current.length >= needed(batch, r.proposal)) page.resolved += 1;
+    // Lines any current pass-1 decision calls unreadable (eval replaces such a page before scoring).
+    if (r.current.some((d) => d.value === "unreadable")) page.unreadable += 1;
     pages.set(x.page_id, page);
   }
   return [...pages.values()].sort((a, b) => (a.page_id < b.page_id ? -1 : 1)).map((p) => ({ ...p, done: p.resolved === p.kraken_lines }));
@@ -244,7 +253,7 @@ export const lineVerify: TaskType = {
   id: TASK_TYPE_ID,
   label: { he: "אימות שורות מול הסריקה", en: "Line verification" },
   options: OPTIONS,
-  optionsFor: (p) => (kindOf(p) === "type" ? TYPE_OPTIONS : isPass2(p) ? PASS2_OPTIONS : OPTIONS),
+  optionsFor: (p) => (kindOf(p) === "type" ? TYPE_OPTIONS : isPass2(p) ? PASS2_OPTIONS : isV12Line(p) ? OPTIONS_V12 : OPTIONS),
   finalDecision: isPass2,
   // The page is shown only on request; prefetching it for every line would cost a phone ~10x the bytes.
   prefetch: ["crop"],
@@ -277,6 +286,10 @@ export const lineVerify: TaskType = {
   normalizeDecision(p: ProposalRecord, value: string, text: unknown): NormalizedDecision {
     if (kindOf(p) === "type") return normalizeTypedDecision(value, text, ["unreadable", ...BOX_REASONS]);
     if (isPass2(p)) return normalizeTypedDecision(value, text);
+    if (value === "misaligned" && isV12Line(p)) {
+      const typed = normalizeTypedDecision("typed", text);
+      return typed.ok ? { ...typed, value: "misaligned" } : typed;
+    }
     return normalizeLineDecision(payloadOf(p).candidate_text, value, text);
   },
 

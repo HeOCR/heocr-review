@@ -99,7 +99,8 @@ export const lineVerifyImporter: TaskImporter = {
           order: order.get(it.item_id)!,
           item_id: it.item_id,
           pass,
-          kind,
+          // Only v1.2 lines say their kind (absent: verify), so v1 and v1.1 lines keep their v1.1 behaviour.
+          ...(v12 ? { kind } : {}),
           blind: blind.has(it.item_id),
           precheck: pass === 1 && it.precheck?.likely_wrong ? { reasons: it.precheck.reasons } : null,
           page: {
