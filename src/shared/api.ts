@@ -40,6 +40,11 @@ export interface TextCorrectionView {
 /** One printed line and a human transcription of it (task type line_verify). */
 export interface LineVerifyView {
   kind: "line_verify";
+  /**
+   * "verify": judge the candidate against the line. "type": a blind second pass, typed from a blank box; the
+   * candidate is never sent (candidate is "" and runs is empty), and the decision is final.
+   */
+  mode: "verify" | "type";
   candidate: string;
   /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
   runs: AttentionRun[];

@@ -57,6 +57,7 @@ describe("line verification v1.1", () => {
     const c = await reviewer("v11-view");
     const { proposal, view } = await next(c);
     expect(proposal!.externalId).toBe(HARDEST);
+    expect(view!.mode).toBe("verify");
     expect(view!.script).toEqual({ id: "square", label: { he: "אותיות מרובעות", en: "Square script" } });
     expect(view!.precheck).toEqual({ reasons: [{ id: "spelling", label: { he: "כתיב", en: "spelling" } }] });
     expect(view!.source.id).toBe("wikisource_he");
@@ -69,7 +70,7 @@ describe("line verification v1.1", () => {
     expect((await next(c)).view!.precheck).toBeNull();
   });
 
-  it("opens the blind second pass only to the same reviewer, 24 hours after their answer, unaided, and closes pass 1 meanwhile", async () => {
+  it("opens the blind second pass only to the same reviewer, 24 hours after their answer, as a blank box, and closes pass 1 meanwhile", async () => {
     const a = await reviewer("v11-a");
     const pass2 = await idOf(`${HARDEST}@pass2`);
     expect((await a.get(`/api/proposals/${pass2}`)).status).toBe(409);
@@ -81,8 +82,14 @@ describe("line verification v1.1", () => {
     const blind = await next(a);
     expect(blind.proposal!.externalId).toBe(`${HARDEST}@pass2`);
     expect(blind.proposal!.mine).toBeNull();
+    // Typed from a blank box: the candidate, its marks and the pre-check never reach the browser.
+    expect(blind.view!.mode).toBe("type");
+    expect(blind.view!.candidate).toBe("");
+    expect(blind.view!.runs).toEqual([]);
     expect(blind.view!.precheck).toBeNull();
-    expect(blind.view!.runs.some((r) => r.attention)).toBe(false);
+    const candidate = (JSON.parse((await env.DB.prepare("SELECT payload_json FROM proposals WHERE id = ?1").bind(pass2).first<{ payload_json: string }>())!.payload_json) as { candidate_text: string }).candidate_text;
+    expect(JSON.stringify(blind)).not.toContain(candidate);
+    expect(blind.proposal!.options.map((o) => o.value)).toEqual(["typed", "pointed_print", "unreadable", "misaligned"]);
     // While pass 2 is open and undecided, pass 1 is closed to this reviewer.
     const pass1 = await idOf(HARDEST);
     expect((await a.get(`/api/proposals/${pass1}`)).status).toBe(409);
@@ -90,8 +97,15 @@ describe("line verification v1.1", () => {
     // Another reviewer who has not answered the line never gets this reviewer's pass 2.
     const b = await reviewer("v11-b");
     expect((await b.get(`/api/proposals/${pass2}`)).status).toBe(409);
-    expect((await a.post(`/api/proposals/${pass2}/decision`, { value: "exact" })).status).toBe(200);
+    for (const bad of [{ value: "exact" }, { value: "edited", text: "שורה" }, { value: "typed" }, { value: "typed", text: " " }, { value: "typed", text: "שָׁלוֹם" }, { value: "pointed_print" }]) {
+      expect((await a.post(`/api/proposals/${pass2}/decision`, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    const typed = await a.post<{ value: string; text: string }>(`/api/proposals/${pass2}/decision`, { value: "typed", text: " שורה שהוקלדה " });
+    expect(typed.status).toBe(200);
+    expect(typed.body).toMatchObject({ value: "typed", text: "שורה שהוקלדה" });
+    // Final: once pass 1 is open again (and with it the candidate), the typed answer cannot change.
     expect((await a.get(`/api/proposals/${pass1}`)).status).toBe(200);
+    expect((await a.post(`/api/proposals/${pass2}/decision`, { value: "typed", text: "שורה אחרת" })).status).toBe(409);
     // The other blind line was answered just now: still closed; nothing else is left.
     expect((await next(a)).proposal).toBeNull();
   });
@@ -113,7 +127,7 @@ describe("line verification v1.1", () => {
     await decideAllPass1(a);
     await age(HARDEST, DAY_AGO());
     const pass2 = (await next(a)).proposal!;
-    await a.post(`/api/proposals/${pass2.id}/decision`, { value: "edited", text: "שורה אחרת לגמרי" });
+    expect((await a.post(`/api/proposals/${pass2.id}/decision`, { value: "typed", text: "שורה אחרת לגמרי" })).status).toBe(200);
     // Pass 2 an hour ago, then pass 1 changed.
     await age(`${HARDEST}@pass2`, new Date(Date.now() - 60 * 60 * 1000).toISOString());
     await a.post(`/api/proposals/${await idOf(HARDEST)}/decision`, { value: "edited", text: "שורה אחרת לגמרי" });
@@ -128,10 +142,12 @@ describe("line verification v1.1", () => {
     expect(decisions).toHaveLength(12);
     expect(decisions.every((d) => d.pass === 1 || d.pass === 2)).toBe(true);
     const mine = decisions.filter((d) => d.item_id === HARDEST);
-    expect(mine.map((d) => [d.pass, d.decision])).toEqual([
-      [1, "edited"],
-      [2, "edited"],
+    expect(mine.map((d) => [d.pass, d.decision, d.text])).toEqual([
+      [1, "edited", "שורה אחרת לגמרי"],
+      [2, "typed", "שורה אחרת לגמרי"],
     ]);
+    expect(mine[1]).toMatchObject({ same_reviewer: true });
+    expect(mine[0]).not.toHaveProperty("same_reviewer");
     expect(mine[1]!.decision_id).toBe(`decision:${HARDEST}@pass2:${String(mine[1]!.reviewer)}`);
     expect(mine[0]).toMatchObject({ revised_after_pass2: true, pass1_at_pass2: { decision: "exact" } });
     // A blind line whose pass 2 was not decided carries no revision mark; a line without a blind pass never does.
@@ -146,7 +162,40 @@ describe("line verification v1.1", () => {
         return { item_id: r.external_id, candidate_text: x.candidate_text, blind: x.blind };
       });
     expect(decisionsFileProblems(file, V11, items)).toEqual([]);
-    // Without the blind flag, a pass-2 decision is refused.
+    // Without same_reviewer, or without the blind flag, a pass-2 decision is refused.
+    const bare = structuredClone(file) as { decisions: Record<string, unknown>[] };
+    delete bare.decisions.find((d) => d.pass === 2)!.same_reviewer;
+    expect(decisionsFileProblems(bare, V11, items).join("\n")).toContain("same_reviewer");
     expect(decisionsFileProblems(file, V11, items.map((i) => ({ ...i, blind: false }))).join("\n")).toContain("has no blind second pass");
+  });
+
+  it("with pass2_reviewer 'other', gives the blind pass only to a reviewer who never decided the line's pass 1", async () => {
+    await env.DB.prepare("INSERT INTO batch_settings (batch_id, pass2_reviewer, updated_at, updated_by) VALUES (?1, 'other', '2026-11-18T00:00:00Z', 'test')").bind(V11).run();
+    const a = await reviewer("v11-first");
+    await decideAllPass1(a);
+    await age(HARDEST, DAY_AGO());
+    // The pass-1 reviewer never gets it, however long ago they answered.
+    expect((await next(a)).proposal).toBeNull();
+    const pass2 = await idOf(`${HARDEST}@pass2`);
+    expect((await a.get(`/api/proposals/${pass2}`)).status).toBe(409);
+    // Another reviewer gets it as a blank box, and the line's pass 1 is closed to them until they have typed it.
+    const b = await reviewer("v11-second");
+    const blind = await next(b);
+    expect(blind.proposal!.externalId).toBe(`${HARDEST}@pass2`);
+    expect(blind.view!.candidate).toBe("");
+    expect((await b.get(`/api/proposals/${await idOf(HARDEST)}`)).status).toBe(409);
+    expect((await b.post(`/api/proposals/${pass2}/decision`, { value: "pointed_print", text: "אותיות בלבד" })).status).toBe(200);
+    // The Sefaria line was answered just now: not open to anyone yet.
+    expect((await next(b)).proposal).toBeNull();
+
+    const admin = new Client();
+    const adminId = await admin.signIn("maintainer");
+    const res = await handle(new Request(`http://localhost/api/admin/batches/${V11}/export`, { headers: { cookie: admin.cookie } }), { ...env, ADMIN_REVIEWER_IDS: adminId }, exec);
+    const body = (await res.json()) as { problems: string[]; files: Record<string, { decisions: Record<string, unknown>[] }> };
+    expect(body.problems).toEqual([]);
+    const p2 = body.files["line_verify_decisions.json"]!.decisions.filter((d) => d.pass === 2);
+    expect(p2).toEqual([expect.objectContaining({ item_id: HARDEST, decision: "pointed_print", text: "אותיות בלבד", same_reviewer: false })]);
+    // A blind line whose pass 2 went to someone else is not revised_after_pass2 for the pass-1 reviewer.
+    expect(body.files["line_verify_decisions.json"]!.decisions.find((d) => d.item_id === HARDEST && d.pass === 1)).not.toHaveProperty("revised_after_pass2");
   });
 });

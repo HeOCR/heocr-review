@@ -1,8 +1,9 @@
 /**
  * Import a line_verify_items.v1 or .v1.1 bundle (items.json and pages/) into the generic model. A v1.1 line listed in
  * `blind_second_pass` also gets a second proposal, `<item_id>@pass2`, gated like page_review's blind pass: it opens to
- * a reviewer 24 hours after their own settled pass-1 answer, shows no pre-check and no attention spans, and while it
- * is open and undecided their pass-1 line is closed to them.
+ * a reviewer 24 hours after a settled pass-1 answer (their own, or by the batch's pass2_reviewer setting another
+ * reviewer's), is typed from a blank box (the candidate is never sent, nor the pre-check or attention spans), and
+ * while it is open and undecided the reviewer's pass-1 line is closed to them.
  */
 import type { Box } from "../../shared/media";
 import type { ImportBundle, TaskImporter } from "../import";

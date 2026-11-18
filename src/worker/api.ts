@@ -262,8 +262,9 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     .prepare("SELECT id, value, text, proposal_sha256 FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
     .bind(proposal.id, reviewer.id)
     .first<{ id: string; value: string; text: string | null; proposal_sha256: string }>();
-  // Volunteer lines: a decision is final (only a reviewer's first decision on a line could count).
-  if (existing && isConsensus(batch)) throw new HttpError(409, "decided", "this line is decided");
+  // Volunteer lines: a decision is final (only a reviewer's first decision on a line could count). So is a blind
+  // second pass: typed before the reviewer could see the candidate, it must not change once they can.
+  if (existing && (isConsensus(batch) || taskType(batch.taskType)!.finalDecision?.(proposal))) throw new HttpError(409, "decided", "this line is decided");
   let decisionId: string;
   if (
     existing &&

@@ -109,6 +109,14 @@ const OPTIONS: DecisionOption[] = [
   { value: "pointed_print", label: { he: "בדפוס יש ניקוד", en: "Print has niqqud" }, withText: false },
 ];
 
+/** A blind second pass: the line is typed from a blank box (pointed_print: the print is pointed, letters typed only). */
+const PASS2_OPTIONS: DecisionOption[] = [
+  { value: "typed", label: { he: "הקלדה", en: "Type" }, withText: true },
+  { value: "pointed_print", label: { he: "בדפוס יש ניקוד", en: "Print has niqqud" }, withText: true },
+  { value: "unreadable", label: { he: "לא קריא", en: "Unreadable" }, withText: false },
+  { value: "misaligned", label: { he: "לא תואם", en: "Misaligned" }, withText: false },
+];
+
 function payloadOf(p: ProposalRecord): LineVerifyPayload {
   return p.payload as unknown as LineVerifyPayload;
 }
@@ -124,6 +132,7 @@ function imageView(img: StoredImage | undefined) {
 const label = (labels: Record<string, Label>, id: string): Label => labels[id] ?? { he: id, en: id };
 
 const passOf = (p: ProposalRecord): 1 | 2 => payloadOf(p).pass ?? 1;
+export const isPass2 = (p: ProposalRecord) => passOf(p) === 2;
 /** The bundle's item id of a line (both passes). */
 const itemIdOf = (p: ProposalRecord): string => payloadOf(p).item_id ?? p.externalId;
 const isV11 = (batch: BatchRecord) => sourceOf(batch).schema_version === ITEMS_SCHEMA_V11;
@@ -133,8 +142,26 @@ const allOf = (r: ResolvedProposal): DecisionRecord[] => [...r.current, ...r.sta
 function body(d: DecisionRecord): Pick<LvDecision, "decision" | "text"> {
   return {
     decision: d.value as LvDecision["decision"],
-    ...(d.value === "edited" ? { text: d.text ?? "" } : d.value === "pointed_print" && d.text ? { text: d.text } : {}),
+    ...(d.value === "edited" || d.value === "typed" ? { text: d.text ?? "" } : d.value === "pointed_print" && d.text ? { text: d.text } : {}),
   };
+}
+
+/**
+ * A blind-pass line as typed: NFC, without edge whitespace, one line, and letters only (niqqud is the print-has-niqqud
+ * choice, with the letters typed).
+ */
+export function normalizeTypedDecision(value: string, text: unknown): NormalizedDecision {
+  if (value === "unreadable" || value === "misaligned") {
+    if (text !== undefined && text !== null) return { ok: false, error: "only a typed or pointed_print decision carries text" };
+    return { ok: true, value, text: null };
+  }
+  if (value !== "typed" && value !== "pointed_print") return { ok: false, error: "decision must be typed, pointed_print, unreadable or misaligned" };
+  if (typeof text !== "string") return { ok: false, error: "type the line" };
+  const typed = text.normalize("NFC").trim();
+  const problems = lineTextProblems(typed);
+  if (problems.length) return { ok: false, error: `the typed line ${problems.join("; ")}` };
+  if (hasNiqqud(typed)) return { ok: false, error: "type the letters only, without niqqud or marks (the print has niqqud: say so)" };
+  return { ok: true, value, text: typed };
 }
 
 /**
@@ -169,15 +196,20 @@ export const lineVerify: TaskType = {
   id: TASK_TYPE_ID,
   label: { he: "אימות שורות מול הסריקה", en: "Line verification" },
   options: OPTIONS,
+  optionsFor: (p) => (isPass2(p) ? PASS2_OPTIONS : OPTIONS),
+  finalDecision: isPass2,
   // The page is shown only on request; prefetching it for every line would cost a phone ~10x the bytes.
   prefetch: ["crop"],
 
   toView(p: ProposalRecord): LineVerifyView {
     const x = payloadOf(p);
+    const blind = isPass2(p);
     return {
       kind: "line_verify",
-      candidate: x.candidate_text,
-      runs: attentionRuns(x.candidate_text, x.attention_spans),
+      mode: blind ? "type" : "verify",
+      // The blind pass never sends the candidate: the reviewer types what the scan shows.
+      candidate: blind ? "" : x.candidate_text,
+      runs: blind ? [] : attentionRuns(x.candidate_text, x.attention_spans),
       lineIndex: x.line_index,
       provenance: { id: x.candidate_provenance, label: label(PROVENANCE_LABELS, x.candidate_provenance) },
       source: { id: x.page.source, label: label(SOURCE_LABELS, x.page.source) },
@@ -186,13 +218,14 @@ export const lineVerify: TaskType = {
       attribution: x.page.attribution,
       textLicense: x.page.text_license,
       script: x.page.script ? { id: x.page.script, label: label(SCRIPT_LABELS, x.page.script) } : null,
-      precheck: x.precheck ? { reasons: x.precheck.reasons.map((r) => ({ id: r, label: label(PRECHECK_LABELS, r) })) } : null,
+      precheck: x.precheck && !blind ? { reasons: x.precheck.reasons.map((r) => ({ id: r, label: label(PRECHECK_LABELS, r) })) } : null,
       crop: imageView(p.media.crop),
       page: imageView(p.media.page),
     };
   },
 
   normalizeDecision(p: ProposalRecord, value: string, text: unknown): NormalizedDecision {
+    if (isPass2(p)) return normalizeTypedDecision(value, text);
     return normalizeLineDecision(payloadOf(p).candidate_text, value, text);
   },
 
@@ -203,7 +236,9 @@ export const lineVerify: TaskType = {
    */
   exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[]): ExportFile {
     const v12 = isV11(batch);
-    // When each reviewer first decided each line's pass 2.
+    // Who decided each line's pass 1 (any decision, current or not), and when each reviewer first decided its pass 2.
+    const pass1By = new Set<string>();
+    for (const r of resolved) if (passOf(r.proposal) === 1) for (const d of allOf(r)) pass1By.add(`${itemIdOf(r.proposal)}\u0000${d.reviewerId}`);
     const pass2At = new Map<string, string>();
     for (const r of resolved) {
       if (passOf(r.proposal) !== 2) continue;
@@ -239,6 +274,7 @@ export const lineVerify: TaskType = {
               ...body(d),
               candidate_sha256: candidateSha,
               ...(v12 ? { pass } : {}),
+              ...(v12 && pass === 2 ? { same_reviewer: pass1By.has(`${itemId}\u0000${d.reviewerId}`) } : {}),
               ...(at !== undefined ? { revised_after_pass2: revised } : {}),
               ...(revised ? { pass1_at_pass2: standing ? { ...body(standing), decided_at: standing.decidedOn } : null } : {}),
               decided_at: d.decidedOn,
