@@ -61,6 +61,11 @@ function lineVerifyV11Batch(): string[] {
   return fixtureBatch(lineVerifyImporter, "test/fixtures/line_verify_v11/items.json", 1, "2026-11-18T00:00:00.000Z");
 }
 
+/** The line_verify_items.v1.2 fixture batch (typed lines, kraken coverage), loaded by its own tests only. */
+function lineVerifyV12Batch(): string[] {
+  return fixtureBatch(lineVerifyImporter, "test/fixtures/line_verify_v12/items.json", 1, "2026-11-18T00:00:00.000Z");
+}
+
 /** The fixture batches: the reference audit (imported first), line verification and page review. */
 function fixtureStatements(minReviewers: number): string[] {
   return [
@@ -95,6 +100,7 @@ export default defineConfig(async () => {
                   TEST_SUBSET_SQL: pageReviewSubset(),
                   TEST_LINE_CONSENSUS_SQL: lineConsensusBatch(),
                   TEST_LINE_VERIFY_V11_SQL: lineVerifyV11Batch(),
+                  TEST_LINE_VERIFY_V12_SQL: lineVerifyV12Batch(),
                 },
               },
             }),

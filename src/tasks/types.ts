@@ -31,7 +31,7 @@ export interface BatchRecord {
   source: Record<string, unknown>;
   minReviewers: number;
   /** The batch's settings (migrations/0006_batch_settings.sql); absent where a record is built without them. */
-  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null };
+  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null };
 }
 
 export interface ProposalRecord {

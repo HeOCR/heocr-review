@@ -8,7 +8,7 @@
 import type { Box } from "../../shared/media";
 import type { ImportBundle, TaskImporter } from "../import";
 import { TASK_TYPE_ID, blindListSha256, type LineVerifyPayload, type LineVerifySource } from "./index";
-import { ITEMS_SCHEMA_V11, PASS2_SUFFIX, itemsFileProblems, type LvItem, type LvItemsFile, type LvPage, type PixelBox } from "./schema";
+import { PASS2_SUFFIX, itemsFileProblems, itemsLevel, type LvItem, type LvItemsFile, type LvPage, type PixelBox } from "./schema";
 
 const fraction = (box: PixelBox, page: LvPage): Box => {
   const r = (v: number) => Math.round(v * 1e6) / 1e6;
@@ -38,12 +38,14 @@ export const lineVerifyImporter: TaskImporter = {
       description: file.description ?? "",
       created_at: file.created_at,
       generator: file.generator,
-      ...(file.schema_version === ITEMS_SCHEMA_V11
+      ...(itemsLevel(file.schema_version) >= 1
         ? { blind_second_pass: { count: (file.blind_second_pass ?? []).length, sha256: blindListSha256(file.blind_second_pass ?? []) } }
         : {}),
     };
     const used = new Set(file.items.map((it) => it.page_id));
-    const v11 = file.schema_version === ITEMS_SCHEMA_V11;
+    const level = itemsLevel(file.schema_version);
+    const v11 = level >= 1;
+    const v12 = level >= 2;
     const blind = new Set(file.blind_second_pass ?? []);
     // Pass 2 comes after every pass-1 line, in the same order; its gate decides when it opens.
     const sorted = [...file.items].sort(byRank);
@@ -72,20 +74,23 @@ export const lineVerifyImporter: TaskImporter = {
             attribution: p.attribution,
             release_split: p.release_split,
             ...(v11 ? { script: p.script } : {}),
+            ...(v12 ? { segmenter: p.segmenter, kraken_lines: p.kraken_lines, book_group: p.book_group } : {}),
           },
           imageStem: null,
           bundleImage: { path: p.image, sha256: p.sha256, width: p.width, height: p.height },
         })),
       proposals: passes.map(({ it, pass }, rank) => {
         const page = pages.get(it.page_id)!;
+        const kind = it.kind ?? "verify";
         const payload: LineVerifyPayload = {
           page_id: it.page_id,
           line_index: it.line_index,
           box: it.box,
           context_box: it.context_box,
-          candidate_text: it.candidate_text,
-          candidate_provenance: it.candidate_provenance,
-          alignment_score: it.alignment_score,
+          // A typed line has no candidate: stored as "" (never shown), so code reading a candidate needs no null case.
+          candidate_text: it.candidate_text ?? "",
+          candidate_provenance: it.candidate_provenance ?? "none",
+          alignment_score: it.alignment_score ?? 0,
           // The blind pass is unaided: no attention spans and no pre-check.
           attention_spans: pass === 2 ? [] : it.attention_spans,
           difficulty: it.difficulty,
@@ -94,6 +99,7 @@ export const lineVerifyImporter: TaskImporter = {
           order: order.get(it.item_id)!,
           item_id: it.item_id,
           pass,
+          kind,
           blind: blind.has(it.item_id),
           precheck: pass === 1 && it.precheck?.likely_wrong ? { reasons: it.precheck.reasons } : null,
           page: {
@@ -105,6 +111,7 @@ export const lineVerifyImporter: TaskImporter = {
             attribution: page.attribution,
             release_split: page.release_split,
             script: page.script ?? null,
+            ...(v12 ? { book_group: page.book_group!, kraken_lines: page.kraken_lines! } : {}),
             width: page.width,
             height: page.height,
             sha256: page.sha256,
@@ -114,7 +121,7 @@ export const lineVerifyImporter: TaskImporter = {
           externalId: pass === 2 ? `${it.item_id}${PASS2_SUFFIX}` : it.item_id,
           itemExternalId: it.page_id,
           category: it.stratum,
-          confidence: pass === 2 ? "blind_second_pass" : it.candidate_provenance,
+          confidence: pass === 2 ? "blind_second_pass" : kind === "type" ? "typed_line" : (it.candidate_provenance ?? "none"),
           rank,
           payload: payload as unknown as Record<string, unknown>,
           pageBox: fraction(it.box, page),
@@ -130,6 +137,7 @@ export const lineVerifyImporter: TaskImporter = {
             candidate_text: it.candidate_text,
             // v1 lines keep their key (and so their decisions); a v1.1 line's key also says its pass and pre-check.
             ...(v11 ? { pass, precheck: pass === 1 ? (it.precheck ?? null) : null } : {}),
+            ...(v12 ? { kind } : {}),
           },
         };
       }),

@@ -16,15 +16,26 @@ export const BLIND_DELAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * The pass-1 answers that open a blind second pass ('after_confirm'): a page_review confirm, or a line_verify answer
- * that gives the line's text (exact, edited, pointed_print). A line marked unreadable or misaligned gets no pass 2.
+ * that gives the line's text (exact, edited, pointed_print, or typed on a typed line). A line marked unreadable,
+ * misaligned or with a box problem gets no pass 2.
  */
-const SETTLED = "('confirm', 'exact', 'edited', 'pointed_print')";
+const SETTLED = "('confirm', 'exact', 'edited', 'pointed_print', 'typed')";
 
 /**
  * Who a batch's blind second pass goes to (migrations/0006_batch_settings.sql): 'same', the reviewer who answered pass
  * 1, 24 hours later; or 'other' (line_verify only), a reviewer who never decided the line's pass 1, 24 hours after
  * another reviewer's answer.
  */
+/**
+ * How many current decisions proposal p needs (in place of the batch's min_reviewers ?n): two on a line_verify typed
+ * line's pass 1 when its page's book group is in the batch's two_typings_groups (migrations/0007_two_typings.sql).
+ */
+const needed = (n: number) => `MAX(?${n}, CASE WHEN json_extract(p.payload_json, '$.kind') = 'type'
+    AND COALESCE(json_extract(p.payload_json, '$.pass'), 1) = 1
+    AND EXISTS (SELECT 1 FROM batch_settings s, json_each(s.two_typings_groups) g
+      WHERE s.batch_id = p.batch_id AND g.value = json_extract(p.payload_json, '$.page.book_group'))
+    THEN 2 ELSE 1 END)`;
+
 const PASS2_MODE = "COALESCE((SELECT s.pass2_reviewer FROM batch_settings s WHERE s.batch_id = p.batch_id), 'same')";
 
 /**
@@ -147,7 +158,7 @@ const OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.
   WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8)}
     AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
-    AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ?3
+    AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}
   ORDER BY EXISTS (SELECT 1 FROM assignments a WHERE a.proposal_id = p.id AND a.reviewer_id <> ?2 AND a.assigned_at > ?4),
     p.rank
   LIMIT ?5`;
@@ -164,7 +175,7 @@ export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId
       `SELECT
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}) AS total,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f} AND
-          (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) >= ?3) AS covered,
+          (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) >= ${needed(3)}) AS covered,
         (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id = d.proposal_id
           WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
@@ -172,7 +183,7 @@ export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
           AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
-          AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ?3) AS remaining`,
+          AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}) AS remaining`,
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();

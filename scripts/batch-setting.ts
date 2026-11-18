@@ -3,24 +3,63 @@
  *
  *   npm run batch-setting -- --batch <id> [--target local|preview|production [--yes-production]]
  *   npm run batch-setting -- --batch <id> --pass2-reviewer same|other --by <who> [--target ...]
+ *   npm run batch-setting -- --batch <id> --two-typings-groups <group,group|none> --by <who> [--target ...]
  *
  * pass2_reviewer (line_verify only): who gets a line's blind second pass. 'same' (the default): the reviewer who
  * answered pass 1, 24 hours later (intra-rater). 'other': only a reviewer who never decided the line's pass 1, 24
  * hours after another reviewer's answer (inter-rater; heocr-eval: switch it on once volunteers review the batch).
  * Changing it affects only lines not yet served; decisions already made keep their same_reviewer in the export.
+ *
+ * two_typings_groups (line_verify items v1.2 only; migrations/0007_two_typings.sql): the book groups whose typed lines
+ * need a second independent typing (heocr-eval's registered fallback: over 5% word disagreement in the blind sample).
+ * "none" clears it. Each group must be a book_group of the batch's pages.
  */
 import { PASS2_REVIEWERS } from "../src/tasks/line_verify/schema";
 import { parseArgs, str, target } from "./lib/args";
 import { inline } from "./lib/sql";
 import { d1Query } from "./lib/wrangler";
 
-export const READ_SQL = `SELECT b.id, b.task_type, COALESCE(s.pass2_reviewer, 'same') AS pass2_reviewer, s.updated_at, s.updated_by
+export const READ_SQL = `SELECT b.id, b.task_type, json_extract(b.source_json, '$.schema_version') AS schema_version,
+  COALESCE(s.pass2_reviewer, 'same') AS pass2_reviewer, s.updated_at, s.updated_by,
+  COALESCE(s.two_typings_groups, '[]') AS two_typings_groups, s.two_typings_set_at
   FROM batches b LEFT JOIN batch_settings s ON s.batch_id = b.id WHERE b.id = ?1`;
+
+/** The batch's book groups (v1.2 pages). */
+export const GROUPS_SQL = `SELECT DISTINCT json_extract(payload_json, '$.book_group') AS g FROM items
+  WHERE batch_id = ?1 AND json_extract(payload_json, '$.book_group') IS NOT NULL ORDER BY g`;
+
+/** Only the two-typings columns change; a new row starts with the pass2_reviewer default. */
+export const UPSERT_TWO_SQL = `INSERT INTO batch_settings (batch_id, updated_at, updated_by, two_typings_groups, two_typings_set_at)
+  VALUES (?1, ?2, ?3, ?4, ?2)
+  ON CONFLICT (batch_id) DO UPDATE SET two_typings_groups = excluded.two_typings_groups, two_typings_set_at = excluded.two_typings_set_at, updated_by = excluded.updated_by`;
 
 export const UPSERT_SQL = `INSERT INTO batch_settings (batch_id, pass2_reviewer, updated_at, updated_by) VALUES (?1, ?2, ?3, ?4)
   ON CONFLICT (batch_id) DO UPDATE SET pass2_reviewer = excluded.pass2_reviewer, updated_at = excluded.updated_at, updated_by = excluded.updated_by`;
 
-type Row = { id: string; task_type: string; pass2_reviewer: string; updated_at: string | null; updated_by: string | null };
+type Row = {
+  id: string;
+  task_type: string;
+  schema_version?: string | null;
+  pass2_reviewer: string;
+  updated_at: string | null;
+  updated_by: string | null;
+  two_typings_groups?: string;
+  two_typings_set_at?: string | null;
+};
+
+/** The groups a --two-typings-groups value names ("none": no group), or why it is refused. */
+export function twoTypingsProblem(row: Row | undefined, value: string, groups: string[], by: string): { groups: string[] } | { problem: string } {
+  if (!row) return { problem: "no such batch" };
+  if (row.task_type !== "line_verify" || row.schema_version !== "line_verify_items.v1.2") {
+    return { problem: "two_typings_groups applies to line_verify_items.v1.2 batches only" };
+  }
+  if (!by.trim()) return { problem: "--by must say who changes it" };
+  const want = value === "none" ? [] : [...new Set(value.split(",").map((g) => g.trim()).filter(Boolean))].sort();
+  if (value !== "none" && !want.length) return { problem: '--two-typings-groups needs group ids, or "none"' };
+  const unknown = want.filter((g) => !groups.includes(g));
+  if (unknown.length) return { problem: `not book groups of this batch: ${unknown.join(", ")} (it has ${groups.join(", ") || "none"})` };
+  return { groups: want };
+}
 
 /** Why a pass2_reviewer change is refused (null: allowed). */
 export function settingProblem(row: Row | undefined, value: string, by: string): string | null {
@@ -37,6 +76,14 @@ function main(): void {
   const batchId = str(flags, "batch");
   const read = () => d1Query<Row>(t, inline(READ_SQL, batchId))[0]?.[0];
   const before = read();
+  if (typeof flags["two-typings-groups"] === "string") {
+    const groups = d1Query<{ g: string }>(t, inline(GROUPS_SQL, batchId))[0]!.map((r) => r.g);
+    const res = twoTypingsProblem(before, flags["two-typings-groups"], groups, str(flags, "by", ""));
+    if ("problem" in res) throw new Error(res.problem);
+    d1Query(t, inline(UPSERT_TWO_SQL, batchId, new Date().toISOString(), str(flags, "by"), JSON.stringify(res.groups)));
+    console.log(JSON.stringify({ target: t, batch: batchId, before: before!.two_typings_groups, after: read()?.two_typings_groups }));
+    return;
+  }
   if (typeof flags["pass2-reviewer"] !== "string") {
     if (!before) throw new Error("no such batch");
     console.log(JSON.stringify({ target: t, ...before }));

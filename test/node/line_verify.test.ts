@@ -141,6 +141,58 @@ describe("line_verify_items.v1.1", () => {
   });
 });
 
+describe("line_verify_items.v1.2", () => {
+  const v12 = JSON.parse(readFileSync("test/fixtures/line_verify_v12/items.json", "utf8")) as LvItemsFile;
+  const typeAt = (f: any) => f.items.findIndex((i: any) => i.kind === "type");
+
+  it("accepts the synthetic v1.2 fixture", () => {
+    expect(itemsFileProblems(v12)).toEqual([]);
+  });
+
+  it.each([
+    ["a page without kraken_lines", (f: any) => delete f.pages[0].kraken_lines, "kraken_lines must be"],
+    ["a page without its segmenter", (f: any) => delete f.pages[0].segmenter, "segmenter must"],
+    ["a page without its book group", (f: any) => delete f.pages[0].book_group, "book_group must"],
+    ["a line missing from a page", (f: any) => f.items.splice(0, 1), "missing 0"],
+    ["a line twice", (f: any) => (f.items[1].line_index = f.items[0].line_index), "extra or repeated"],
+    ["a line past the page's count", (f: any) => (f.pages[0].kraken_lines = 6), "extra or repeated 6"],
+    ["an item without kind", (f: any) => delete f.items[0].kind, "kind must be one of"],
+    ["a typed line with a candidate", (f: any) => (f.items[typeAt(f)].candidate_text = "שורה"), "candidate_text must be null on a type item"],
+    ["a typed line with a provenance", (f: any) => (f.items[typeAt(f)].candidate_provenance = "pby_human_typed"), "candidate_provenance must be null"],
+    ["a typed line with marks", (f: any) => (f.items[typeAt(f)].attention_spans = [[0, 1]]), "attention_spans must be []"],
+    ["a typed line with a pre-check", (f: any) => (f.items[typeAt(f)].precheck = { likely_wrong: true, reasons: ["digits"] }), "no precheck"],
+    ["a verify line without a candidate", (f: any) => (f.items[0].candidate_text = null), "candidate_text"],
+  ])("refuses %s", (_, mutate, message) => {
+    const f = clone(v12);
+    mutate(f);
+    expect(itemsFileProblems(f).join("\n")).toContain(message);
+  });
+
+  it("refuses v1.2 fields in v1.1", () => {
+    const f = clone(v12) as any;
+    f.schema_version = "line_verify_items.v1.1";
+    const out = itemsFileProblems(f).join("\n");
+    expect(out).toContain("kraken_lines is a line_verify_items.v1.2 field");
+    expect(out).toContain("kind is a line_verify_items.v1.2 field");
+  });
+
+  it("imports typed lines with no candidate, the page's group and count, and blind passes for both kinds", () => {
+    const b = lineVerifyImporter.bundle(v12);
+    const typed = b.proposals.filter((p) => (p.payload as unknown as LineVerifyPayload).kind === "type");
+    expect(typed.length).toBe(v12.items.filter((i) => i.kind === "type").length + 1); // one typed line has a pass 2
+    for (const p of typed) {
+      const x = p.payload as unknown as LineVerifyPayload;
+      expect(x.candidate_text).toBe("");
+      expect(x.precheck).toBeNull();
+      expect(x.page.kraken_lines).toBeGreaterThan(0);
+      expect(["early", "later"]).toContain(x.page.book_group);
+      expect((p.contentKey as { kind: string }).kind).toBe("type");
+    }
+    expect(b.proposals.filter((p) => p.externalId.endsWith("@pass2")).map((p) => (p.payload as unknown as LineVerifyPayload).kind).sort()).toEqual(["type", "verify"]);
+    expect(b.items[1]!.payload).toMatchObject({ book_group: "early", kraken_lines: 4, segmenter: "kraken blla (fixture)" });
+  });
+});
+
 describe("attention runs", () => {
   it("marks code-point spans", () => {
     expect(attentionRuns("אבג דהו", [[4, 7]])).toEqual([

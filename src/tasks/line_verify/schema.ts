@@ -13,6 +13,13 @@
  * from a blank box (heocr-eval, 2026-11-18: showing the candidate again would reproduce the bias it measures), so its
  * decisions are `typed` (the reviewer's text), `pointed_print` (with the letters typed, no niqqud), `unreadable` or
  * `misaligned`, and say `same_reviewer` (the pass-2 reviewer also decided the line's pass 1: intra-rater).
+ *
+ * Items v1.2 (heocr-eval's P-hist page rule, 2026-11-18): every kraken line of a scored page gets a reference. An item
+ * is `kind` "verify" (an edition candidate, as before) or "type" (no candidate: typed from a blank box, including
+ * running heads, page numbers, catchwords and glosses); each page says its `segmenter`, `kraken_lines` and
+ * `book_group`, and its items cover line_index 0..kraken_lines-1 exactly once. A typed line's box problems are H's:
+ * not_one_line, no_text, continued. Decisions on a v1.2 batch are exported as `line_verify_decisions.v1.3`: v1.2 plus
+ * each decision's `kind`, `box_reason` on not_on_page, and a `pages` list saying which pages are done.
  */
 import { pyLen, reviewerIdProblems, validDate } from "../reference_audit/schema";
 import { hasNiqqud } from "../../shared/niqqud";
@@ -21,12 +28,24 @@ import { MAX_TEXT_LENGTH } from "../types";
 
 export const ITEMS_SCHEMA = "line_verify_items.v1";
 export const ITEMS_SCHEMA_V11 = "line_verify_items.v1.1";
-export const ITEMS_SCHEMAS = [ITEMS_SCHEMA, ITEMS_SCHEMA_V11] as const;
+export const ITEMS_SCHEMA_V12 = "line_verify_items.v1.2";
+export const ITEMS_SCHEMAS = [ITEMS_SCHEMA, ITEMS_SCHEMA_V11, ITEMS_SCHEMA_V12] as const;
+/** 0 for v1, 1 for v1.1, 2 for v1.2: each level adds to the one before. */
+export const itemsLevel = (schema: unknown): number => (ITEMS_SCHEMAS as readonly unknown[]).indexOf(schema);
 export const DECISIONS_SCHEMA = "line_verify_decisions.v1.1";
 /** Decisions on a v1.1 batch: v1.1 plus `pass` on every decision. */
 export const DECISIONS_SCHEMA_V12 = "line_verify_decisions.v1.2";
-/** Every version validates; a v1 file may not use `pointed_print`, and only v1.2 carries `pass`. */
-export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA, DECISIONS_SCHEMA_V12] as const;
+/** Decisions on a v1.2 batch: v1.2 plus `kind` on every decision, `box_reason`, and the pages list. */
+export const DECISIONS_SCHEMA_V13 = "line_verify_decisions.v1.3";
+/** Every version validates; a v1 file may not use `pointed_print`, only v1.2+ carries `pass`, only v1.3 `kind`. */
+export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA, DECISIONS_SCHEMA_V12, DECISIONS_SCHEMA_V13] as const;
+export const KINDS = ["verify", "type"] as const;
+/** A typed line's box problems (as in H): exported as decision not_on_page with this box_reason. */
+export const BOX_REASONS = ["not_one_line", "no_text", "continued"] as const;
+/** What a reviewer may answer on a typed line (either pass), as stored; the box problems export as not_on_page. */
+export const TYPE_APP_VALUES = ["typed", "pointed_print", "unreadable", ...BOX_REASONS] as const;
+/** A typed line's decisions as exported (v1.3). */
+export const TYPE_DECISION_VALUES = ["typed", "pointed_print", "unreadable", "not_on_page"] as const;
 export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned"] as const;
 export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned"] as const;
 /** v1.1 adds edition texts: the candidate is a published edition's text, never OCR. */
@@ -75,8 +94,14 @@ export interface LvPage {
   text_license: string;
   attribution: string;
   release_split: (typeof RELEASE_SPLITS)[number] | null;
-  /** v1.1 only, and required there. */
+  /** v1.1 and later, and required there. */
   script?: (typeof SCRIPTS)[number];
+  /** v1.2: the segmenter whose lines the items cover, e.g. "kraken blla 5.2.9". */
+  segmenter?: string;
+  /** v1.2: how many lines the segmenter found; the page's items cover line_index 0..kraken_lines-1 exactly once. */
+  kraken_lines?: number;
+  /** v1.2: the book group the page belongs to (e.g. early or later prints); a two-typings switch acts per group. */
+  book_group?: string;
 }
 
 export interface LvPrecheck {
@@ -91,15 +116,18 @@ export interface LvItem {
   line_index: number;
   box: PixelBox;
   context_box: PixelBox;
-  candidate_text: string;
-  candidate_provenance: (typeof PROVENANCES_V11)[number];
-  alignment_score: number;
+  /** null on a v1.2 "type" item. */
+  candidate_text: string | null;
+  candidate_provenance: (typeof PROVENANCES_V11)[number] | null;
+  alignment_score: number | null;
   attention_spans: [number, number][];
   difficulty: number;
   stratum: (typeof STRATA)[number];
   rank: number;
-  /** v1.1 only, optional. */
+  /** v1.1 and later, optional; never on a "type" item. */
   precheck?: LvPrecheck;
+  /** v1.2 only, and required there. */
+  kind?: (typeof KINDS)[number];
 }
 
 export interface LvItemsFile {
@@ -118,7 +146,11 @@ export interface LvDecision {
   decision_id: string;
   item_id: string;
   reviewer: string;
-  decision: (typeof DECISION_VALUES)[number] | (typeof PASS2_DECISION_VALUES)[number];
+  decision: (typeof DECISION_VALUES)[number] | (typeof PASS2_DECISION_VALUES)[number] | (typeof TYPE_DECISION_VALUES)[number];
+  /** v1.3 only, and required there. */
+  kind?: (typeof KINDS)[number];
+  /** v1.3: exactly on not_on_page. */
+  box_reason?: (typeof BOX_REASONS)[number];
   text?: string;
   /** Additive to the v1 contract: SHA-256 of the UTF-8 candidate_text the reviewer judged (see README). */
   candidate_sha256?: string;
@@ -172,7 +204,8 @@ function pixelBoxProblems(name: string, box: unknown, page: Obj | undefined): st
   return [];
 }
 
-function pageProblems(page: Obj, v11: boolean): string[] {
+function pageProblems(page: Obj, level: number): string[] {
+  const v11 = level >= 1;
   const problems: string[] = [];
   if (!(typeof page.image === "string" && PAGE_IMAGE.test(page.image))) problems.push("image must be pages/<name>.jpg|jpeg|png|webp");
   if (!(typeof page.sha256 === "string" && SHA256.test(page.sha256))) problems.push("sha256 must be the image's SHA-256");
@@ -187,6 +220,13 @@ function pageProblems(page: Obj, v11: boolean): string[] {
   }
   if (v11 && !oneOf(SCRIPTS, page.script)) problems.push(`script must be one of ${join(SCRIPTS)}`);
   if (!v11 && "script" in page) problems.push(`script is a ${ITEMS_SCHEMA_V11} field`);
+  if (level >= 2) {
+    if (!nonEmpty(page.segmenter)) problems.push("segmenter must name the line segmenter and its version");
+    if (!(isInt(page.kraken_lines) && page.kraken_lines > 0)) problems.push("kraken_lines must be a positive integer");
+    if (!(typeof page.book_group === "string" && BATCH_ID.test(page.book_group))) problems.push("book_group must be 1-100 letters, digits, '.', '_' or '-'");
+  } else {
+    for (const key of ["segmenter", "kraken_lines", "book_group"]) if (key in page) problems.push(`${key} is a ${ITEMS_SCHEMA_V12} field`);
+  }
   return problems;
 }
 
@@ -203,8 +243,12 @@ function precheckProblems(precheck: unknown): string[] {
   return problems;
 }
 
-function itemProblems(item: Obj, page: Obj | undefined, v11: boolean): string[] {
+function itemProblems(item: Obj, page: Obj | undefined, level: number): string[] {
+  const v11 = level >= 1;
   const problems: string[] = [];
+  if (level >= 2 && !oneOf(KINDS, item.kind)) problems.push(`kind must be one of ${join(KINDS)}`);
+  if (level < 2 && "kind" in item) problems.push(`kind is a ${ITEMS_SCHEMA_V12} field`);
+  if (level >= 2 && item.kind === "type") return [...problems, ...typeItemProblems(item, page)];
   if (typeof item.item_id === "string" && item.item_id.includes(PASS2_SUFFIX)) problems.push(`item_id must not contain ${PASS2_SUFFIX}`);
   if (!(isInt(item.line_index) && item.line_index >= 0)) problems.push("line_index must be a non-negative integer");
   problems.push(...pixelBoxProblems("box", item.box, page), ...pixelBoxProblems("context_box", item.context_box, page));
@@ -212,7 +256,7 @@ function itemProblems(item: Obj, page: Obj | undefined, v11: boolean): string[] 
   const provenances = v11 ? PROVENANCES_V11 : PROVENANCES;
   if (!oneOf(provenances, item.candidate_provenance)) problems.push(`candidate_provenance must be one of ${join(provenances)}`);
   if ("precheck" in item) {
-    if (v11) problems.push(...precheckProblems(item.precheck));
+    if (v11 && item.precheck !== null) problems.push(...precheckProblems(item.precheck));
     else problems.push(`precheck is a ${ITEMS_SCHEMA_V11} field`);
   }
   for (const key of ["alignment_score", "difficulty"]) {
@@ -233,10 +277,30 @@ function itemProblems(item: Obj, page: Obj | undefined, v11: boolean): string[] 
   return problems;
 }
 
-/** Every problem with a line_verify_items.v1 or .v1.1 file (empty when valid). */
+/** A typed line: the segmenter's box, no candidate, nothing to show but the scan. */
+function typeItemProblems(item: Obj, page: Obj | undefined): string[] {
+  const problems: string[] = [];
+  if (typeof item.item_id === "string" && item.item_id.includes(PASS2_SUFFIX)) problems.push(`item_id must not contain ${PASS2_SUFFIX}`);
+  if (!(isInt(item.line_index) && item.line_index >= 0)) problems.push("line_index must be a non-negative integer");
+  problems.push(...pixelBoxProblems("box", item.box, page), ...pixelBoxProblems("context_box", item.context_box, page));
+  for (const key of ["candidate_text", "candidate_provenance"]) if (item[key] !== null) problems.push(`${key} must be null on a type item`);
+  // No candidate, so nothing was aligned: null, or a number (ignored).
+  if (!(item.alignment_score === null || (isNum(item.alignment_score) && item.alignment_score >= 0 && item.alignment_score <= 1))) {
+    problems.push("alignment_score must be null or a number in [0, 1] on a type item");
+  }
+  if (!(Array.isArray(item.attention_spans) && item.attention_spans.length === 0)) problems.push("attention_spans must be [] on a type item");
+  if ("precheck" in item && item.precheck !== null) problems.push("a type item has no precheck");
+  if (!(isNum(item.difficulty) && item.difficulty >= 0 && item.difficulty <= 1)) problems.push("difficulty must be a number in [0, 1]");
+  if (!oneOf(STRATA, item.stratum)) problems.push(`stratum must be one of ${join(STRATA)}`);
+  if (!(isInt(item.rank) && item.rank >= 0)) problems.push("rank must be a non-negative integer");
+  return problems;
+}
+
+/** Every problem with a line_verify_items.v1, .v1.1 or .v1.2 file (empty when valid). */
 export function itemsFileProblems(payload: unknown): string[] {
   if (!isObj(payload) || !oneOf(ITEMS_SCHEMAS, payload.schema_version)) return [`schema_version must be one of ${join(ITEMS_SCHEMAS)}`];
-  const v11 = payload.schema_version === ITEMS_SCHEMA_V11;
+  const level = itemsLevel(payload.schema_version);
+  const v11 = level >= 1;
   const problems: string[] = [];
   if (!(typeof payload.batch_id === "string" && BATCH_ID.test(payload.batch_id))) {
     problems.push("batch_id must be 1-100 letters, digits, '.', '_' or '-'");
@@ -252,7 +316,7 @@ export function itemsFileProblems(payload: unknown): string[] {
       continue;
     }
     pages.set(id, page);
-    problems.push(...pageProblems(page, v11).map((p) => `page ${id}: ${p}`));
+    problems.push(...pageProblems(page, level).map((p) => `page ${id}: ${p}`));
   }
   const ids = new Set<string>();
   if (!Array.isArray(payload.items) || payload.items.length === 0) problems.push("items must list at least one line");
@@ -265,7 +329,27 @@ export function itemsFileProblems(payload: unknown): string[] {
     ids.add(id);
     const page = typeof item.page_id === "string" ? pages.get(item.page_id) : undefined;
     if (!page) problems.push(`item ${id}: page_id is not a page of this bundle`);
-    problems.push(...itemProblems(item, page, v11).map((p) => `item ${id}: ${p}`));
+    problems.push(...itemProblems(item, page, level).map((p) => `item ${id}: ${p}`));
+  }
+  // v1.2: every segmenter line of every page has exactly one item, so no printed line goes without a reference.
+  if (level >= 2) {
+    const lines = new Map<string, number[]>();
+    for (const item of Array.isArray(payload.items) ? payload.items : []) {
+      if (isObj(item) && typeof item.page_id === "string" && isInt(item.line_index)) lines.set(item.page_id, [...(lines.get(item.page_id) ?? []), item.line_index]);
+    }
+    for (const [id, page] of pages) {
+      if (!isInt(page.kraken_lines)) continue;
+      const got = lines.get(id) ?? [];
+      const missing = [...Array(page.kraken_lines).keys()].filter((i) => !got.includes(i));
+      const extra = got.filter((i, k) => i >= (page.kraken_lines as number) || got.indexOf(i) !== k);
+      if (missing.length || extra.length) {
+        problems.push(
+          `page ${id}: items must cover line_index 0..${page.kraken_lines - 1} exactly once` +
+            (missing.length ? `; missing ${missing.slice(0, 10).join(", ")}` : "") +
+            (extra.length ? `; extra or repeated ${extra.slice(0, 10).join(", ")}` : ""),
+        );
+      }
+    }
   }
   if ("blind_second_pass" in payload) {
     const blind = payload.blind_second_pass;
@@ -290,7 +374,10 @@ export function decisionId(itemId: string, reviewer: string): string {
 
 export interface ItemRef {
   item_id: string;
+  /** "" on a typed line. */
   candidate_text: string;
+  /** v1.3: the item's kind. */
+  kind?: (typeof KINDS)[number];
   candidate_sha256?: string;
   /** The line has a blind second pass (v1.2 decisions may then carry pass 2). */
   blind?: boolean;
@@ -300,8 +387,21 @@ export interface ItemRef {
 export function decisionsFileProblems(payload: unknown, batchId: string, items: ItemRef[]): string[] {
   if (!isObj(payload) || !oneOf(DECISIONS_SCHEMAS, payload.schema_version)) return [`schema_version must be one of ${join(DECISIONS_SCHEMAS)}`];
   const allowed: readonly string[] = payload.schema_version === "line_verify_decisions.v1" ? DECISION_VALUES_V1 : DECISION_VALUES;
-  const v12 = payload.schema_version === DECISIONS_SCHEMA_V12;
+  const v13 = payload.schema_version === DECISIONS_SCHEMA_V13;
+  const v12 = payload.schema_version === DECISIONS_SCHEMA_V12 || v13;
   const problems: string[] = [];
+  if (v13) {
+    const two = isObj(payload.two_typings) ? payload.two_typings : {};
+    if (!(Array.isArray(two.groups) && two.groups.every((g) => typeof g === "string"))) problems.push("two_typings.groups must be a list of book groups");
+    if (!(two.set_at === null || typeof two.set_at === "string")) problems.push("two_typings.set_at must be a timestamp or null");
+    if (!Array.isArray(payload.pages)) problems.push("pages must list every page with its kraken_lines, resolved and done");
+    else {
+      for (const pg of payload.pages as unknown[]) {
+        const ok = isObj(pg) && nonEmpty(pg.page_id) && isInt(pg.kraken_lines) && isInt(pg.resolved) && pg.resolved >= 0 && pg.resolved <= pg.kraken_lines && pg.done === (pg.resolved === pg.kraken_lines);
+        if (!ok) problems.push(`pages: ${JSON.stringify(isObj(pg) ? pg.page_id : pg)} must give kraken_lines, resolved (at most kraken_lines) and done`);
+      }
+    }
+  }
   if (v12) {
     const mode = isObj(payload.pass2_reviewer) ? payload.pass2_reviewer : {};
     if (!oneOf(PASS2_REVIEWERS, mode.mode)) problems.push(`pass2_reviewer.mode must be one of ${join(PASS2_REVIEWERS)}`);
@@ -332,6 +432,10 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     } else {
       for (const key of ["pass", "same_reviewer", "revised_after_pass2", "pass1_at_pass2"]) if (key in d) problems.push(`${label}: ${key} is a ${DECISIONS_SCHEMA_V12} field`);
     }
+    if (v13 && !oneOf(KINDS, d.kind)) problems.push(`${label}: kind must be one of ${join(KINDS)}`);
+    else if (v13 && item?.kind && d.kind !== item.kind) problems.push(`${label}: kind must be the item's (${item.kind})`);
+    if (!v13) for (const key of ["kind", "box_reason"]) if (key in d) problems.push(`${label}: ${key} is a ${DECISIONS_SCHEMA_V13} field`);
+    const typedLine = v13 && d.kind === "type";
     const pass2 = v12 && d.pass === 2;
     if (v12 && (pass2 ? typeof d.same_reviewer !== "boolean" : "same_reviewer" in d)) problems.push(`${label}: same_reviewer is a boolean on pass-2 decisions only`);
     if (!nonEmpty(d.decision_id)) problems.push(`${label}: decision_id must be a non-empty string`);
@@ -347,7 +451,21 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     const key = `${String(d.item_id)}\u0000${String(d.reviewer)}\u0000${pass2 ? 2 : 1}`;
     if (item && decided.has(key)) problems.push(`${label}: a second decision by ${String(d.reviewer)} for ${item.item_id}; one per reviewer and pass`);
     decided.add(key);
-    if (pass2) {
+    if (typedLine) {
+      if (!oneOf(TYPE_DECISION_VALUES, d.decision)) problems.push(`${label}: a typed line's decision must be one of ${join(TYPE_DECISION_VALUES)}`);
+      else if (d.decision === "typed" || d.decision === "pointed_print") {
+        const textProblems = lineTextProblems(d.text);
+        if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: text ${p}`));
+        else if (hasNiqqud(d.text as string)) problems.push(`${label}: typed text holds the letters only, without niqqud or marks`);
+      } else if ("text" in d) problems.push(`${label}: only a typed or pointed_print decision carries text`);
+      if ((d.decision === "not_on_page") !== oneOf(BOX_REASONS, d.box_reason)) problems.push(`${label}: box_reason (${join(BOX_REASONS)}) comes exactly with not_on_page`);
+      if ("candidate_sha256" in d) problems.push(`${label}: a typed line has no candidate_sha256`);
+    } else if (v13 && "box_reason" in d) {
+      problems.push(`${label}: box_reason is for typed lines only`);
+    }
+    if (typedLine) {
+      // checked above
+    } else if (pass2) {
       if (!oneOf(PASS2_DECISION_VALUES, d.decision)) problems.push(`${label}: a pass-2 decision must be one of ${join(PASS2_DECISION_VALUES)}`);
       else if (d.decision === "typed" || d.decision === "pointed_print") {
         const textProblems = lineTextProblems(d.text);

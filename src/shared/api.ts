@@ -45,6 +45,10 @@ export interface LineVerifyView {
    * candidate is never sent (candidate is "" and runs is empty), and the decision is final.
    */
   mode: "verify" | "type";
+  /** 2: the blind second pass (final once saved). */
+  pass: 1 | 2;
+  /** "type": a v1.2 typed line (no candidate, either pass); "verify": an edition candidate's line. */
+  lineKind: "verify" | "type";
   candidate: string;
   /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
   runs: AttentionRun[];

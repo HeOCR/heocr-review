@@ -19,8 +19,10 @@ import type { BatchRecord, DecisionRecord, ExportFile, NormalizedDecision, Propo
 import {
   DECISIONS_SCHEMA,
   BLIND_LIST_SHA256_OF,
+  BOX_REASONS,
   DECISIONS_SCHEMA_V12,
-  ITEMS_SCHEMA_V11,
+  DECISIONS_SCHEMA_V13,
+  itemsLevel,
   decisionId,
   decisionsFileProblems,
   hasNiqqud,
@@ -54,11 +56,16 @@ export interface LineVerifyPayload {
   pass?: 1 | 2;
   /** The line has a blind second pass. */
   blind?: boolean;
+  /** v1.2: "type" lines have no candidate (candidate_text "") and are typed from a blank box. Absent: "verify". */
+  kind?: "verify" | "type";
   /** The agent pre-check's "look here" (pass 1 of a flagged v1.1 line only): never a proposed text. */
   precheck?: { reasons: string[] } | null;
   /** The page's metadata, copied onto each line so a line can be shown with its attribution. */
   page: Pick<LvPage, "source" | "book_id" | "book_title" | "page_label" | "text_license" | "attribution" | "release_split" | "width" | "height" | "sha256"> & {
     script?: LvPage["script"] | null;
+    /** v1.2 pages. */
+    book_group?: string;
+    kraken_lines?: number;
   };
 }
 
@@ -112,6 +119,16 @@ const OPTIONS: DecisionOption[] = [
   { value: "pointed_print", label: { he: "בדפוס יש ניקוד", en: "Print has niqqud" }, withText: false },
 ];
 
+/** A typed line (v1.2 kind "type"), either pass: typed from a blank box, or one of H's box problems. */
+const TYPE_OPTIONS: DecisionOption[] = [
+  { value: "typed", label: { he: "הקלדה", en: "Type" }, withText: true },
+  { value: "pointed_print", label: { he: "בדפוס יש ניקוד", en: "Print has niqqud" }, withText: true },
+  { value: "unreadable", label: { he: "לא קריא", en: "Unreadable" }, withText: false },
+  { value: "not_one_line", label: { he: "לא שורה אחת", en: "Not one line" }, withText: false },
+  { value: "no_text", label: { he: "אין כאן טקסט", en: "No text here" }, withText: false },
+  { value: "continued", label: { he: "המשך שורה", en: "Continued" }, withText: false },
+];
+
 /** A blind second pass: the line is typed from a blank box (pointed_print: the print is pointed, letters typed only). */
 const PASS2_OPTIONS: DecisionOption[] = [
   { value: "typed", label: { he: "הקלדה", en: "Type" }, withText: true },
@@ -136,6 +153,14 @@ const label = (labels: Record<string, Label>, id: string): Label => labels[id] ?
 
 const passOf = (p: ProposalRecord): 1 | 2 => payloadOf(p).pass ?? 1;
 export const isPass2 = (p: ProposalRecord) => passOf(p) === 2;
+const kindOf = (p: ProposalRecord): "verify" | "type" => payloadOf(p).kind ?? "verify";
+/** Typed from a blank box: a typed line (either pass), or any line's blind second pass. */
+const typedFromBlank = (p: ProposalRecord) => kindOf(p) === "type" || isPass2(p);
+/** How many current decisions a line needs: two on a typed line's pass 1 in a group switched to two typings. */
+export function needed(batch: BatchRecord, p: ProposalRecord): number {
+  const two = kindOf(p) === "type" && passOf(p) === 1 && (batch.settings?.twoTypingsGroups ?? []).includes(payloadOf(p).page.book_group ?? "");
+  return Math.max(batch.minReviewers, two ? 2 : 1);
+}
 
 /** The checksum of a blind_second_pass list (BLIND_LIST_SHA256_OF). */
 export function blindListSha256(ids: string[]): string {
@@ -143,11 +168,13 @@ export function blindListSha256(ids: string[]): string {
 }
 /** The bundle's item id of a line (both passes). */
 const itemIdOf = (p: ProposalRecord): string => payloadOf(p).item_id ?? p.externalId;
-const isV11 = (batch: BatchRecord) => sourceOf(batch).schema_version === ITEMS_SCHEMA_V11;
+const levelOf = (batch: BatchRecord) => itemsLevel(sourceOf(batch).schema_version);
 const allOf = (r: ResolvedProposal): DecisionRecord[] => [...r.current, ...r.stale, ...r.superseded];
 
 /** The decision's own fields, in the contract's key order: text for edited, and for pointed_print with corrected letters. */
-function body(d: DecisionRecord): Pick<LvDecision, "decision" | "text"> {
+function body(d: DecisionRecord): Pick<LvDecision, "decision" | "text" | "box_reason"> {
+  // A typed line's box problems are exported as H does: not_on_page, with the reason.
+  if ((BOX_REASONS as readonly string[]).includes(d.value)) return { decision: "not_on_page", box_reason: d.value as LvDecision["box_reason"] };
   return {
     decision: d.value as LvDecision["decision"],
     ...(d.value === "edited" || d.value === "typed" ? { text: d.text ?? "" } : d.value === "pointed_print" && d.text ? { text: d.text } : {}),
@@ -158,12 +185,12 @@ function body(d: DecisionRecord): Pick<LvDecision, "decision" | "text"> {
  * A blind-pass line as typed: NFC, without edge whitespace, one line, and letters only (niqqud is the print-has-niqqud
  * choice, with the letters typed).
  */
-export function normalizeTypedDecision(value: string, text: unknown): NormalizedDecision {
-  if (value === "unreadable" || value === "misaligned") {
+export function normalizeTypedDecision(value: string, text: unknown, noText: readonly string[] = ["unreadable", "misaligned"]): NormalizedDecision {
+  if (noText.includes(value)) {
     if (text !== undefined && text !== null) return { ok: false, error: "only a typed or pointed_print decision carries text" };
     return { ok: true, value, text: null };
   }
-  if (value !== "typed" && value !== "pointed_print") return { ok: false, error: "decision must be typed, pointed_print, unreadable or misaligned" };
+  if (value !== "typed" && value !== "pointed_print") return { ok: false, error: `decision must be typed, pointed_print, ${noText.join(", ")}` };
   if (typeof text !== "string") return { ok: false, error: "type the line" };
   const typed = text.normalize("NFC").trim();
   const problems = lineTextProblems(typed);
@@ -200,21 +227,36 @@ export function normalizeLineDecision(candidate: string, value: string, text: un
   return { ok: true, value: "edited", text: edited };
 }
 
+/** v1.3's pages list: per page, its segmenter lines and how many have enough current pass-1 decisions. */
+function pagesOf(batch: BatchRecord, resolved: ResolvedProposal[]) {
+  const pages = new Map<string, { page_id: string; book_group: string | null; kraken_lines: number; resolved: number }>();
+  for (const r of resolved) {
+    if (passOf(r.proposal) !== 1) continue;
+    const x = payloadOf(r.proposal);
+    const page = pages.get(x.page_id) ?? { page_id: x.page_id, book_group: x.page.book_group ?? null, kraken_lines: x.page.kraken_lines ?? 0, resolved: 0 };
+    if (r.current.length >= needed(batch, r.proposal)) page.resolved += 1;
+    pages.set(x.page_id, page);
+  }
+  return [...pages.values()].sort((a, b) => (a.page_id < b.page_id ? -1 : 1)).map((p) => ({ ...p, done: p.resolved === p.kraken_lines }));
+}
+
 export const lineVerify: TaskType = {
   id: TASK_TYPE_ID,
   label: { he: "אימות שורות מול הסריקה", en: "Line verification" },
   options: OPTIONS,
-  optionsFor: (p) => (isPass2(p) ? PASS2_OPTIONS : OPTIONS),
+  optionsFor: (p) => (kindOf(p) === "type" ? TYPE_OPTIONS : isPass2(p) ? PASS2_OPTIONS : OPTIONS),
   finalDecision: isPass2,
   // The page is shown only on request; prefetching it for every line would cost a phone ~10x the bytes.
   prefetch: ["crop"],
 
   toView(p: ProposalRecord): LineVerifyView {
     const x = payloadOf(p);
-    const blind = isPass2(p);
+    const blind = typedFromBlank(p);
     return {
       kind: "line_verify",
       mode: blind ? "type" : "verify",
+      pass: passOf(p),
+      lineKind: kindOf(p),
       // The blind pass never sends the candidate: the reviewer types what the scan shows.
       candidate: blind ? "" : x.candidate_text,
       runs: blind ? [] : attentionRuns(x.candidate_text, x.attention_spans),
@@ -233,6 +275,7 @@ export const lineVerify: TaskType = {
   },
 
   normalizeDecision(p: ProposalRecord, value: string, text: unknown): NormalizedDecision {
+    if (kindOf(p) === "type") return normalizeTypedDecision(value, text, ["unreadable", ...BOX_REASONS]);
     if (isPass2(p)) return normalizeTypedDecision(value, text);
     return normalizeLineDecision(payloadOf(p).candidate_text, value, text);
   },
@@ -240,10 +283,14 @@ export const lineVerify: TaskType = {
   /**
    * v1 batches export line_verify_decisions.v1.1, as before. v1.1 batches export v1.2: every decision says its `pass`,
    * and a pass-1 decision on a blind line made after the reviewer first decided its pass 2 is `revised_after_pass2`,
-   * with `pass1_at_pass2`, the pass-1 answer that stood then (the one the passes compare).
+   * with `pass1_at_pass2`, the pass-1 answer that stood then (the one the passes compare). v1.2 batches export v1.3:
+   * also each decision's `kind`, `box_reason` on a typed line's not_on_page, the two-typings switch, and `pages`: per
+   * page, how many of its segmenter lines are resolved (enough current pass-1 decisions) and whether it is done.
    */
   exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[]): ExportFile {
-    const v12 = isV11(batch);
+    const level = levelOf(batch);
+    const v12 = level >= 1;
+    const v13 = level >= 2;
     // Who decided each line's pass 1 (any decision, current or not), and when each reviewer first decided its pass 2.
     const pass1By = new Set<string>();
     for (const r of resolved) if (passOf(r.proposal) === 1) for (const d of allOf(r)) pass1By.add(`${itemIdOf(r.proposal)}\u0000${d.reviewerId}`);
@@ -260,7 +307,8 @@ export const lineVerify: TaskType = {
       .slice()
       .sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order || passOf(a.proposal) - passOf(b.proposal))
       .flatMap((r) => {
-        const candidateSha = sha256Hex(payloadOf(r.proposal).candidate_text);
+        const kind = kindOf(r.proposal);
+        const candidateSha = kind === "type" ? null : sha256Hex(payloadOf(r.proposal).candidate_text);
         const pass = passOf(r.proposal);
         const itemId = itemIdOf(r.proposal);
         return r.current
@@ -280,8 +328,9 @@ export const lineVerify: TaskType = {
               item_id: itemId,
               reviewer: d.reviewerId,
               ...body(d),
-              candidate_sha256: candidateSha,
+              ...(candidateSha ? { candidate_sha256: candidateSha } : {}),
               ...(v12 ? { pass } : {}),
+              ...(v13 ? { kind } : {}),
               ...(v12 && pass === 2 ? { same_reviewer: pass1By.has(`${itemId}\u0000${d.reviewerId}`) } : {}),
               ...(at !== undefined ? { revised_after_pass2: revised } : {}),
               ...(revised ? { pass1_at_pass2: standing ? { ...body(standing), decided_at: standing.decidedOn } : null } : {}),
@@ -293,13 +342,19 @@ export const lineVerify: TaskType = {
     return {
       fileName: "line_verify_decisions.json",
       content: {
-        schema_version: v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
+        schema_version: v13 ? DECISIONS_SCHEMA_V13 : v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
         batch_id: sourceOf(batch).batch_id,
         // v1.2: which mode the blind pass ran in, and which list it ran on (heocr-eval, so a later reader can tell).
         ...(v12
           ? {
               pass2_reviewer: { mode: batch.settings?.pass2Reviewer ?? "same", set_at: batch.settings?.pass2ReviewerSetAt ?? null },
               blind_second_pass: { ...(sourceOf(batch).blind_second_pass ?? { count: 0, sha256: blindListSha256([]) }), sha256_of: BLIND_LIST_SHA256_OF },
+            }
+          : {}),
+        ...(v13
+          ? {
+              two_typings: { groups: batch.settings?.twoTypingsGroups ?? [], set_at: batch.settings?.twoTypingsSetAt ?? null },
+              pages: pagesOf(batch, resolved),
             }
           : {}),
         decisions,
@@ -313,8 +368,9 @@ export const lineVerify: TaskType = {
       .map((p) => ({
         item_id: itemIdOf(p),
         candidate_text: payloadOf(p).candidate_text,
-        candidate_sha256: sha256Hex(payloadOf(p).candidate_text),
+        ...(kindOf(p) === "type" ? {} : { candidate_sha256: sha256Hex(payloadOf(p).candidate_text) }),
         blind: payloadOf(p).blind === true,
+        kind: kindOf(p),
       }));
     return decisionsFileProblems(content, sourceOf(batch).batch_id, items);
   },
