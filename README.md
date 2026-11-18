@@ -37,7 +37,11 @@ Three task types:
   0..kraken_lines-1 exactly once. One typing is a typed line's reference; a batch setting can require two independent
   typings for a book group's typed lines (eval's registered fallback). A v1.2 batch exports
   `line_verify_decisions.v1.3`: v1.2 plus each decision's `kind`, `box_reason` on a typed line's not_on_page, the
-  two-typings setting, and `pages` (per page: kraken_lines, resolved lines, done, unreadable lines). On a v1.2 verify
+  two-typings setting, and `pages` (per page: kraken_lines, resolved lines, done, unreadable lines). A batch set to
+  `resolution: volunteer_v1` (the P-hist test batches) follows `docs/specs/line_verify_volunteer_resolution_v1.md`:
+  decisions count only from reviewers with mid-century standing, every line needs two counted decisions that agree
+  under line_fold_v1, disagreements go to a third reviewer, then the maintainer (or a fourth volunteer if he decided
+  the line), decisions are final, and the export is `line_verify_decisions.v1.4`. On a v1.2 verify
   line, misaligned (the candidate is not this line) opens a blank box: the decision carries the line as typed, so
   every line still gets a text, and the misaligned count measures the aligner (heocr-eval).
 - **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
@@ -189,6 +193,7 @@ Batch settings, which a re-import keeps (`migrations/0006_batch_settings.sql`):
 npm run batch-setting -- --batch <id> --target local|preview|production                       # read
 npm run batch-setting -- --batch <id> --pass2-reviewer other --by <who> --target preview       # change
 npm run batch-setting -- --batch <id> --two-typings-groups early --by <who> --target preview   # v1.2: two typings ("none" clears)
+npm run batch-setting -- --batch <id> --resolution volunteer_v1 --by <who> --target preview    # before the first decision
 ```
 
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by

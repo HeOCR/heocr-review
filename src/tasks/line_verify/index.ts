@@ -15,13 +15,15 @@ import type { DecisionOption, Label, LineVerifyView } from "../../shared/api";
 import type { Box } from "../../shared/media";
 import { imageUrl } from "../../shared/media";
 import { sha256Hex } from "../../shared/sha256";
-import type { BatchRecord, DecisionRecord, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType } from "../types";
+import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType, VerifyVote } from "../types";
+import { GATE_BATCH_ID, LINE_FOLD_V1_SHA256, referenceOf, routeLine, type CountedVote } from "./resolution";
 import {
   DECISIONS_SCHEMA,
   BLIND_LIST_SHA256_OF,
   BOX_REASONS,
   DECISIONS_SCHEMA_V12,
   DECISIONS_SCHEMA_V13,
+  DECISIONS_SCHEMA_V14,
   itemsLevel,
   decisionId,
   decisionsFileProblems,
@@ -234,6 +236,36 @@ export function normalizeLineDecision(candidate: string, value: string, text: un
   return { ok: true, value: "edited", text: edited };
 }
 
+/** A v1.4 decision's counted, not_counted_reason and step, from its verify_votes row (none: not recorded). */
+function voteFields(v: VerifyVote | undefined): Pick<LvDecision, "counted" | "not_counted_reason" | "step"> {
+  if (!v) return { counted: false, not_counted_reason: "not_recorded", step: "uncounted" };
+  return v.counted ? { counted: true, step: v.step as LvDecision["step"] } : { counted: false, not_counted_reason: v.notCountedReason as LvDecision["not_counted_reason"], step: "uncounted" };
+}
+
+/** v1.4's lines list: each line's routing from its counted current decisions (spec, "Routing"). */
+function linesOf(resolved: ResolvedProposal[], votes: Map<string, VerifyVote>) {
+  return resolved
+    .filter((r) => passOf(r.proposal) === 1)
+    .sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order)
+    .map((r) => {
+      const byId = new Map(r.current.map((d) => [d.id, d]));
+      const counted: CountedVote[] = r.current
+        .filter((d) => votes.get(d.id)?.counted)
+        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1))
+        .map((d) => ({ decisionId: d.id, reviewerId: d.reviewerId, value: d.value, text: d.text, createdAt: d.createdAt }));
+      const adminDecided = allOf(r).some((d) => votes.get(d.id)?.byAdmin);
+      const route = routeLine(counted, payloadOf(r.proposal).candidate_text, adminDecided, kindOf(r.proposal));
+      const exportId = (id: string) => decisionId(r.proposal.externalId, byId.get(id)!.reviewerId);
+      return {
+        item_id: itemIdOf(r.proposal),
+        kind: kindOf(r.proposal),
+        resolution: route.resolution,
+        reference: route.reference ? referenceOf(route.reference.value) : null,
+        pair: route.reference ? [exportId(route.reference.pair[0]), exportId(route.reference.pair[1])] : null,
+      };
+    });
+}
+
 /** v1.3's pages list: per page, its segmenter lines, how many have enough current pass-1 decisions, and how many are unreadable. */
 function pagesOf(batch: BatchRecord, resolved: ResolvedProposal[]) {
   const pages = new Map<string, { page_id: string; book_group: string | null; kraken_lines: number; resolved: number; unreadable: number }>();
@@ -300,10 +332,13 @@ export const lineVerify: TaskType = {
    * also each decision's `kind`, `box_reason` on a typed line's not_on_page, the two-typings switch, and `pages`: per
    * page, how many of its segmenter lines are resolved (enough current pass-1 decisions) and whether it is done.
    */
-  exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[]): ExportFile {
+  exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[], extra?: ExportExtra): ExportFile {
     const level = levelOf(batch);
     const v12 = level >= 1;
     const v13 = level >= 2;
+    // A volunteer_v1 batch (docs/specs/line_verify_volunteer_resolution_v1.md) exports v1.4.
+    const v14 = v13 && batch.settings?.resolution === "volunteer_v1";
+    const votes = new Map((extra?.verifyVotes ?? []).map((v) => [v.decisionId, v]));
     // Who decided each line's pass 1 (any decision, current or not), and when each reviewer first decided its pass 2.
     const pass1By = new Set<string>();
     for (const r of resolved) if (passOf(r.proposal) === 1) for (const d of allOf(r)) pass1By.add(`${itemIdOf(r.proposal)}\u0000${d.reviewerId}`);
@@ -347,6 +382,7 @@ export const lineVerify: TaskType = {
               ...(v12 && pass === 2 ? { same_reviewer: pass1By.has(`${itemId}\u0000${d.reviewerId}`) } : {}),
               ...(at !== undefined ? { revised_after_pass2: revised } : {}),
               ...(revised ? { pass1_at_pass2: standing ? { ...body(standing), decided_at: standing.decidedOn } : null } : {}),
+              ...(v14 ? voteFields(votes.get(d.id)) : {}),
               decided_at: d.decidedOn,
               checked_by: "human",
             };
@@ -355,7 +391,7 @@ export const lineVerify: TaskType = {
     return {
       fileName: "line_verify_decisions.json",
       content: {
-        schema_version: v13 ? DECISIONS_SCHEMA_V13 : v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
+        schema_version: v14 ? DECISIONS_SCHEMA_V14 : v13 ? DECISIONS_SCHEMA_V13 : v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
         batch_id: sourceOf(batch).batch_id,
         // v1.2: which mode the blind pass ran in, and which list it ran on (heocr-eval, so a later reader can tell).
         ...(v12
@@ -370,6 +406,7 @@ export const lineVerify: TaskType = {
               pages: pagesOf(batch, resolved),
             }
           : {}),
+        ...(v14 ? { resolution: "volunteer_v1", gate_batch_id: GATE_BATCH_ID, line_fold_v1_sha256: LINE_FOLD_V1_SHA256, lines: linesOf(resolved, votes) } : {}),
         decisions,
       },
     };

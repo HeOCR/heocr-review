@@ -17,6 +17,7 @@ declare global {
       TEST_LINE_CONSENSUS_SQL: string[];
       TEST_LINE_VERIFY_V11_SQL: string[];
       TEST_LINE_VERIFY_V12_SQL: string[];
+      TEST_LINE_VERIFY_VOL_SQL: string[];
     }
   }
 }

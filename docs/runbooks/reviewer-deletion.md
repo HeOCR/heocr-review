@@ -119,7 +119,7 @@ In one `--file` run, in this order:
 2. move every class E decision, and every class U decision if the choice is unlink, to `deleted-N`. Move class P to
    `deleted-N-pub`. Superseded decisions move with their class. Only `reviewer_id` changes: the decision id, value,
    text, dates and `terms_version` (the CC0 dedication) stay as they are;
-3. if the choice is delete: delete the class U decisions (superseded ones too);
+3. if the choice is delete: delete the class U decisions (superseded ones too); their `verify_votes` rows go with them (`ON DELETE CASCADE`);
 4. delete the reviewer's `drafts`, `skips`, `assignments`, `consent_events` and their `rate_limits` rows (key suffix
    `:<pseudonym>`). Their `agreement_exclusions` rows go with the record (`ON DELETE CASCADE`);
 5. delete the `reviewers` row. D1 enforces the foreign keys, so this fails if anything still points at it. A failure

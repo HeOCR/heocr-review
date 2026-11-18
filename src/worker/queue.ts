@@ -7,6 +7,7 @@ import { taskType } from "../tasks/registry";
 import type { BatchRecord, ProposalRecord } from "../tasks/types";
 import { assignReserves, type ReserveRow } from "./reserves";
 import { servedMembers, type CurrentDecisionRow, type SubsetMemberRow } from "./subsets";
+import { VOLUNTEER_DONE, isVolunteerV1, volunteerOpen } from "./verify_resolution";
 
 /** How long a served proposal stays leased to its reviewer before others are offered it first. */
 export const LEASE_MS = 10 * 60 * 1000;
@@ -160,11 +161,18 @@ const inFilter = (n: number, volunteerPages: boolean) =>
  * Proposals leased to someone else in the last LEASE_MS come after the rest; then by rank (the
  * task type's serving order, set at import).
  */
-const openSql = (volunteerPages: boolean) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
+/**
+ * SQL: proposal p still wants a decision from reviewer ?2 (who has not decided it): below the reviewer target, or for
+ * a volunteer_v1 batch (`volunteer`: the reviewer is the admin or not), its routing step lets them decide it.
+ */
+const wantsDecision = (volunteer: { admin: boolean } | null) =>
+  volunteer ? volunteerOpen(volunteer.admin) : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}`;
+
+const openSql = (volunteerPages: boolean, volunteer: { admin: boolean } | null) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
   WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8, volunteerPages)}
     AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
-    AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}
+    AND ${wantsDecision(volunteer)}
   ORDER BY EXISTS (SELECT 1 FROM assignments a WHERE a.proposal_id = p.id AND a.reviewer_id <> ?2 AND a.assigned_at > ?4),
     p.rank
   LIMIT ?5`;
@@ -173,15 +181,24 @@ const openSql = (volunteerPages: boolean) => `SELECT ${PROPOSAL_COLUMNS} FROM pr
  * Progress over the proposals open to this reviewer now (gated ones count once they open). With a subset filter,
  * over the proposals its strata serve, and the total is its number of strata.
  */
-export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<Progress> {
+export async function progressFor(
+  db: D1Database,
+  batch: BatchRecord,
+  reviewerId: string,
+  nowMs = Date.now(),
+  filter: SubsetFilter | null = null,
+  admin = false,
+): Promise<Progress> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const f = inFilter(6, batch.taskType === PAGE_REVIEW);
+  const volunteer = isVolunteerV1(batch) ? { admin } : null;
+  // A volunteer_v1 line is covered once it is resolved or unresolved.
+  const covered = volunteer ? VOLUNTEER_DONE : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) >= ${needed(3)}`;
   const row = await db
     .prepare(
       `SELECT
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}) AS total,
-        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f} AND
-          (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) >= ${needed(3)}) AS covered,
+        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f} AND ${covered}) AS covered,
         (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id = d.proposal_id
           WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
@@ -189,7 +206,7 @@ export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
           AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
-          AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}) AS remaining`,
+          AND ${wantsDecision(volunteer)}) AS remaining`,
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();
@@ -239,14 +256,21 @@ async function draftFor(db: D1Database, p: ProposalRecord, reviewerId: string): 
   return { prefillSha256: sha, readingOrder: body.readingOrder, rows: body.rows, savedAt: row.updated_at };
 }
 
-export async function nextFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<NextResponse> {
+export async function nextFor(
+  db: D1Database,
+  batch: BatchRecord,
+  reviewerId: string,
+  nowMs = Date.now(),
+  filter: SubsetFilter | null = null,
+  admin = false,
+): Promise<NextResponse> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
-    .prepare(openSql(batch.taskType === PAGE_REVIEW))
+    .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const rows = results.map(toProposal);
-  const progress = await progressFor(db, batch, reviewerId, nowMs, filter);
+  const progress = await progressFor(db, batch, reviewerId, nowMs, filter, admin);
   const first = rows[0];
   if (!first) return { proposal: null, progress, prefetch: [] };
   await db

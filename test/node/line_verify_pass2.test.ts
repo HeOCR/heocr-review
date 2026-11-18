@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { settingProblem, twoTypingsProblem } from "../../scripts/batch-setting";
+import { resolutionProblem, settingProblem, twoTypingsProblem } from "../../scripts/batch-setting";
 import { blindListSha256, normalizeTypedDecision } from "../../src/tasks/line_verify";
 import { decisionsFileProblems } from "../../src/tasks/line_verify/schema";
 
@@ -93,6 +93,7 @@ describe("typed lines (v1.3)", () => {
     [{ decision: "typed", text: "x", box_reason: "no_text" }, "box_reason"],
     [{ decision: "typed", text: "x", candidate_sha256: "0".repeat(64) }, "no candidate_sha256"],
     [{ decision: "typed", text: "x", kind: "verify" }, "kind must be the item's"],
+    [{ decision: "pointed_print" }, "text must be a string"],
   ])("refuses %j", (d, message) => expect(decisionsFileProblems(tfile(d), "b", titems).join("\n")).toContain(message));
   it("checks the pages list", () => {
     const f = tfile({ decision: "unreadable" });
@@ -110,6 +111,14 @@ describe("batch-setting", () => {
     expect(settingProblem(row, "anyone", "x")).toContain("must be one of");
     expect(settingProblem({ ...row, task_type: "page_review" }, "other", "x")).toContain("line_verify batches only");
     expect(settingProblem(row, "other", " ")).toContain("--by");
+  });
+
+  it("switches resolution on a line_verify batch with no decisions only", () => {
+    expect(resolutionProblem(row, "volunteer_v1", 0, "lead")).toBeNull();
+    expect(resolutionProblem(row, "volunteer_v1", 3, "lead")).toContain("before its first decision");
+    expect(resolutionProblem(row, "majority", 0, "lead")).toContain("must be one of");
+    expect(resolutionProblem({ ...row, task_type: "page_review" }, "volunteer_v1", 0, "lead")).toContain("line_verify batches only");
+    expect(resolutionProblem(row, "volunteer_v1", 0, " ")).toContain("--by");
   });
 
   it("switches two typings on for named book groups of a v1.2 batch only", () => {
