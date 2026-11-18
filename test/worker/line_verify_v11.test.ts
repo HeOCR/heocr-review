@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { LineVerifyView, NextResponse, ProposalView } from "../../src/shared/api";
@@ -138,6 +139,10 @@ describe("line verification v1.1", () => {
     expect(body.problems).toEqual([]);
     const file = body.files["line_verify_decisions.json"]!;
     expect(file.schema_version).toBe("line_verify_decisions.v1.2");
+    // The header says which mode the blind pass ran in and which list it ran on.
+    expect(Object.keys(file)).toEqual(["schema_version", "batch_id", "pass2_reviewer", "blind_second_pass", "decisions"]);
+    expect(file.pass2_reviewer).toEqual({ mode: "same", set_at: null });
+    expect(file.blind_second_pass).toMatchObject({ count: 2, sha256: createHash("sha256").update([HARDEST, SEFARIA].sort().join("\n"), "utf8").digest("hex") });
     const decisions = file.decisions as Record<string, unknown>[];
     expect(decisions).toHaveLength(12);
     expect(decisions.every((d) => d.pass === 1 || d.pass === 2)).toBe(true);
@@ -193,6 +198,7 @@ describe("line verification v1.1", () => {
     const res = await handle(new Request(`http://localhost/api/admin/batches/${V11}/export`, { headers: { cookie: admin.cookie } }), { ...env, ADMIN_REVIEWER_IDS: adminId }, exec);
     const body = (await res.json()) as { problems: string[]; files: Record<string, { decisions: Record<string, unknown>[] }> };
     expect(body.problems).toEqual([]);
+    expect(body.files["line_verify_decisions.json"]).toMatchObject({ pass2_reviewer: { mode: "other", set_at: "2026-11-18T00:00:00Z" } });
     const p2 = body.files["line_verify_decisions.json"]!.decisions.filter((d) => d.pass === 2);
     expect(p2).toEqual([expect.objectContaining({ item_id: HARDEST, decision: "pointed_print", text: "אותיות בלבד", same_reviewer: false })]);
     // A blind line whose pass 2 went to someone else is not revised_after_pass2 for the pass-1 reviewer.

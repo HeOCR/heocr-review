@@ -26,7 +26,8 @@ Three task types:
   answer on pass 1 (exact, edited or print has niqqud); by the batch's `pass2_reviewer` setting, to the same reviewer
   (`same`, the default) or only to a reviewer who never decided the line's pass 1 (`other`, for once volunteers
   review). While it is open and undecided, the reviewer's pass-1 line is closed to them. A v1.1 batch exports
-  `line_verify_decisions.v1.2`: each decision's `pass`; on pass 2 the decision `typed` (or `pointed_print` with the
+  `line_verify_decisions.v1.2`: a header with the batch's `pass2_reviewer` mode (and when it was set) and the
+  `blind_second_pass` list's count and sha256 (of its item ids, sorted, joined by newlines); each decision's `pass`; on pass 2 the decision `typed` (or `pointed_print` with the
   letters, `unreadable`, `misaligned`) and `same_reviewer`; on a blind line's pass 1 revised after pass 2,
   `revised_after_pass2` and the pass-1 answer that stood then.
 - **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
