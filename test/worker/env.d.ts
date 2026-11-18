@@ -15,6 +15,8 @@ declare global {
       TEST_SUBSET_SQL: string[];
       /** The volunteer line batch (line_consensus). */
       TEST_LINE_CONSENSUS_SQL: string[];
+      /** The handwriting transcription batch (line_transcribe), gated on the volunteer line batch. */
+      TEST_LINE_TRANSCRIBE_SQL: string[];
     }
   }
 }

@@ -20,7 +20,9 @@ import {
   assertConsensusEnabled,
   consensusProgress,
   exportExtras,
+  gateOpen,
   isConsensus,
+  isTranscribe,
   lineOpenTo,
   nextLine,
   setExclusion,
@@ -171,6 +173,8 @@ export async function batches(ctx: Ctx): Promise<Response> {
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
+    // Transcription is listed only to the maintainer and to volunteers its gate lets in.
+    if (isTranscribe(b) && !isAdmin(ctx.env, reviewer.id) && !(await gateOpen(ctx.env.DB, b, reviewer.id))) continue;
     out.push({
       id: b.id,
       taskType: b.taskType,
@@ -194,7 +198,13 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
-  if (isConsensus(batch)) return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now));
+  if (isConsensus(batch)) {
+    // ?languages=jrb,lad: languages besides Hebrew the volunteer says they read, for this session only (never stored).
+    const raw = new URL(ctx.request.url).searchParams.get("languages") ?? "";
+    const languages = raw === "" ? [] : raw.split(",");
+    if (languages.length > 8 || !languages.every((l) => /^[a-z]{2,3}$/.test(l))) throw new HttpError(400, "invalid_languages", "languages must be language codes");
+    return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now, languages));
+  }
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
   const subsetId = new URL(ctx.request.url).searchParams.get("subset");
   let filter = null;
@@ -381,7 +391,7 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
   for (const batch of await listBatches(ctx.env.DB, false)) {
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
-    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch) : {};
     const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
     const perReviewer = new Map<string, number>();
     for (const d of rows.decisions) if (d.supersededAt === null) perReviewer.set(d.reviewerId, (perReviewer.get(d.reviewerId) ?? 0) + 1);
@@ -404,7 +414,7 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   if (!batch) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
-  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch) : {};
   const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
   return json({
     counts: result.counts,

@@ -1,4 +1,5 @@
 import { lineConsensus } from "./line_consensus";
+import { lineTranscribe } from "./line_transcribe";
 import { lineVerify } from "./line_verify";
 import { pageReview } from "./page_review";
 import { referenceAudit } from "./reference_audit";
@@ -14,6 +15,7 @@ const TASK_TYPES: Record<string, TaskType> = {
   [lineVerify.id]: lineVerify,
   [pageReview.id]: pageReview,
   [lineConsensus.id]: lineConsensus,
+  [lineTranscribe.id]: lineTranscribe,
 };
 
 export function taskType(id: string): TaskType | undefined {

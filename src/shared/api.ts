@@ -116,7 +116,24 @@ export interface LineConsensusView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView;
+/**
+ * One handwritten line to transcribe (task type line_transcribe): typed from scratch, with no pre-fill and no
+ * machine reading of any kind (h_eval_v1 amendment 1).
+ */
+export interface LineTranscribeView {
+  kind: "line_transcribe";
+  /** Languages besides Hebrew that the page's catalogue records (other_hebrew_script pages). */
+  languages: { code: string; label: Label }[];
+  /** The token for one illegible span inside a line. */
+  spanMarker: string;
+  attribution: string;
+  textLicense: string;
+  crop: ImageView | null;
+  context: Box | null;
+  page: ImageView | null;
+}
+
+export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView | LineTranscribeView;
 
 export interface DecisionOption {
   value: string;

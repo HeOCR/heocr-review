@@ -95,6 +95,8 @@ export interface ExportExtra {
   exclusions: { reviewerId: string; excludedAt: string }[];
   /** Ids of decisions an admin made in a volunteer batch (migrations/0005_line_consensus.sql). */
   maintainerDecisions: string[];
+  /** line_transcribe: each reviewer's standing in the gate batch (who counts is decided there). */
+  standings?: Record<string, string>;
 }
 
 export interface TaskType {

@@ -263,6 +263,16 @@ main:has(.pagereview) { max-width: 1500px; }
   .conventions dl { grid-template-columns: 1fr; }
 }
 
+/* Handwriting transcription (line_transcribe) */
+.transcribe .typebox { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.transcribe textarea.typed { font-size: 22px; line-height: 1.5; width: 100%; box-sizing: border-box; }
+.transcribe .warn { color: var(--attn-line); margin: 0; }
+.transcribe .keys-row { gap: 6px; flex-wrap: wrap; }
+.transcribe .kbdhint { margin: 0; }
+.actions.four { grid-template-columns: repeat(4, 1fr); }
+.actions.four .act { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 4px; }
+@media (max-width: 520px) { .actions.four { grid-template-columns: repeat(2, 1fr); } .actions.four .act { min-height: 52px; } }
+
 /* Volunteer line review (line_consensus) */
 .consensus .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .consensus .tag.look { border-color: var(--attn-line); background: var(--attn-bg); }

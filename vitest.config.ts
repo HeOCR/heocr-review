@@ -5,6 +5,7 @@ import { buildImportStatements } from "./scripts/lib/importsql";
 import { buildSubsetStatements, interimMembers } from "./scripts/lib/subset";
 import type { TaskImporter } from "./src/tasks/import";
 import { lineConsensusImporter } from "./src/tasks/line_consensus/importer";
+import { lineTranscribeImporter } from "./src/tasks/line_transcribe/importer";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
 import { pageReviewImporter } from "./src/tasks/page_review/importer";
 import { referenceAuditImporter } from "./src/tasks/reference_audit/importer";
@@ -89,6 +90,7 @@ export default defineConfig(async () => {
                   TEST_PAGE_REVIEW_AI_SQL: pageReviewWithAiFlags(1),
                   TEST_SUBSET_SQL: pageReviewSubset(),
                   TEST_LINE_CONSENSUS_SQL: lineConsensusBatch(),
+                  TEST_LINE_TRANSCRIBE_SQL: fixtureBatch(lineTranscribeImporter, "test/fixtures/line_transcribe/h_line_items_v1.json", 1, "2026-11-18T13:00:00.000Z"),
                 },
               },
             }),

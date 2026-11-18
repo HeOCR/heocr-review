@@ -32,7 +32,7 @@ const KEYS: [string, string, string][] = [
  * The band around the line, cut from the page image (the image is the page; `region` and the line's box are page
  * fractions), at most the holder's width and 160 px high, with the line outlined.
  */
-function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
+export function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
   const rw = (region[2] - region[0]) * img.width;
   const rh = (region[3] - region[1]) * img.height;
   const scale = Math.min(width / rw, 160 / rh);

@@ -237,6 +237,30 @@ maintainer had decided, which keep his references), the batch's `ai_flags.json`,
 - **Off unless switched on:** the whole task is off unless `CONSENSUS_ENABLED=1` (set for preview in
   `wrangler.jsonc`), until the maintainer approves the privacy text for gold lines and accuracy.
 
+### Handwriting transcription (preview only; draft until eval's amendment 3)
+
+```sh
+npm run import -- --task line_transcribe --bundle <bundle dir> --target local|preview
+```
+
+Volunteers transcribe the handwriting (H) eval pages one line at a time (task type `line_transcribe`; heocr-eval's
+`h_eval_v1`, amendments 1 and 2). The bundle holds `h_line_items_v1.json` (schema `h_line_items.v1`: the line boxes
+data-collection makes and eval registers) and `pages/`. The import refuses the box file until its sha256 is in
+`REGISTERED_SHA256` (`src/tasks/line_transcribe/schema.ts`).
+
+- **From scratch:** there is no pre-fill and no machine reading of any kind. A line is typed, marked whole-line
+  unreadable, or marked as a box that doesn't hold exactly one line (`not_on_page`). `[?]` marks one illegible span
+  inside a line.
+- **Routing and agreement:** as in volunteer line review. Two blind transcriptions, then a blind third, then the
+  maintainer, under eval's `agreement.py`.
+- **Who transcribes:** the maintainer, and volunteers who count in the mid-century volunteer batch (95% on at least 20
+  gold lines). Nobody else is listed the task or served a line. A change in a volunteer's standing there, or an
+  admin's exclusion, is applied to their H lines. There is no handwriting gold yet.
+- **Strata kept apart:** `primary`, `seen_writer` and `other_hebrew_script` are on every line of the export
+  (`h_line_transcriptions.v0`), with counts per stratum. Volunteers are not told a page is a seen writer's.
+- **Other languages:** `other_hebrew_script` lines are served only when the volunteer ticks, for the session, that
+  they read the page's languages. The choice stays in the browser tab and goes with each request. It is never stored.
+
 ## Decisions out
 
 ```sh

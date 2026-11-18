@@ -11,7 +11,8 @@ import { imageUrl } from "../shared/media";
 import { sha256Hex } from "../shared/sha256";
 import { goldNext } from "../tasks/line_consensus/consensus";
 import { TASK_TYPE_ID as LINE_CONSENSUS, hasBox, isGold, payloadOf, routeLine, standingOf, standingsOf, type StandingRow } from "../tasks/line_consensus";
-import { CONSENSUS_EXPORT_SQL, PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
+import { TASK_TYPE_ID as LINE_TRANSCRIBE, gateBatchOf } from "../tasks/line_transcribe";
+import { BATCH_SQL, CONSENSUS_EXPORT_SQL, PROPOSAL_COLUMNS, toBatch, toProposal, type BatchRow, type ProposalRow } from "../tasks/rows";
 import type { BatchRecord, ProposalRecord } from "../tasks/types";
 import type { Env } from "./env";
 import { HttpError } from "./http";
@@ -23,7 +24,13 @@ const PREFETCH = 3;
 /** The maintainer's queue: lines with no majority, and lines with no box. */
 const MAINTAINER_STATES = "('to_maintainer', 'no_box')";
 
-export const isConsensus = (batch: BatchRecord) => batch.taskType === LINE_CONSENSUS;
+/** Volunteer line batches: line review (line_consensus) and handwriting transcription (line_transcribe). */
+export const isConsensus = (batch: BatchRecord) => batch.taskType === LINE_CONSENSUS || batch.taskType === LINE_TRANSCRIBE;
+/**
+ * Handwriting transcription: no gold of its own; who counts (and who is served at all) is the reviewer's standing
+ * in its gate batch, the mid-century volunteer batch, less this batch's own admin exclusions.
+ */
+export const isTranscribe = (batch: BatchRecord) => batch.taskType === LINE_TRANSCRIBE;
 
 /**
  * Volunteer line review runs only where it is switched on (CONSENSUS_ENABLED=1: preview), until the maintainer has
@@ -89,6 +96,33 @@ export async function standings(db: D1Database, batchId: string, ids: string[] |
   );
 }
 
+/** The standings that route this batch's lines: its own (line review), or the gate batch's (transcription). */
+export async function routingStandings(db: D1Database, batch: BatchRecord, ids: string[] | null): Promise<Map<string, StandingRow>> {
+  if (!isTranscribe(batch)) return standings(db, batch.id, ids);
+  const st = await standings(db, gateBatchOf(batch), ids);
+  const { results } = await db.prepare("SELECT reviewer_id FROM agreement_exclusions WHERE batch_id = ?1").bind(batch.id).all<{ reviewer_id: string }>();
+  for (const { reviewer_id } of results) {
+    if (ids && !ids.includes(reviewer_id)) continue;
+    st.set(reviewer_id, { ...standingOf(st, reviewer_id), state: "excluded" });
+  }
+  return st;
+}
+
+/** Whether a volunteer may be served this transcription batch's lines: counting in its gate batch. */
+export async function gateOpen(db: D1Database, batch: BatchRecord, reviewerId: string): Promise<boolean> {
+  return standingOf(await routingStandings(db, batch, [reviewerId]), reviewerId).state === "counting";
+}
+
+/** The transcription batches gated on this batch: a standing change here changes who counts there. */
+async function dependents(db: D1Database, gateBatchId: string): Promise<BatchRecord[]> {
+  const { results } = await db.prepare(`${BATCH_SQL} WHERE task_type = ?1`).bind(LINE_TRANSCRIBE).all<BatchRow>();
+  return results.map(toBatch).filter((b) => gateBatchOf(b) === gateBatchId);
+}
+
+async function recomputeDependents(db: D1Database, gateBatchId: string, reviewerId: string, nowMs: number): Promise<void> {
+  for (const b of await dependents(db, gateBatchId)) await recomputeReviewer(db, b, reviewerId, nowMs);
+}
+
 /** Recompute and store the state of these lines (gold lines have none). */
 export async function recomputeLines(db: D1Database, batch: BatchRecord, ids: number[], nowMs: number): Promise<void> {
   const lines = (await proposalsByIds(db, ids)).filter((p) => p.batchId === batch.id && !isGold(p));
@@ -103,7 +137,7 @@ export async function recomputeLines(db: D1Database, batch: BatchRecord, ids: nu
     .bind(JSON.stringify(lines.map((p) => p.id)))
     .all<{ id: string; proposal_id: number; reviewer_id: string; value: string; text: string | null; created_at: string; maintainer: number }>();
   const reviewers = [...new Set(results.filter((r) => !r.maintainer).map((r) => r.reviewer_id))];
-  const st = await standings(db, batch.id, reviewers);
+  const st = await routingStandings(db, batch, reviewers);
   const now = iso(nowMs);
   const stmts = lines.map((p) => {
     const ds = results.filter((r) => r.proposal_id === p.id);
@@ -149,6 +183,8 @@ const LINE_OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM line_state s JOIN proposa
   WHERE s.batch_id = ?1 AND s.state = 'open' AND p.active = 1
     AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2)
     AND NOT EXISTS (SELECT 1 FROM skips k WHERE k.proposal_id = p.id AND k.reviewer_id = ?2)
+    AND (COALESCE(json_extract(p.payload_json, '$.stratum'), '') <> 'other_hebrew_script'
+      OR NOT EXISTS (SELECT 1 FROM json_each(p.payload_json, '$.languages') l WHERE l.value <> 'he' AND l.value NOT IN (SELECT value FROM json_each(?5))))
     AND s.needed > (SELECT COUNT(*) FROM assignments a WHERE a.proposal_id = p.id AND a.reviewer_id <> ?2 AND a.assigned_at > ?3
       AND NOT EXISTS (SELECT 1 FROM decisions e WHERE e.proposal_id = a.proposal_id AND e.reviewer_id = a.reviewer_id))
   ORDER BY s.needed, p.rank
@@ -188,13 +224,20 @@ async function dueGold(db: D1Database, batch: BatchRecord, reviewerId: string): 
   return first ? byGold.get(first)! : null;
 }
 
-export async function nextLine(db: D1Database, batch: BatchRecord, reviewerId: string, admin: boolean, nowMs: number): Promise<NextResponse> {
+/**
+ * The next line for this reviewer. `languages`: the languages besides Hebrew the volunteer said, for this session,
+ * that they read; other_hebrew_script lines are served only when all of theirs are among them. Nothing about it is
+ * stored.
+ */
+export async function nextLine(db: D1Database, batch: BatchRecord, reviewerId: string, admin: boolean, nowMs: number, languages: string[] = []): Promise<NextResponse> {
   let rows: ProposalRecord[];
   if (admin) {
     rows = (await db.prepare(MAINTAINER_SQL).bind(batch.id, reviewerId, 1 + PREFETCH).all<ProposalRow>()).results.map(toProposal);
+  } else if (isTranscribe(batch) && !(await gateOpen(db, batch, reviewerId))) {
+    rows = [];
   } else {
-    const gold = await dueGold(db, batch, reviewerId);
-    const open = (await db.prepare(LINE_OPEN_SQL).bind(batch.id, reviewerId, nowMs - LINE_LEASE_MS, 1 + PREFETCH).all<ProposalRow>()).results.map(toProposal);
+    const gold = isTranscribe(batch) ? null : await dueGold(db, batch, reviewerId);
+    const open = (await db.prepare(LINE_OPEN_SQL).bind(batch.id, reviewerId, nowMs - LINE_LEASE_MS, 1 + PREFETCH, JSON.stringify(languages)).all<ProposalRow>()).results.map(toProposal);
     rows = gold ? [gold, ...open] : open;
   }
   const first = rows[0];
@@ -260,7 +303,10 @@ export async function afterLineDecision(db: D1Database, batch: BatchRecord, p: P
     standingsOf(results.flatMap((r) => (gold.has(r.proposal_id) ? [{ reviewerId, value: r.value, text: r.text, proposal: gold.get(r.proposal_id)! }] : [])), excluded),
     reviewerId,
   );
-  if (before.state !== after.state) await recomputeReviewer(db, batch, reviewerId, nowMs);
+  if (before.state !== after.state) {
+    await recomputeReviewer(db, batch, reviewerId, nowMs);
+    await recomputeDependents(db, batch.id, reviewerId, nowMs);
+  }
 }
 
 /** The admin's view of a volunteer batch: line states, and per volunteer their gold record and standing. */
@@ -277,9 +323,10 @@ export async function volunteerReport(db: D1Database, batch: BatchRecord) {
       .bind(batch.id),
     db.prepare("SELECT reviewer_id, excluded_at FROM agreement_exclusions WHERE batch_id = ?1").bind(batch.id),
   ]);
-  const st = await standings(db, batch.id, null);
   const lines = new Map(((decided!.results ?? []) as { reviewer_id: string; n: number }[]).map((r) => [r.reviewer_id, r.n]));
   const excludedAt = new Map(((excl!.results ?? []) as { reviewer_id: string; excluded_at: string }[]).map((r) => [r.reviewer_id, r.excluded_at]));
+  // Transcription: only reviewers who worked in this batch (or are excluded from it), with their gate standing.
+  const st = isTranscribe(batch) ? await routingStandings(db, batch, [...new Set([...lines.keys(), ...excludedAt.keys()])]) : await standings(db, batch.id, null);
   const ids = [...new Set([...lines.keys(), ...st.keys()])].sort();
   return {
     states: Object.fromEntries(((states!.results ?? []) as { state: string; n: number }[]).map((r) => [r.state, r.n])),
@@ -311,15 +358,27 @@ export async function setExclusion(db: D1Database, batch: BatchRecord, reviewerI
     await db.prepare("DELETE FROM agreement_exclusions WHERE batch_id = ?1 AND reviewer_id = ?2").bind(batch.id, reviewerId).run();
   }
   await recomputeReviewer(db, batch, reviewerId, nowMs);
+  if (!isTranscribe(batch)) await recomputeDependents(db, batch.id, reviewerId, nowMs);
 }
 
-/** The export's extra inputs: exclusions and the maintainer's decisions. */
-export async function exportExtras(db: D1Database, batchId: string) {
+/** The export's extra inputs: exclusions, the maintainer's decisions and (transcription) the gate standings. */
+export async function exportExtras(db: D1Database, batch: BatchRecord): Promise<{ exclusions: { reviewerId: string; excludedAt: string }[]; maintainerDecisions: string[]; standings?: Record<string, string> }> {
+  const batchId = batch.id;
   const [excl, maint] = await db.batch([
     db.prepare(CONSENSUS_EXPORT_SQL.exclusions).bind(batchId),
     db.prepare(CONSENSUS_EXPORT_SQL.maintainer).bind(batchId),
   ]);
+  let gate: Record<string, string> | undefined;
+  if (isTranscribe(batch)) {
+    const { results } = await db
+      .prepare("SELECT DISTINCT d.reviewer_id FROM decisions d JOIN proposals p ON p.id = d.proposal_id WHERE p.batch_id = ?1")
+      .bind(batchId)
+      .all<{ reviewer_id: string }>();
+    const st = await standings(db, gateBatchOf(batch), results.map((r) => r.reviewer_id));
+    gate = Object.fromEntries(results.map((r) => [r.reviewer_id, standingOf(st, r.reviewer_id).state]));
+  }
   return {
+    ...(gate ? { standings: gate } : {}),
     exclusions: ((excl!.results ?? []) as { reviewer_id: string; excluded_at: string }[]).map((r) => ({ reviewerId: r.reviewer_id, excludedAt: r.excluded_at })),
     maintainerDecisions: ((maint!.results ?? []) as { decision_id: string }[]).map((r) => r.decision_id),
   };
