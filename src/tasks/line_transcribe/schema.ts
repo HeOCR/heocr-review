@@ -26,8 +26,9 @@ export const H_MANIFESTS: Record<string, string> = {
 };
 export const H_BATCH_ID = "h_eval_v1_transcribe_v0";
 /**
- * Who may transcribe: the maintainer, and volunteers counting in the mid-century volunteer batch (95% on at least 20
- * gold lines; h_eval_v1 README §3). Handwriting gold comes with a later amendment.
+ * Whose transcriptions count: volunteers counting in the mid-century volunteer batch (95% on at least 20 gold
+ * lines). Anyone may transcribe; other decisions are kept and do not count (lead, 2026-11-18: a counting rule, not
+ * an access gate). Handwriting gold comes with a later amendment.
  */
 export const GATE_BATCH_ID = "newprinted_midcentury_volunteers_v0";
 

@@ -253,9 +253,10 @@ data-collection makes and eval registers) and `pages/`. The import refuses the b
   inside a line.
 - **Routing and agreement:** as in volunteer line review. Two blind transcriptions, then a blind third, then the
   maintainer, under eval's `agreement.py`.
-- **Who transcribes:** the maintainer, and volunteers who count in the mid-century volunteer batch (95% on at least 20
-  gold lines). Nobody else is listed the task or served a line. A change in a volunteer's standing there, or an
-  admin's exclusion, is applied to their H lines. There is no handwriting gold yet.
+- **Who counts:** anyone may transcribe, but only decisions from volunteers who count in the mid-century volunteer
+  batch (95% on at least 20 gold lines) count toward agreement. Other decisions are kept and don't count, so a line
+  is offered until counted decisions settle it. A change in a volunteer's standing there, or an admin's exclusion,
+  is applied to their H lines. There is no handwriting gold yet.
 - **Strata kept apart:** `primary`, `seen_writer` and `other_hebrew_script` are on every line of the export
   (`h_line_transcriptions.v0`), with counts per stratum. Volunteers are not told a page is a seen writer's.
 - **Other languages:** `other_hebrew_script` lines are served only when the volunteer ticks, for the session, that

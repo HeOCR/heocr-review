@@ -96,18 +96,32 @@ async function serveUntil(c: Client, externalId: string): Promise<number> {
 }
 
 describe("handwriting transcription", () => {
-  it("is closed to volunteers below the mid-century floor: not listed, nothing served", async () => {
+  it("is open to anyone, but only volunteers at the mid-century floor count toward agreement", async () => {
     const [none, low, few] = [await volunteer("t-none"), await volunteer("t-low"), await volunteer("t-few")];
     await giveGold(low.id, 18, 2);
     await giveGold(few.id, 19);
+    const target = `${P1}#l0`;
+    let id = 0;
     for (const c of [none, low, few]) {
       const list = await call<{ batches: { id: string }[] }>(c, "GET", "/api/batches");
-      expect(list.body.batches.map((b) => b.id)).not.toContain(H);
-      expect((await next(c)).proposal).toBeNull();
+      expect(list.body.batches.map((b) => b.id)).toContain(H);
+      id = await serveUntil(c, target);
+      expect((await decide(c, id, "edit", "בדוי")).status).toBe(200);
     }
-    const ok = await counting("t-ok");
-    const list = await call<{ batches: { id: string }[] }>(ok, "GET", "/api/batches");
-    expect(list.body.batches.map((b) => b.id)).toContain(H);
+    // Three agreeing decisions, none counted: the line is still open for two counted ones.
+    expect(await lineState(id)).toEqual({ state: "open", needed: 2 });
+    const [a, b] = [await counting("t-ok1"), await counting("t-ok2")];
+    await decide(a, await serveUntil(a, target), "edit", "בדוי");
+    await decide(b, await serveUntil(b, target), "edit", "בדוי");
+    expect(await lineState(id)).toEqual({ state: "agreed", needed: 0 });
+    const m = new Client();
+    admins = await m.signIn("t-adm");
+    await m.acceptTerms();
+    const exp = await call<{ files: Record<string, { decisions: { reviewer: string; counted: boolean; not_counted_reason: string | null }[] }> }>(m, "GET", `/api/admin/batches/${H}/export`);
+    const ds = exp.body.files["h_line_transcriptions.json"]!.decisions;
+    expect(ds.find((d) => d.reviewer === low.id)).toMatchObject({ counted: false, not_counted_reason: "below_floor" });
+    expect(ds.find((d) => d.reviewer === few.id)).toMatchObject({ counted: false, not_counted_reason: "fewer_than_20_gold" });
+    expect(ds.filter((d) => d.counted)).toHaveLength(2);
   });
 
   it("shows no text of any kind, and serves other-script lines only for the languages the volunteer reads", async () => {
@@ -206,7 +220,6 @@ describe("handwriting transcription", () => {
     await m.acceptTerms();
     expect((await call(m, "PUT", `/api/admin/batches/${GATE}/reviewers/${b.id}/exclusion`, { excluded: true })).status).toBe(200);
     expect(await lineState(id)).toEqual({ state: "open", needed: 1 });
-    expect((await next(b)).proposal).toBeNull();
     await call(m, "PUT", `/api/admin/batches/${GATE}/reviewers/${b.id}/exclusion`, { excluded: false });
     expect(await lineState(id)).toEqual({ state: "agreed", needed: 0 });
     // Excluded in this batch only: the same.

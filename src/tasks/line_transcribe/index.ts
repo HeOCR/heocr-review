@@ -8,8 +8,8 @@
  * It runs on the volunteer line machinery of line_consensus (the line_state table, the queue, the maintainer's
  * tie-break, agreement.py's rule), with three differences:
  * - no pre-fill: the stored payload has prefill "" and every text decision is typed;
- * - no gold in this batch: who counts is the volunteer's standing in the mid-century volunteer batch (GATE_BATCH_ID),
- *   and only counting volunteers and the maintainer are served at all;
+ * - no gold in this batch: whose decisions count is the volunteer's standing in the mid-century volunteer batch
+ *   (GATE_BATCH_ID); anyone may transcribe, and other decisions are kept and do not count;
  * - strata are kept apart, and other_hebrew_script lines are served only to volunteers who say, for the session,
  *   that they read the page's language.
  */

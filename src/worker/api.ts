@@ -20,9 +20,7 @@ import {
   assertConsensusEnabled,
   consensusProgress,
   exportExtras,
-  gateOpen,
   isConsensus,
-  isTranscribe,
   lineOpenTo,
   nextLine,
   setExclusion,
@@ -173,8 +171,6 @@ export async function batches(ctx: Ctx): Promise<Response> {
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
-    // Transcription is listed only to the maintainer and to volunteers its gate lets in.
-    if (isTranscribe(b) && !isAdmin(ctx.env, reviewer.id) && !(await gateOpen(ctx.env.DB, b, reviewer.id))) continue;
     out.push({
       id: b.id,
       taskType: b.taskType,

@@ -27,8 +27,9 @@ const MAINTAINER_STATES = "('to_maintainer', 'no_box')";
 /** Volunteer line batches: line review (line_consensus) and handwriting transcription (line_transcribe). */
 export const isConsensus = (batch: BatchRecord) => batch.taskType === LINE_CONSENSUS || batch.taskType === LINE_TRANSCRIBE;
 /**
- * Handwriting transcription: no gold of its own; who counts (and who is served at all) is the reviewer's standing
- * in its gate batch, the mid-century volunteer batch, less this batch's own admin exclusions.
+ * Handwriting transcription: no gold of its own. Anyone may transcribe; whose decisions count is the reviewer's
+ * standing in its gate batch (the mid-century volunteer batch), less this batch's own admin exclusions. A line goes
+ * on being offered until counted decisions settle it, as in line review.
  */
 export const isTranscribe = (batch: BatchRecord) => batch.taskType === LINE_TRANSCRIBE;
 
@@ -106,11 +107,6 @@ export async function routingStandings(db: D1Database, batch: BatchRecord, ids: 
     st.set(reviewer_id, { ...standingOf(st, reviewer_id), state: "excluded" });
   }
   return st;
-}
-
-/** Whether a volunteer may be served this transcription batch's lines: counting in its gate batch. */
-export async function gateOpen(db: D1Database, batch: BatchRecord, reviewerId: string): Promise<boolean> {
-  return standingOf(await routingStandings(db, batch, [reviewerId]), reviewerId).state === "counting";
 }
 
 /** The transcription batches gated on this batch: a standing change here changes who counts there. */
@@ -233,8 +229,6 @@ export async function nextLine(db: D1Database, batch: BatchRecord, reviewerId: s
   let rows: ProposalRecord[];
   if (admin) {
     rows = (await db.prepare(MAINTAINER_SQL).bind(batch.id, reviewerId, 1 + PREFETCH).all<ProposalRow>()).results.map(toProposal);
-  } else if (isTranscribe(batch) && !(await gateOpen(db, batch, reviewerId))) {
-    rows = [];
   } else {
     const gold = isTranscribe(batch) ? null : await dueGold(db, batch, reviewerId);
     const open = (await db.prepare(LINE_OPEN_SQL).bind(batch.id, reviewerId, nowMs - LINE_LEASE_MS, 1 + PREFETCH, JSON.stringify(languages)).all<ProposalRow>()).results.map(toProposal);
