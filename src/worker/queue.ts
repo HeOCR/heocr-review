@@ -145,18 +145,23 @@ const VOLUNTEER_PAGE = `EXISTS (SELECT 1 FROM items vi JOIN batches vb ON vb.id 
       AND vp.active = 1 AND json_extract(vp.payload_json, '$.gold') IS NULL)`;
 
 /**
- * SQL: proposal p is in the filter bound at ?n (a JSON array of ids); with no filter (null), any proposal whose page is
- * not a volunteer page.
+ * SQL: proposal p is in the filter bound at ?n (a JSON array of ids); with no filter (null), any proposal, except that
+ * a page_review batch (`volunteerPages`) leaves out volunteer pages. Only page_review shares page keys with the
+ * volunteer batch; running the volunteer lookup for every other batch's every proposal overloaded preview's D1
+ * (2026-11-18), so the other task types never run it.
  */
-const inFilter = (n: number) => `(CASE WHEN ?${n} IS NULL THEN NOT ${VOLUNTEER_PAGE} ELSE p.id IN (SELECT value FROM json_each(?${n})) END)`;
+const inFilter = (n: number, volunteerPages: boolean) =>
+  volunteerPages
+    ? `(CASE WHEN ?${n} IS NULL THEN NOT ${VOLUNTEER_PAGE} ELSE p.id IN (SELECT value FROM json_each(?${n})) END)`
+    : `(?${n} IS NULL OR p.id IN (SELECT value FROM json_each(?${n})))`;
 
 /**
  * Open to reviewer ?2: active, not decided by them, not skipped by them, and below the batch's reviewer target.
  * Proposals leased to someone else in the last LEASE_MS come after the rest; then by rank (the
  * task type's serving order, set at import).
  */
-const OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
-  WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8)}
+const openSql = (volunteerPages: boolean) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
+  WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8, volunteerPages)}
     AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
     AND (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}
@@ -170,7 +175,7 @@ const OPEN_SQL = `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.
  */
 export async function progressFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<Progress> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
-  const f = inFilter(6);
+  const f = inFilter(6, batch.taskType === PAGE_REVIEW);
   const row = await db
     .prepare(
       `SELECT
@@ -237,7 +242,7 @@ async function draftFor(db: D1Database, p: ProposalRecord, reviewerId: string): 
 export async function nextFor(db: D1Database, batch: BatchRecord, reviewerId: string, nowMs = Date.now(), filter: SubsetFilter | null = null): Promise<NextResponse> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
-    .prepare(OPEN_SQL)
+    .prepare(openSql(batch.taskType === PAGE_REVIEW))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const rows = results.map(toProposal);
