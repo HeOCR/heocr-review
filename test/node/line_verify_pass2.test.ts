@@ -93,6 +93,7 @@ describe("typed lines (v1.3)", () => {
     [{ decision: "typed", text: "x", box_reason: "no_text" }, "box_reason"],
     [{ decision: "typed", text: "x", candidate_sha256: "0".repeat(64) }, "no candidate_sha256"],
     [{ decision: "typed", text: "x", kind: "verify" }, "kind must be the item's"],
+    [{ decision: "pointed_print" }, "text must be a string"],
   ])("refuses %j", (d, message) => expect(decisionsFileProblems(tfile(d), "b", titems).join("\n")).toContain(message));
   it("checks the pages list", () => {
     const f = tfile({ decision: "unreadable" });

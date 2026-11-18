@@ -45,7 +45,8 @@ Each decision has a value; two decisions agree when their values are equal.
 | edited (verify) | `text` + fold(edited text) |
 | typed (type) | `text` + fold(typed text) |
 | misaligned with its typed text (verify, v1.2) | `text` + fold(typed text) |
-| pointed_print | `pointed` + fold(letters; the candidate's when no letters were typed) |
+| pointed_print (verify) | `pointed` + fold(letters; the candidate's when no letters were typed) |
+| pointed_print (type) | `pointed` + fold(typed letters): a typed line has no candidate, so its pointed_print must carry typed letters; the app and the export's validator refuse one without them |
 | unreadable, not_one_line, no_text, continued | the action itself |
 
 `fold` is **line_fold_v1** exactly (tasks/eval-domains/profiles/line_fold_v1.json, sha256 2e262710…1d317): Unicode

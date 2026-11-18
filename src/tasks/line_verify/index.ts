@@ -254,7 +254,7 @@ function linesOf(resolved: ResolvedProposal[], votes: Map<string, VerifyVote>) {
         .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1))
         .map((d) => ({ decisionId: d.id, reviewerId: d.reviewerId, value: d.value, text: d.text, createdAt: d.createdAt }));
       const adminDecided = allOf(r).some((d) => votes.get(d.id)?.byAdmin);
-      const route = routeLine(counted, payloadOf(r.proposal).candidate_text, adminDecided);
+      const route = routeLine(counted, payloadOf(r.proposal).candidate_text, adminDecided, kindOf(r.proposal));
       const exportId = (id: string) => decisionId(r.proposal.externalId, byId.get(id)!.reviewerId);
       return {
         item_id: itemIdOf(r.proposal),

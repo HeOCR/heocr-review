@@ -41,6 +41,11 @@ describe("agreement values", () => {
     expect(decisionValue({ value: "pointed_print", text: null }, cand)).toBe(decisionValue({ value: "pointed_print", text: "הילד הלך-לבית" }, "x"));
   });
 
+  it("on a typed line, print has niqqud needs its typed letters (no candidate to fall back on)", () => {
+    expect(() => decisionValue({ value: "pointed_print", text: null }, "", "type")).toThrow(/typed letters/);
+    expect(decisionValue({ value: "pointed_print", text: "שורה" }, "", "type")).toBe(decisionValue({ value: "pointed_print", text: null }, "שורה", "verify"));
+  });
+
   it("the non-text answers agree only with themselves", () => {
     const actions = ["unreadable", "not_one_line", "no_text", "continued"];
     for (const a of actions) for (const b of actions) expect(decisionValue({ value: a, text: null }, cand) === decisionValue({ value: b, text: null }, cand)).toBe(a === b);

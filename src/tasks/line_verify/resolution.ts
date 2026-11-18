@@ -33,8 +33,11 @@ export interface StoredDecision {
 /** Actions that agree only with the same action. */
 const SAME_ACTION = ["unreadable", "not_one_line", "no_text", "continued", "misaligned"];
 
-/** A decision's value (spec, "When two decisions agree"): equal values agree. */
-export function decisionValue(d: StoredDecision, candidate: string): string {
+/**
+ * A decision's value (spec, "When two decisions agree"): equal values agree. On a typed line (`kind` "type") there
+ * is no candidate, so print-has-niqqud must carry its typed letters.
+ */
+export function decisionValue(d: StoredDecision, candidate: string, kind: "verify" | "type" = "verify"): string {
   switch (d.value) {
     case "exact":
       return `text\u0000${lineFoldV1(candidate)}`;
@@ -42,6 +45,7 @@ export function decisionValue(d: StoredDecision, candidate: string): string {
     case "typed":
       return `text\u0000${lineFoldV1(d.text ?? "")}`;
     case "pointed_print":
+      if (d.text === null && kind === "type") throw new Error("a typed line's pointed_print must carry its typed letters");
       return `pointed\u0000${lineFoldV1(d.text ?? candidate)}`;
     case "misaligned":
       // A v1.2 misaligned line carries the line as typed: compared as text. Without one (v1, v1.1), the action alone.
@@ -85,10 +89,10 @@ export function referenceOf(value: string): { class: string; text: string | null
  * counted or not (spec, "Routing"). A pair resolves the line at once; four counted decisions without one leave it
  * unresolved.
  */
-export function routeLine(counted: CountedVote[], candidate: string, adminDecided: boolean): LineRouting {
+export function routeLine(counted: CountedVote[], candidate: string, adminDecided: boolean, kind: "verify" | "type" = "verify"): LineRouting {
   const seen = new Map<string, string>();
   for (let i = 0; i < counted.length; i++) {
-    const v = decisionValue(counted[i]!, candidate);
+    const v = decisionValue(counted[i]!, candidate, kind);
     const first = seen.get(v);
     if (first !== undefined) {
       return { resolution: i === 1 ? "agreed" : "majority", next: null, openTo: "nobody", reference: { value: v, pair: [first, counted[i]!.decisionId] } };

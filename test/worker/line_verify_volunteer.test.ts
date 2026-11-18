@@ -155,6 +155,8 @@ describe("line_verify volunteer resolution v1", () => {
     await a!.decide(line, { value: "exact" });
     await b!.decide(line, { value: "exact" });
     const typed = await idOf("benyehuda_nli_aligned:fixture_pby_42__p0003#L002");
+    // A typed line's print-has-niqqud needs its letters: there is no candidate to fall back on.
+    expect((await b!.decide(typed, { value: "pointed_print" })).status).toBe(400);
     await a!.decide(typed, { value: "typed", text: "שורה  מוקלדת" });
     const admin = new R();
     await admin.req("POST", "/api/auth/dev", { subject: "maintainer" });

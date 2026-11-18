@@ -35,8 +35,8 @@ export async function routingOf(db: D1Database, proposal: ProposalRecord): Promi
   const counted: CountedVote[] = results
     .filter((r) => r.counted === 1)
     .map((r) => ({ decisionId: r.id, reviewerId: r.reviewer_id, value: r.value, text: r.text, createdAt: r.created_at }));
-  const candidate = (proposal.payload as unknown as LineVerifyPayload).candidate_text;
-  return routeLine(counted, candidate, results.some((r) => r.by_admin === 1));
+  const x = proposal.payload as unknown as LineVerifyPayload;
+  return routeLine(counted, x.candidate_text, results.some((r) => r.by_admin === 1), x.kind ?? "verify");
 }
 
 /** Whether a reviewer may decide this volunteer_v1 line now (they have not decided it; its step lets them). */
