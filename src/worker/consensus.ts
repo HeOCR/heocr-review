@@ -11,9 +11,9 @@ import { imageUrl } from "../shared/media";
 import { sha256Hex } from "../shared/sha256";
 import { goldNext } from "../tasks/line_consensus/consensus";
 import { TASK_TYPE_ID as LINE_CONSENSUS, hasBox, isGold, payloadOf, routeLine, standingOf, standingsOf, type StandingRow } from "../tasks/line_consensus";
-import { TASK_TYPE_ID as LINE_TRANSCRIBE, gateBatchOf } from "../tasks/line_transcribe";
-import { BATCH_SQL, CONSENSUS_EXPORT_SQL, PROPOSAL_COLUMNS, toBatch, toProposal, type BatchRow, type ProposalRow } from "../tasks/rows";
-import type { BatchRecord, ProposalRecord } from "../tasks/types";
+import { TASK_TYPE_ID as LINE_TRANSCRIBE, forAgreement, gateBatchOf } from "../tasks/line_transcribe";
+import { BATCH_SQL, CONSENSUS_EXPORT_SQL, PROPOSAL_COLUMNS, pageFlagsOf, toBatch, toProposal, type BatchRow, type PageFlagAnswerRow, type PageFlagRow, type ProposalRow } from "../tasks/rows";
+import type { BatchRecord, ExportExtra, PageFlagExtra, ProposalRecord } from "../tasks/types";
 import type { Env } from "./env";
 import { HttpError } from "./http";
 import { proposalView } from "./queue";
@@ -137,7 +137,10 @@ export async function recomputeLines(db: D1Database, batch: BatchRecord, ids: nu
   const now = iso(nowMs);
   const stmts = lines.map((p) => {
     const ds = results.filter((r) => r.proposal_id === p.id);
-    const vol = ds.filter((r) => !r.maintainer).map((r) => ({ reviewerId: r.reviewer_id, value: r.value, text: r.text, at: r.created_at }));
+    const vol = ds
+      .filter((r) => !r.maintainer)
+      .map((r) => ({ reviewerId: r.reviewer_id, value: r.value, text: r.text, at: r.created_at }))
+      .map((v) => (isTranscribe(batch) ? forAgreement(v) : v));
     const routed = routeLine(p, vol, ds.some((r) => r.maintainer), st);
     return db
       .prepare(
@@ -356,7 +359,7 @@ export async function setExclusion(db: D1Database, batch: BatchRecord, reviewerI
 }
 
 /** The export's extra inputs: exclusions, the maintainer's decisions and (transcription) the gate standings. */
-export async function exportExtras(db: D1Database, batch: BatchRecord): Promise<{ exclusions: { reviewerId: string; excludedAt: string }[]; maintainerDecisions: string[]; standings?: Record<string, string> }> {
+export async function exportExtras(db: D1Database, batch: BatchRecord): Promise<Omit<ExportExtra, "exportedAt">> {
   const batchId = batch.id;
   const [excl, maint] = await db.batch([
     db.prepare(CONSENSUS_EXPORT_SQL.exclusions).bind(batchId),
@@ -371,9 +374,94 @@ export async function exportExtras(db: D1Database, batch: BatchRecord): Promise<
     const st = await standings(db, gateBatchOf(batch), results.map((r) => r.reviewer_id));
     gate = Object.fromEntries(results.map((r) => [r.reviewer_id, standingOf(st, r.reviewer_id).state]));
   }
+  let pageFlags: PageFlagExtra[] | undefined;
+  if (isTranscribe(batch)) {
+    const [f, a] = await db.batch([db.prepare(CONSENSUS_EXPORT_SQL.pageFlags).bind(batchId), db.prepare(CONSENSUS_EXPORT_SQL.pageFlagAnswers).bind(batchId)]);
+    pageFlags = pageFlagsOf((f!.results ?? []) as PageFlagRow[], (a!.results ?? []) as PageFlagAnswerRow[]);
+  }
   return {
     ...(gate ? { standings: gate } : {}),
+    ...(pageFlags ? { pageFlags } : {}),
     exclusions: ((excl!.results ?? []) as { reviewer_id: string; excluded_at: string }[]).map((r) => ({ reviewerId: r.reviewer_id, excludedAt: r.excluded_at })),
     maintainerDecisions: ((maint!.results ?? []) as { decision_id: string }[]).map((r) => r.decision_id),
   };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Page flags (line_transcribe): "text outside the boxes"
+
+/**
+ * A volunteer's report that the page of a line they were served has a text line no box covers. One per volunteer
+ * per page; it decides nothing about the line they are on.
+ */
+export async function reportPageFlag(db: D1Database, p: ProposalRecord, reviewerId: string, kind: string, nowMs: number): Promise<void> {
+  await db
+    .prepare("INSERT OR IGNORE INTO page_flags (item_id, reviewer_id, kind, created_at) SELECT item_id, ?2, ?3, ?4 FROM proposals WHERE id = ?1")
+    .bind(p.id, reviewerId, kind, iso(nowMs))
+    .run();
+}
+
+export interface FlaggedPage {
+  itemId: number;
+  pageKey: string;
+  kind: string;
+  reports: number;
+  firstReportedAt: string;
+  answer: "confirmed" | "dismissed" | null;
+  /** The page image, with the boxes as imported (for the maintainer's look). */
+  page: { url: string; width: number; height: number } | null;
+  boxes: [number, number, number, number][];
+}
+
+/** The maintainer's queue of reported pages, unanswered first. */
+export async function flaggedPages(db: D1Database, batch: BatchRecord): Promise<FlaggedPage[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT f.item_id, i.external_id AS page_key, f.kind, COUNT(*) AS reports, MIN(f.created_at) AS first_at, a.answer
+       FROM page_flags f JOIN items i ON i.id = f.item_id
+       LEFT JOIN page_flag_answers a ON a.item_id = f.item_id AND a.kind = f.kind
+       WHERE i.batch_id = ?1 GROUP BY f.item_id, f.kind ORDER BY (a.answer IS NOT NULL), first_at`,
+    )
+    .bind(batch.id)
+    .all<{ item_id: number; page_key: string; kind: string; reports: number; first_at: string; answer: "confirmed" | "dismissed" | null }>();
+  const out: FlaggedPage[] = [];
+  for (const r of results) {
+    const { results: ps } = await db
+      .prepare(`SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.item_id = ?1 AND p.active = 1 ORDER BY p.rank`)
+      .bind(r.item_id)
+      .all<ProposalRow>();
+    const lines = ps.map(toProposal);
+    const img = lines[0]?.media.page;
+    out.push({
+      itemId: r.item_id,
+      pageKey: r.page_key,
+      kind: r.kind,
+      reports: r.reports,
+      firstReportedAt: r.first_at,
+      answer: r.answer,
+      page: img ? { url: imageUrl(img.ref), width: img.width, height: img.height } : null,
+      boxes: lines.map((l) => payloadOf(l).page_box as [number, number, number, number]),
+    });
+  }
+  return out;
+}
+
+/** The maintainer's answer on a reported page: confirmed (re-box it) or dismissed; null withdraws the answer. */
+export async function answerPageFlag(db: D1Database, batch: BatchRecord, itemId: number, kind: string, answer: "confirmed" | "dismissed" | null, adminId: string, nowMs: number): Promise<boolean> {
+  const item = await db
+    .prepare("SELECT 1 AS ok FROM page_flags f JOIN items i ON i.id = f.item_id WHERE f.item_id = ?1 AND f.kind = ?2 AND i.batch_id = ?3 LIMIT 1")
+    .bind(itemId, kind, batch.id)
+    .first<{ ok: number }>();
+  if (!item) return false;
+  if (answer === null) await db.prepare("DELETE FROM page_flag_answers WHERE item_id = ?1 AND kind = ?2").bind(itemId, kind).run();
+  else {
+    await db
+      .prepare(
+        `INSERT INTO page_flag_answers (item_id, kind, answer, reviewer_id, answered_at) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (item_id, kind) DO UPDATE SET answer = excluded.answer, reviewer_id = excluded.reviewer_id, answered_at = excluded.answered_at`,
+      )
+      .bind(itemId, kind, answer, adminId, iso(nowMs))
+      .run();
+  }
+  return true;
 }

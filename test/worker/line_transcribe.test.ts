@@ -148,7 +148,7 @@ describe("handwriting transcription", () => {
     const n = await next(a);
     expect(n.view).toMatchObject({ kind: "line_transcribe", spanMarker: "[?]" });
     expect(JSON.stringify(n.proposal)).not.toMatch(/"(prefill|text|candidate|draft)"/);
-    expect(n.proposal!.options.map((o) => o.value)).toEqual(["edit", "print_has_niqqud", "unreadable", "not_on_page"]);
+    expect(n.proposal!.options.map((o) => o.value)).toEqual(["edit", "print_has_niqqud", "unreadable", "continued", "no_text", "not_on_page"]);
     await call(a, "POST", `/api/proposals/${n.proposal!.id}/skip`);
     const plain = [n.proposal!.externalId, ...(await servedAll(a))];
     expect(plain.sort()).toEqual([`${P1}#l0`, `${P1}#l1`, `${SEEN}#l0`]);
@@ -244,5 +244,68 @@ describe("handwriting transcription", () => {
     // Excluded in this batch only: the same.
     await call(m, "PUT", `/api/admin/batches/${H}/reviewers/${a.id}/exclusion`, { excluded: true });
     expect(await lineState(id)).toEqual({ state: "open", needed: 1 });
+  });
+
+  it("box problems agree as not_on_page and keep their reason; a mixed pair is marked mixed", async () => {
+    const [a, b, c, d] = [await counting("t-bx1"), await counting("t-bx2"), await counting("t-bx3"), await counting("t-bx4")];
+    const l0 = await serveUntil(a, `${P1}#l0`);
+    await decide(a, l0, "continued");
+    await decide(b, await serveUntil(b, `${P1}#l0`), "continued");
+    expect(await lineState(l0)).toEqual({ state: "agreed", needed: 0 });
+    const l1 = await serveUntil(c, `${P1}#l1`);
+    await decide(c, l1, "no_text");
+    await decide(d, await serveUntil(d, `${P1}#l1`), "not_on_page");
+    expect(await lineState(l1)).toEqual({ state: "agreed", needed: 0 });
+    const m = new Client();
+    admins = await m.signIn("t-bx-adm");
+    await m.acceptTerms();
+    type File = {
+      decisions: { reviewer: string; action: string; box_reason: string | null }[];
+      lines: { page_key: string; i: number; reference: { action: string; box_reason: string | null } | null }[];
+      joins: unknown[];
+    };
+    const exp = await call<{ files: Record<string, File>; problems: string[] }>(m, "GET", `/api/admin/batches/${H}/export`);
+    expect(exp.body.problems).toEqual([]);
+    const f = exp.body.files["h_line_transcriptions.json"]!;
+    expect(f.decisions.find((x) => x.reviewer === a.id)).toMatchObject({ action: "not_on_page", box_reason: "continued" });
+    expect(f.decisions.find((x) => x.reviewer === c.id)).toMatchObject({ action: "not_on_page", box_reason: "no_text" });
+    expect(f.lines.find((l) => l.page_key === P1 && l.i === 0)!.reference).toEqual({ action: "not_on_page", text: null, box_reason: "continued" });
+    expect(f.lines.find((l) => l.page_key === P1 && l.i === 1)!.reference).toEqual({ action: "not_on_page", text: null, box_reason: "mixed" });
+    // Line 0 is a piece with no piece to its right in its row (the fixture's rows are whole lines).
+    expect(f.joins).toEqual([{ page_key: P1, first: null, pieces: [0] }]);
+  });
+
+  it("a volunteer reports text outside the boxes on a page they were served; it goes to the maintainer's queue and the export", async () => {
+    const [a, b] = [await volunteer("t-fl1"), await volunteer("t-fl2")];
+    const id = await serveUntil(a, `${P1}#l0`);
+    const other = (await env.DB.prepare("SELECT id FROM proposals WHERE external_id = ?1").bind(`${SEEN}#l0`).first<{ id: number }>())!.id;
+    expect((await call(a, "POST", `/api/proposals/${other}/page-flag`, { kind: "text_outside_boxes" })).status).toBe(409);
+    expect((await call(a, "POST", `/api/proposals/${id}/page-flag`, { kind: "missing" })).status).toBe(400);
+    expect((await call(a, "POST", `/api/proposals/${id}/page-flag`, { kind: "text_outside_boxes" })).status).toBe(200);
+    expect((await call(a, "POST", `/api/proposals/${id}/page-flag`, { kind: "text_outside_boxes" })).status).toBe(200);
+    // The report decides nothing: the line is still the volunteer's to type.
+    expect(await lineState(id)).toEqual({ state: "open", needed: 2 });
+    expect((await decide(a, id, "edit", "בדוי")).status).toBe(200);
+    await call(b, "POST", `/api/proposals/${await serveUntil(b, `${P1}#l1`)}/page-flag`, { kind: "text_outside_boxes" });
+    expect((await call(a, "GET", `/api/admin/batches/${H}/page-flags`)).status).toBe(403);
+    const m = new Client();
+    admins = await m.signIn("t-fl-adm");
+    await m.acceptTerms();
+    type Flagged = { pages: { itemId: number; pageKey: string; reports: number; answer: string | null; boxes: unknown[] }[] };
+    const q = await call<Flagged>(m, "GET", `/api/admin/batches/${H}/page-flags`);
+    expect(q.body.pages).toHaveLength(1);
+    expect(q.body.pages[0]).toMatchObject({ pageKey: P1, reports: 2, answer: null });
+    expect(q.body.pages[0]!.boxes).toHaveLength(2);
+    const ans = await call<Flagged>(m, "PUT", `/api/admin/batches/${H}/items/${q.body.pages[0]!.itemId}/page-flag`, { kind: "text_outside_boxes", answer: "confirmed" });
+    expect(ans.body.pages[0]!.answer).toBe("confirmed");
+    expect((await call(m, "PUT", `/api/admin/batches/${H}/items/999999/page-flag`, { kind: "text_outside_boxes", answer: "confirmed" })).status).toBe(404);
+    type File = { page_flags: { page_key: string; reports: { reviewer: string }[]; maintainer: { answer: string } | null }[]; held_pages: { page_key: string; reason: string }[] };
+    const exp = await call<{ files: Record<string, File>; problems: string[] }>(m, "GET", `/api/admin/batches/${H}/export`);
+    expect(exp.body.problems).toEqual([]);
+    const f = exp.body.files["h_line_transcriptions.json"]!;
+    expect(f.page_flags).toEqual([
+      expect.objectContaining({ page_key: P1, kind: "text_outside_boxes", reports: [expect.objectContaining({ reviewer: a.id }), expect.objectContaining({ reviewer: b.id })], maintainer: expect.objectContaining({ answer: "confirmed" }) }),
+    ]);
+    expect(f.held_pages.map((h) => h.reason)).toEqual(["no_hebrew_text", "no_boxes"]);
   });
 });

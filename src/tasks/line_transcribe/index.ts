@@ -23,13 +23,21 @@ import { AGREEMENT_PY_SHA256 } from "../line_consensus/schema";
 import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType } from "../types";
 import type { Box } from "../../shared/media";
 import {
+  BOX_REASON,
   GATE_BATCH_ID,
-  H_ACTIONS,
+  H_APP_ACTIONS,
   H_DECISIONS_SCHEMA,
   LANGUAGE_LABELS,
   SPAN_MARKER,
+  agreementAction,
   hDecisionsFileProblems,
+  type BoxReason,
   type HAction,
+  type HAppAction,
+  type HExportJoin,
+  type HExportPageFlag,
+  type PageFlagKind,
+  type PixelBox,
   type HDecisionsFile,
   type HExportDecision,
   type HExportLine,
@@ -52,11 +60,12 @@ export interface LineTranscribePayload {
   eval_set: string;
   stratum: Stratum;
   languages: string[];
-  hand_id: string;
   attribution: string;
   license_expression: string;
   image_sha256: string;
   order: number;
+  /** The box in pixels of the displayed page (as in the box file). */
+  box: PixelBox;
   page_box: Box;
   context_box: Box;
 }
@@ -66,6 +75,8 @@ export interface LineTranscribeSource {
   batch_id: string;
   gate_batch_id: string;
   sources: Record<string, string | null>;
+  /** Pages of the box file not imported, and why. */
+  held_pages?: { page_key: string; reason: string }[];
 }
 
 export const payloadOf = (p: ProposalRecord): LineTranscribePayload => p.payload as unknown as LineTranscribePayload;
@@ -79,8 +90,13 @@ const OPTIONS: DecisionOption[] = [
   { value: "edit", label: { he: "שמירה", en: "Save" }, withText: true },
   { value: "print_has_niqqud", label: { he: "יש ניקוד (הקלדתי בלעדיו)", en: "Has niqqud (typed without)" }, withText: true },
   { value: "unreadable", label: { he: "כל השורה לא קריאה", en: "Whole line unreadable" }, withText: false },
+  { value: "continued", label: { he: "חלק משורה במסגרת אחרת", en: "Part of a line in another box" }, withText: false },
+  { value: "no_text", label: { he: "אין כאן טקסט", en: "No text here" }, withText: false },
   { value: "not_on_page", label: { he: "המסגרת לא מכילה שורה אחת", en: "Box doesn't hold one line" }, withText: false },
 ];
+
+/** Recorded values that carry no text: the line is unreadable, or the box holds no line of its own. */
+const NO_TEXT: readonly string[] = ["unreadable", "not_on_page", "no_text", "continued"];
 
 const TEXT_LICENSE = "Transcriptions: CC0 1.0. Image: the scan's own terms (public domain).";
 
@@ -93,8 +109,8 @@ function imageView(img: StoredImage | undefined) {
  * print_has_niqqud's text has the letters only. There is no `correct`: nothing was shown to confirm.
  */
 export function normalizeTranscription(action: string, text: unknown): NormalizedDecision {
-  if (!(H_ACTIONS as readonly string[]).includes(action)) return { ok: false, error: `decision must be one of ${H_ACTIONS.join(", ")}` };
-  if (action === "unreadable" || action === "not_on_page") {
+  if (!(H_APP_ACTIONS as readonly string[]).includes(action)) return { ok: false, error: `decision must be one of ${H_APP_ACTIONS.join(", ")}` };
+  if (NO_TEXT.includes(action)) {
     if (text !== undefined && text !== null) return { ok: false, error: `a line marked ${action} carries no text` };
     return { ok: true, value: action, text: null };
   }
@@ -117,7 +133,48 @@ export function standingsFromStates(states: Record<string, string>, excluded: Se
   return out;
 }
 
-const asLine = (d: { value: string; text: string | null }) => ({ action: d.value as LineAction, text: d.text });
+/** agreement.py's view of a recorded decision: the three box problems are all not_on_page. */
+const asLine = (d: { value: string; text: string | null }) => ({ action: agreementAction(d.value) as LineAction, text: d.text });
+/** The votes routeLine takes, with values as agreement.py knows them. */
+export const forAgreement = <T extends { value: string }>(d: T): T => ({ ...d, value: agreementAction(d.value) });
+const boxReasonOf = (v: string): BoxReason | null => BOX_REASON[v as HAppAction] ?? null;
+
+/** The deciding decisions' box reason for a not_on_page reference: theirs when they agree, else "mixed". */
+function referenceReason(ds: { value: string }[]): BoxReason | "mixed" | null {
+  const rs = [...new Set(ds.map((d) => boxReasonOf(d.value)))];
+  return rs.length === 1 ? rs[0]! : "mixed";
+}
+
+/**
+ * Split lines: each piece whose reference is continued joins the nearest piece to its right in the same row (boxes
+ * overlapping by at least half the shorter one's height) whose reference is not continued. Hebrew runs right to
+ * left, so the line's first piece is its rightmost; box order is not used (unreliable inside a fragmented row).
+ */
+export function joinsOf(lines: { page_key: string; i: number; box: PixelBox; continued: boolean }[]): HExportJoin[] {
+  const out: HExportJoin[] = [];
+  const byPage = new Map<string, typeof lines>();
+  for (const l of lines) byPage.set(l.page_key, [...(byPage.get(l.page_key) ?? []), l]);
+  for (const [page_key, ls] of byPage) {
+    const groups = new Map<number | null, number[]>();
+    for (const piece of ls.filter((l) => l.continued)) {
+      const [x0, y0, x1, y1] = piece.box;
+      const cx = (x0 + x1) / 2;
+      let best: { i: number; d: number } | null = null;
+      for (const t of ls) {
+        if (t.continued || t.i === piece.i) continue;
+        const overlap = Math.min(y1, t.box[3]) - Math.max(y0, t.box[1]);
+        if (overlap < 0.5 * Math.min(y1 - y0, t.box[3] - t.box[1])) continue;
+        const tx = (t.box[0] + t.box[2]) / 2;
+        if (tx <= cx) continue;
+        if (!best || tx - cx < best.d) best = { i: t.i, d: tx - cx };
+      }
+      const first = best?.i ?? null;
+      groups.set(first, [...(groups.get(first) ?? []), piece.i]);
+    }
+    for (const [first, pieces] of groups) out.push({ page_key, first, pieces: pieces.sort((a, b) => a - b) });
+  }
+  return out.sort((a, b) => a.page_key.localeCompare(b.page_key) || (a.first ?? -1) - (b.first ?? -1));
+}
 
 function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: ExportExtra): HDecisionsFile {
   const src = sourceOf(batch);
@@ -131,10 +188,19 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
   for (const r of sorted) {
     const x = payloadOf(r.proposal);
     const ds = r.current.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.reviewerId.localeCompare(b.reviewerId));
-    const base = (d: DecisionRecord) => ({ decision_id: d.id, reviewer: d.reviewerId, page_key: x.page_key, i: x.i, action: d.value as HAction, text: d.text, decided_at: d.createdAt });
+    const base = (d: DecisionRecord) => ({
+      decision_id: d.id,
+      reviewer: d.reviewerId,
+      page_key: x.page_key,
+      i: x.i,
+      action: agreementAction(d.value) as HAction,
+      box_reason: boxReasonOf(d.value),
+      text: d.text,
+      decided_at: d.createdAt,
+    });
     const vol = ds.filter((d) => !maintainer.has(d.id));
     const maint = ds.filter((d) => maintainer.has(d.id));
-    const routed = routeLine(r.proposal, vol.map((d) => ({ reviewerId: d.reviewerId, value: d.value, text: d.text, at: d.createdAt })), maint.length > 0, standings);
+    const routed = routeLine(r.proposal, vol.map((d) => forAgreement({ reviewerId: d.reviewerId, value: d.value, text: d.text, at: d.createdAt })), maint.length > 0, standings);
     const roles = ["first", "second", "third"] as const;
     vol.forEach((d, k) => {
       const reason = notCountedReason(standingOf(standings, d.reviewerId).state);
@@ -149,15 +215,17 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
       const counts = new Map<string, number>();
       for (const d of deciding) counts.set(value(asLine(d), ""), (counts.get(value(asLine(d), "")) ?? 0) + 1);
       const ref = deciding.find((d) => (counts.get(value(asLine(d), "")) ?? 0) >= 2)!;
-      reference = { action: ref.value as HAction, text: ref.text };
+      const action = agreementAction(ref.value) as HAction;
+      const same = deciding.filter((d) => value(asLine(d), "") === value(asLine(ref), ""));
+      reference = { action, text: ref.text, box_reason: action === "not_on_page" ? referenceReason(same) : null };
     } else if (routed.state === "maintainer") {
       outcome = "maintainer";
       const m = maint[maint.length - 1]!;
-      reference = { action: m.value as HAction, text: m.text };
+      reference = { action: agreementAction(m.value) as HAction, text: m.text, box_reason: boxReasonOf(m.value) };
     } else if (routed.state === "to_maintainer") outcome = "to_maintainer";
     const tally = (strata[x.stratum] ??= {});
     tally[outcome] = (tally[outcome] ?? 0) + 1;
-    lines.push({ page_key: x.page_key, i: x.i, eval_set: x.eval_set, stratum: x.stratum, languages: x.languages, hand_id: x.hand_id, outcome, reference, decision_ids: ds.map((d) => d.id) });
+    lines.push({ page_key: x.page_key, i: x.i, eval_set: x.eval_set, stratum: x.stratum, languages: x.languages, box: x.box, outcome, reference, decision_ids: ds.map((d) => d.id) });
   }
   const reviewers: HExportReviewer[] = [...new Set(decisions.filter((d) => d.role !== "maintainer").map((d) => d.reviewer))].sort().map((id) => {
     const mine = decisions.filter((d) => d.reviewer === id && d.role !== "maintainer");
@@ -178,6 +246,16 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
     strata,
     decisions,
     lines,
+    joins: joinsOf(lines.map((l) => ({ page_key: l.page_key, i: l.i, box: l.box, continued: l.reference?.box_reason === "continued" }))),
+    page_flags: (extra.pageFlags ?? []).map(
+      (f): HExportPageFlag => ({
+        page_key: f.pageKey,
+        kind: f.kind as PageFlagKind,
+        reports: f.reports.map((r) => ({ reviewer: r.reviewerId, reported_at: r.at })),
+        maintainer: f.maintainer ? { answer: f.maintainer.answer, reviewer: f.maintainer.reviewerId, answered_at: f.maintainer.at } : null,
+      }),
+    ),
+    held_pages: src.held_pages ?? [],
     reviewers,
     admin_exclusions: [...excluded].map(([reviewer, excluded_at]) => ({ reviewer, excluded_at })).sort((a, b) => a.reviewer.localeCompare(b.reviewer)),
   };

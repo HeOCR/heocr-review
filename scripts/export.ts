@@ -16,7 +16,21 @@ import { buildExport, formatJson } from "../src/tasks/export";
 import { standingOf, standingsOf } from "../src/tasks/line_consensus";
 import { gateBatchOf } from "../src/tasks/line_transcribe";
 import type { DecisionRecord, ProposalRecord } from "../src/tasks/types";
-import { CONSENSUS_EXPORT_SQL, EXPORT_SQL, toBatch, toCredit, toDecision, toProposal, type BatchRow, type CreditRow, type DecisionRow, type ProposalRow } from "../src/tasks/rows";
+import {
+  CONSENSUS_EXPORT_SQL,
+  EXPORT_SQL,
+  pageFlagsOf,
+  toBatch,
+  toCredit,
+  toDecision,
+  toProposal,
+  type BatchRow,
+  type CreditRow,
+  type DecisionRow,
+  type PageFlagAnswerRow,
+  type PageFlagRow,
+  type ProposalRow,
+} from "../src/tasks/rows";
 import { parseArgs, str, target } from "./lib/args";
 import { inline } from "./lib/sql";
 import { d1Query } from "./lib/wrangler";
@@ -58,7 +72,12 @@ function main(): void {
     proposals: one<ProposalRow>(EXPORT_SQL.proposals).map(toProposal),
     decisions,
     credits: one<CreditRow>(EXPORT_SQL.credits).map(toCredit),
-    ...(batchRow.task_type === "line_transcribe" ? { standings: gateStandings(query, gateBatchOf(batch), decisions) } : {}),
+    ...(batchRow.task_type === "line_transcribe"
+      ? {
+          standings: gateStandings(query, gateBatchOf(batch), decisions),
+          pageFlags: pageFlagsOf(one<PageFlagRow>(CONSENSUS_EXPORT_SQL.pageFlags), one<PageFlagAnswerRow>(CONSENSUS_EXPORT_SQL.pageFlagAnswers)),
+        }
+      : {}),
     ...(consensus
       ? {
           exclusions: one<{ reviewer_id: string; excluded_at: string }>(CONSENSUS_EXPORT_SQL.exclusions).map((r) => ({ reviewerId: r.reviewer_id, excludedAt: r.excluded_at })),

@@ -2,7 +2,7 @@ import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
 import { cleanDisplayName, displayNameProblem } from "../shared/displayName";
 import { TERMS_STATUS, TERMS_VERSION } from "../shared/terms";
 import { buildExport } from "../tasks/export";
-import { TRANSCRIBE_TERMS_VERSION, termsCoverTranscription } from "../tasks/line_transcribe/schema";
+import { PAGE_FLAG_KINDS, TRANSCRIBE_TERMS_VERSION, termsCoverTranscription } from "../tasks/line_transcribe/schema";
 import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { taskType } from "../tasks/registry";
 import { devAuthEnabled, devProvider } from "./auth/dev";
@@ -18,13 +18,16 @@ import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import {
   afterLineDecision,
+  answerPageFlag,
   assertConsensusEnabled,
   consensusProgress,
   exportExtras,
+  flaggedPages,
   isConsensus,
   isTranscribe,
   lineOpenTo,
   nextLine,
+  reportPageFlag,
   setExclusion,
   volunteerReport,
 } from "./consensus";
@@ -377,6 +380,23 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
   return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
 }
 
+/**
+ * line_transcribe: report that the page of a line you were served has a text line no box covers. Recorded once per
+ * volunteer and page; the line in front of you stays yours to type.
+ */
+export async function flagPage(ctx: Ctx, id: number): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
+  const body = await readJson(ctx.request);
+  if (!(PAGE_FLAG_KINDS as readonly unknown[]).includes(body.kind)) throw new HttpError(400, "invalid_request", `kind must be one of ${PAGE_FLAG_KINDS.join(", ")}`);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (!isTranscribe(batch)) throw new HttpError(404, "not_found");
+  await reportPageFlag(ctx.env.DB, proposal, reviewer.id, body.kind as string, ctx.now);
+  return json({ ok: true });
+}
+
 export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
@@ -457,4 +477,30 @@ export async function adminExclusion(ctx: Ctx, batchId: string, reviewerId: stri
   if (!(await getReviewer(ctx.env.DB, reviewerId))) throw new HttpError(404, "not_found");
   await setExclusion(ctx.env.DB, batch, reviewerId, body.excluded, ctx.now);
   return json(await volunteerReport(ctx.env.DB, batch));
+}
+
+async function transcribeBatch(ctx: Ctx, batchId: string) {
+  const batch = await consensusBatch(ctx, batchId);
+  if (!isTranscribe(batch)) throw new HttpError(404, "not_found");
+  return batch;
+}
+
+/** Admin: the maintainer's queue of pages volunteers reported as having text outside the boxes. */
+export async function adminPageFlags(ctx: Ctx, batchId: string): Promise<Response> {
+  await requireAdmin(ctx);
+  const batch = await transcribeBatch(ctx, batchId);
+  return json({ pages: await flaggedPages(ctx.env.DB, batch) });
+}
+
+/** Admin: answer a reported page ({kind, answer: "confirmed" | "dismissed" | null}). */
+export async function adminPageFlagAnswer(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const admin = await requireAdmin(ctx);
+  await enforce(ctx.env.DB, LIMITS.writeMinute, admin.id, ctx.now);
+  const batch = await transcribeBatch(ctx, batchId);
+  const body = await readJson(ctx.request);
+  if (!(PAGE_FLAG_KINDS as readonly unknown[]).includes(body.kind)) throw new HttpError(400, "invalid_request", `kind must be one of ${PAGE_FLAG_KINDS.join(", ")}`);
+  if (!(body.answer === "confirmed" || body.answer === "dismissed" || body.answer === null)) throw new HttpError(400, "invalid_request", "answer must be confirmed, dismissed or null");
+  if (!(await answerPageFlag(ctx.env.DB, batch, itemId, body.kind as string, body.answer, admin.id, ctx.now))) throw new HttpError(404, "not_found");
+  return json({ pages: await flaggedPages(ctx.env.DB, batch) });
 }

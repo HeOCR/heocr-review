@@ -7,6 +7,11 @@
  * volunteer ticks, for this session, that they read the language. The choice stays in this browser tab
  * (sessionStorage) and goes with each request for the next line; the server never stores it.
  *
+ * Box problems (the boxes are machine-made and fragment on dense or faded pages): a piece of a split line ("part of a
+ * line typed in another box": the whole line is typed in its first, rightmost piece), a false box ("no text"), a box
+ * over two lines ("box doesn't hold one line"), and a text line no box covers ("a line here has no box": a report
+ * on the page for the maintainer, which decides nothing about the line in front of you).
+ *
  * Keys outside the text box: T type · S skip · +/− zoom · P page. Inside it: Ctrl+Enter save · Esc leave the box.
  * The final actions have buttons only, so a stray key in a Hebrew layout never makes one.
  */
@@ -38,6 +43,10 @@ const H_CONVENTIONS: [string, string][] = [
   ["כתיב", "בדיוק כמו שכתוב, גם כתיב חסר, קיצורים וטעויות. לא מתקנים ולא משלימים"],
   ["קטע שאי אפשר לקרוא בתוך שורה", "[?] (כפתור), פעם אחת לכל קטע, בכל אורך"],
   ["כל השורה לא קריאה", "הכפתור \"כל השורה לא קריאה\""],
+  ["שורה שמחולקת לכמה מסגרות", "מקלידים את כל השורה במסגרת הראשונה שלה (הימנית ביותר). בשאר המסגרות: \"חלק משורה במסגרת אחרת\""],
+  ["מסגרת על כתם, חותמת או דיו שעבר מהצד השני", "\"אין כאן טקסט\""],
+  ["מסגרת על שתי שורות", "\"המסגרת לא מכילה שורה אחת\""],
+  ["שורה בלי מסגרת", "\"יש כאן שורה בלי מסגרת\", ואז ממשיכים להקליד את השורה המסומנת"],
   ["שפה אחרת בכתב עברי", "באותיות עבריות כמו שכתוב, בלי תעתיק ובלי תרגום"],
 ];
 
@@ -78,14 +87,15 @@ function onboarding(langs: Set<string>, onStart: () => void): HTMLElement {
       "ol",
       {},
       h("li", {}, "בכל פעם מוצגת שורה אחת מכתב יד. מקלידים אותה מאפס, בדיוק כמו שהיא כתובה."),
-      h("li", {}, "קטע שאי אפשר לקרוא: הכפתור [?]. כל השורה לא קריאה: \"כל השורה לא קריאה\". המסגרת לא מכילה שורה אחת בדיוק: \"המסגרת לא מכילה שורה אחת\"."),
+      h("li", {}, "קטע שאי אפשר לקרוא: הכפתור [?]. כל השורה לא קריאה: \"כל השורה לא קריאה\"."),
+      h("li", {}, "המסגרות סומנו במחשב ולפעמים טועות. שורה שמחולקת לכמה מסגרות מקלידים כולה במסגרת הימנית שלה, ובשאר המסגרות בוחרים \"חלק משורה במסגרת אחרת\". מסגרת בלי טקסט, מסגרת על שתי שורות ושורה בלי מסגרת: הכפתורים בשורה \"בעיה במסגרת\"."),
       h("li", {}, "יש ניקוד: מקלידים אותיות בלבד ומסמנים \"יש ניקוד\"."),
       h("li", {}, "כל שורה מתועתקת בנפרד בידי כמה מתנדבים, וההחלטה שלכם סופית. לא רואים כאן תעתיקים של אחרים."),
     ),
     h(
       "p",
       { lang: "en", dir: "ltr", class: "muted small" },
-      "One handwritten line at a time: type it from scratch, exactly as written. Use [?] for a part you can't read; mark the whole line unreadable, or the box wrong if it doesn't hold exactly one line. Several volunteers transcribe each line independently, and your transcription is final.",
+      "One handwritten line at a time: type it from scratch, exactly as written. Use [?] for a part you can't read, or mark the whole line unreadable. The boxes are machine-made: if a line is split over several boxes, type the whole line in its first (rightmost) box and mark the others \"part of a line in another box\". Use the box-problem buttons for a box with no text, a box over two lines, or a line with no box. Several volunteers transcribe each line independently, and your transcription is final.",
     ),
     h("h3", {}, "מקלדת / Keyboard"),
     h("p", { class: "small" }, "העבירו את המקלדת לעברית לפני שמתחילים. בטלפון: מקש הגלובוס או החלפת השפה במקלדת.", h("span", { class: "muted block", lang: "en", dir: "ltr" }, "Switch your keyboard to Hebrew first. On a phone: the globe or language key.")),
@@ -114,6 +124,8 @@ export function lineTranscribeView(batch: BatchSummary, hooks: ReviewHooks, star
   let showPage = false;
   let introDone = false;
   const langs = new Set(readLangs());
+  /** Pages this volunteer reported this session (the server keeps one report per volunteer and page anyway). */
+  const reported = new Set<string>();
   const fail = failureHandler(root, hooks);
   const view = (): LineTranscribeView | null => (current && current.view.kind === "line_transcribe" ? current.view : null);
   const status = (text: string) => {
@@ -159,6 +171,25 @@ export function lineTranscribeView(batch: BatchSummary, hooks: ReviewHooks, star
     } catch (err) {
       if (err instanceof ApiFailure && err.code === "decided") await loadNext().catch(fail);
       else if (err instanceof ApiFailure && err.code === "invalid_decision") status(err.message);
+      else fail(err);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** "A line here has no box": a report on the page; the line in front of the volunteer stays theirs to type. */
+  async function reportMissed(): Promise<void> {
+    if (!current || busy) return;
+    const page = current.itemTitle;
+    busy = true;
+    try {
+      await post(`/api/proposals/${current.id}/page-flag`, { kind: "text_outside_boxes" });
+      reported.add(page);
+      const b = root.querySelector("button[data-flag]") as HTMLButtonElement | null;
+      if (b) b.disabled = true;
+      status("תודה, דיווחנו. עכשיו הקלידו את השורה המסומנת. / Reported, thanks. Now type the marked line.");
+    } catch (err) {
+      if (err instanceof ApiFailure && err.code === "terms_required") await hooks.needTerms();
       else fail(err);
     } finally {
       busy = false;
@@ -326,8 +357,20 @@ export function lineTranscribeView(batch: BatchSummary, hooks: ReviewHooks, star
         { class: "actions four" },
         h("button", { type: "button", class: "act ok", onclick: save, disabled: p.mine !== null, "data-value": "edit" }, h("span", {}, "שמירה / Save"), h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
         btn("unreadable", "bad", () => void act("unreadable")),
-        btn("not_on_page", "bad", () => void act("not_on_page")),
+        btn("continued", "", () => void act("continued")),
         h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
+      ),
+      h(
+        "div",
+        { class: "boxproblems" },
+        h("span", { class: "muted small" }, "בעיה במסגרת / Box problem:"),
+        btn("no_text", "small", () => void act("no_text")),
+        btn("not_on_page", "small", () => void act("not_on_page")),
+        h(
+          "button",
+          { type: "button", class: "act small", "data-flag": "text_outside_boxes", onclick: () => void reportMissed(), disabled: reported.has(p.itemTitle), title: "A text line on this page has no box (a report for the maintainer; then type the marked line)" },
+          h("span", {}, "יש כאן שורה בלי מסגרת"),
+        ),
       ),
       h(
         "div",

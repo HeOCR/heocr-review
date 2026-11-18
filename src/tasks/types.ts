@@ -97,6 +97,15 @@ export interface ExportExtra {
   maintainerDecisions: string[];
   /** line_transcribe: each reviewer's standing in the gate batch (who counts is decided there). */
   standings?: Record<string, string>;
+  /** line_transcribe: pages volunteers reported as having text outside the boxes, with the maintainer's answer. */
+  pageFlags?: PageFlagExtra[];
+}
+
+export interface PageFlagExtra {
+  pageKey: string;
+  kind: string;
+  reports: { reviewerId: string; at: string }[];
+  maintainer: null | { answer: "confirmed" | "dismissed"; reviewerId: string; at: string };
 }
 
 export interface TaskType {

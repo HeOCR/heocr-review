@@ -1,45 +1,100 @@
 {
  "schema": "h_line_items.v1",
- "manifests": {
+ "shape_of": "heocr-restricted-eval midcentury_line_items.v1",
+ "manifest_sha256": {
   "h_eval_v1": "63e9f31cfdd1987c17f02dbb5028ed9427a2e1d0993ac53625adb91226cbb642",
   "h_eval_v1_1": "a1c7f6166eef0fcbbd17e9d5f35a510ff40cc31454e003db1c6d310703b2a153"
  },
+ "rule": "Invented fixture for tests.",
+ "pages_total": 6,
+ "lines_total": 6,
  "pages": [
   {
    "page_key": "loc__fixture001__p0001",
    "eval_set": "h_eval_v1",
    "stratum": "primary",
-   "languages": [
-    "he"
-   ],
-   "hand_id": "hand_a",
-   "attribution": "Fixture Library, invented test page",
-   "license_expression": "PDM-1.0",
-   "source_url": "https://example.org/fixture",
+   "source_id": "loc__fixture001",
    "image": "data/scans/loc__fixture001__p0001.jpg",
    "image_sha256": "59753c974c3c426b4e4b82efbcf86810260ce82558ad7c53b051256e1e24a576",
    "image_size": [
     1000,
     1400
    ],
+   "exif_orientation": 1,
+   "segmenter": "blla",
+   "page_flag": null,
+   "coordinate_frame": "display",
+   "prefill_source": null,
+   "prefill_from_stock": false,
+   "regions": 1,
    "lines": [
     {
      "i": 0,
+     "prefill": "",
      "box": [
       100,
       100,
       900,
       180
-     ]
+     ],
+     "box_status": "segmented",
+     "polygon": [
+      [
+       100,
+       100
+      ],
+      [
+       900,
+       100
+      ],
+      [
+       900,
+       180
+      ],
+      [
+       100,
+       180
+      ]
+     ],
+     "baseline": null,
+     "region": "r1",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
     },
     {
      "i": 1,
+     "prefill": "",
      "box": [
       100,
       220,
       900,
       300
-     ]
+     ],
+     "box_status": "segmented",
+     "polygon": [
+      [
+       100,
+       220
+      ],
+      [
+       900,
+       220
+      ],
+      [
+       900,
+       300
+      ],
+      [
+       100,
+       300
+      ]
+     ],
+     "baseline": null,
+     "region": "r1",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
     }
    ]
   },
@@ -47,28 +102,54 @@
    "page_key": "loc__fixture002__p0003",
    "eval_set": "h_eval_v1",
    "stratum": "seen_writer",
-   "languages": [
-    "he"
-   ],
-   "hand_id": "hand_b",
-   "attribution": "Fixture Library, invented test page",
-   "license_expression": "PDM-1.0",
-   "source_url": "https://example.org/fixture",
+   "source_id": "loc__fixture002",
    "image": "data/scans/loc__fixture002__p0003.jpg",
    "image_sha256": "45ec513615007bcb486bfdb41c6f99cc471c3ec8287ee4095bb27986fb7ed3a6",
    "image_size": [
     1000,
     1400
    ],
+   "exif_orientation": 1,
+   "segmenter": "blla",
+   "page_flag": null,
+   "coordinate_frame": "display",
+   "prefill_source": null,
+   "prefill_from_stock": false,
+   "regions": 1,
    "lines": [
     {
      "i": 0,
+     "prefill": "",
      "box": [
       100,
       100,
       900,
       180
-     ]
+     ],
+     "box_status": "segmented",
+     "polygon": [
+      [
+       100,
+       100
+      ],
+      [
+       900,
+       100
+      ],
+      [
+       900,
+       180
+      ],
+      [
+       100,
+       180
+      ]
+     ],
+     "baseline": null,
+     "region": "r1",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
     }
    ]
   },
@@ -76,29 +157,54 @@
    "page_key": "nli__fixture003__p0002",
    "eval_set": "h_eval_v1_1",
    "stratum": "other_hebrew_script",
-   "languages": [
-    "he",
-    "jrb"
-   ],
-   "hand_id": "hand_c",
-   "attribution": "Fixture Library, invented test page",
-   "license_expression": "PDM-1.0",
-   "source_url": "https://example.org/fixture",
+   "source_id": "nli__fixture003",
    "image": "data/scans/nli__fixture003__p0002.jpg",
    "image_sha256": "b317f59e9d95c9d78a5a7b9130ca4d629d9eb0cb0a66618dbc17d3778a931914",
    "image_size": [
     1000,
     1400
    ],
+   "exif_orientation": 1,
+   "segmenter": "blla",
+   "page_flag": null,
+   "coordinate_frame": "display",
+   "prefill_source": null,
+   "prefill_from_stock": false,
+   "regions": 1,
    "lines": [
     {
      "i": 0,
+     "prefill": "",
      "box": [
       100,
       100,
       900,
       180
-     ]
+     ],
+     "box_status": "segmented",
+     "polygon": [
+      [
+       100,
+       100
+      ],
+      [
+       900,
+       100
+      ],
+      [
+       900,
+       180
+      ],
+      [
+       100,
+       180
+      ]
+     ],
+     "baseline": null,
+     "region": "r1",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
     }
    ]
   },
@@ -106,31 +212,115 @@
    "page_key": "nli__fixture004__p0001",
    "eval_set": "h_eval_v1_1",
    "stratum": "other_hebrew_script",
-   "languages": [
-    "he",
-    "lad"
-   ],
-   "hand_id": "hand_d",
-   "attribution": "Fixture Library, invented test page",
-   "license_expression": "PDM-1.0",
-   "source_url": "https://example.org/fixture",
+   "source_id": "nli__fixture004",
    "image": "data/scans/nli__fixture004__p0001.jpg",
    "image_sha256": "45eae2dcdfcdedd0c1ea68c6d1d82aa078351e6a37231be707207905536a9b53",
    "image_size": [
     1000,
     1400
    ],
+   "exif_orientation": 1,
+   "segmenter": "blla",
+   "page_flag": null,
+   "coordinate_frame": "display",
+   "prefill_source": null,
+   "prefill_from_stock": false,
+   "regions": 1,
    "lines": [
     {
      "i": 0,
+     "prefill": "",
      "box": [
       100,
       100,
       900,
       180
-     ]
+     ],
+     "box_status": "segmented",
+     "polygon": [
+      [
+       100,
+       100
+      ],
+      [
+       900,
+       100
+      ],
+      [
+       900,
+       180
+      ],
+      [
+       100,
+       180
+      ]
+     ],
+     "baseline": null,
+     "region": "r1",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
     }
    ]
+  },
+  {
+   "page_key": "nli__fixture005__p0001",
+   "eval_set": "h_eval_v1_1",
+   "stratum": "primary",
+   "source_id": "nli__fixture005",
+   "image": "data/scans/nli__fixture005__p0001.jpg",
+   "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+   "image_size": [
+    1000,
+    1400
+   ],
+   "exif_orientation": 1,
+   "segmenter": "blla",
+   "page_flag": "no_hebrew_text",
+   "coordinate_frame": "display",
+   "prefill_source": null,
+   "prefill_from_stock": false,
+   "regions": 0,
+   "lines": [
+    {
+     "i": 0,
+     "prefill": "",
+     "box": [
+      100,
+      100,
+      900,
+      180
+     ],
+     "box_status": "segmented",
+     "polygon": [],
+     "baseline": null,
+     "region": "r1",
+     "match": null,
+     "tier_a": null,
+     "bidi_risk": null
+    }
+   ]
+  },
+  {
+   "page_key": "nli__fixture006__p0004",
+   "eval_set": "h_eval_v1_1",
+   "stratum": "primary",
+   "source_id": "nli__fixture006",
+   "image": "data/scans/nli__fixture006__p0004.jpg",
+   "image_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+   "image_size": [
+    1000,
+    1400
+   ],
+   "exif_orientation": 1,
+   "segmenter": "blla",
+   "page_flag": null,
+   "coordinate_frame": "display",
+   "prefill_source": null,
+   "prefill_from_stock": false,
+   "regions": 0,
+   "lines": []
   }
- ]
+ ],
+ "signed": "fixture"
 }
