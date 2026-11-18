@@ -15,6 +15,12 @@ const PREFETCH = 3;
 export const BLIND_DELAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * The pass-1 answers that open a blind second pass ('after_confirm'): a page_review confirm, or a line_verify answer
+ * that gives the line's text (exact, edited, pointed_print). A line marked unreadable or misaligned gets no pass 2.
+ */
+const SETTLED = "('confirm', 'exact', 'edited', 'pointed_print')";
+
+/**
  * Whether proposal p is open to reviewer ?2 under its gate (migrations/0002_proposal_gates.sql). `reserves` binds a
  * JSON array of the reserve proposal ids assigned so far, `cutoff` the ISO time before which a first-pass decision
  * must have been made.
@@ -25,7 +31,7 @@ function eligible(reserves: number, cutoff: number): string {
     OR (p.gate_kind = 'after_confirm'
       AND EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND q.active = 1 AND d.reviewer_id = ?2
-          AND d.superseded_at IS NULL AND d.value = 'confirm' AND d.proposal_sha256 = q.content_sha256)
+          AND d.superseded_at IS NULL AND d.value IN ${SETTLED} AND d.proposal_sha256 = q.content_sha256)
       AND (SELECT MIN(d.created_at) FROM proposals q JOIN decisions d ON d.proposal_id = q.id
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND d.reviewer_id = ?2) <= ?${cutoff}))`;
 }

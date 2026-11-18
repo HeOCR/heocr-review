@@ -2,7 +2,8 @@
  * The line verification screen (task type line_verify): one printed line at a time, shown large, under it a
  * smaller context band, then the candidate transcription in large RTL type with the attention spans marked.
  * Keyboard first: Enter exact, E edit, N print has niqqud, U unreadable, M misaligned, S skip, B back; every key has a
- * button.
+ * button. A line the agent pre-check flags (v1.1 batches) says why, and is not marked exact before the full page has
+ * been opened; the flag is only where to look and never proposes a text.
  */
 import type { AttentionRun } from "../../shared/attention";
 import type { BatchSummary, LineVerifyView, NextResponse, Progress, ProposalView } from "../../shared/api";
@@ -65,13 +66,22 @@ export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: nu
   return strip;
 }
 
-/** The candidate with attention runs marked; odd spaces (doubled, leading, trailing) and invisible characters shown. */
-export function candidateNodes(runs: AttentionRun[]): Node[] {
+const ATTN_TITLE = {
+  ocr: { mark: "מנועי ה-OCR קראו כאן אחרת / OCR engines read this differently", caret: "כאן מנועי ה-OCR קראו תו נוסף / OCR read an extra character here" },
+  precheck: { mark: "הבדיקה המוקדמת: בדקו כאן / Pre-check: look here", caret: "הבדיקה המוקדמת: ייתכן שחסר כאן תו / Pre-check: a character may be missing here" },
+};
+
+/**
+ * The candidate with attention runs marked; odd spaces (doubled, leading, trailing) and invisible characters shown.
+ * `from` says who marked the runs: the OCR engines (v1), or the agent pre-check (a flagged v1.1 line).
+ */
+export function candidateNodes(runs: AttentionRun[], from: keyof typeof ATTN_TITLE = "ocr"): Node[] {
+  const titles = ATTN_TITLE[from];
   const chars = Array.from(runs.map((r) => r.text).join(""));
   const odd = chars.map((c, i) => c === " " && (i === 0 || i === chars.length - 1 || chars[i - 1] === " " || chars[i + 1] === " "));
   let at = 0;
   return runs.map((run) => {
-    if (run.text === "") return h("span", { class: "caret attn", title: "כאן מנועי ה-OCR קראו תו נוסף / OCR read an extra character here" }, "‸");
+    if (run.text === "") return h("span", { class: "caret attn", title: titles.caret }, "‸");
     const inner: Node[] = visibleTokens(run.text).map((t) => {
       const here = at;
       at += Array.from(t.raw).length;
@@ -79,7 +89,7 @@ export function candidateNodes(runs: AttentionRun[]): Node[] {
       if (t.kind === "space") return odd[here] ? h("bdi", { class: "ws", title: t.label ?? "" }, "␣") : document.createTextNode(" ");
       return h("bdi", { class: "sp", title: t.label ?? "", dir: /^[⟨]/.test(t.shown) ? "ltr" : "auto" }, t.shown);
     });
-    return run.attention ? h("mark", { class: "attn", title: "מנועי ה-OCR קראו כאן אחרת / OCR engines read this differently" }, ...inner) : h("span", {}, ...inner);
+    return run.attention ? h("mark", { class: "attn", title: titles.mark }, ...inner) : h("span", {}, ...inner);
   });
 }
 
@@ -107,6 +117,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   // A phone shows the line in two pieces rather than four; +/− changes it.
   let zoom = matchMedia("(max-width: 520px)").matches ? 0 : 2;
   let showPage = false;
+  let sawPage = false; // the full page has been opened on this line (a pre-check flag asks for it before "exact")
   const fail = failureHandler(root, hooks);
 
   const view = (): LineVerifyView | null => (current && current.view.kind === "line_verify" ? current.view : null);
@@ -133,6 +144,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   async function act(value: string, text?: string): Promise<void> {
     if (!current || busy) return;
     if ((value === "exact" || value === "pointed_print") && !ready) return status("התמונה עוד נטענת. / The image is still loading.");
+    if (value === "exact" && view()?.precheck && !sawPage) {
+      return status("הבדיקה המוקדמת סימנה את השורה: פתחו קודם את העמוד המלא (P). / The pre-check flagged this line: open the full page first (P).");
+    }
     busy = true;
     const id = current.id;
     try {
@@ -302,6 +316,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   function togglePage(): void {
     if (!view()?.page) return;
     showPage = !showPage;
+    if (showPage) sawPage = true;
     renderContext();
   }
 
@@ -317,6 +332,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     editing = null;
     ready = false;
     showPage = false;
+    sawPage = false;
     const option = (value: string) => p.options.find((o) => o.value === value);
     const btn = (value: string, key: string, cls: string, onclick: () => void) => {
       const o = option(value);
@@ -339,6 +355,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           { class: "meta" },
           h("span", { class: "tag", title: v.source.label.en }, v.source.label.he),
           h("span", { class: "tag", title: v.provenance.label.en }, v.provenance.label.he),
+          v.script ? h("span", { class: `tag script-${v.script.id}`, title: v.script.label.en }, v.script.label.he) : null,
           h("span", { class: "muted small title", dir: "auto" }, `${p.itemTitle} · שורה ${v.lineIndex}`),
         ),
         h(
@@ -348,8 +365,20 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Is the text exactly the marked line, letter by letter and mark by mark?"),
         ),
         h("div", { class: "linebox" }),
-        h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes(v.runs)),
-        v.runs.some((r) => r.attention)
+        h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes(v.runs, v.precheck ? "precheck" : "ocr")),
+        v.precheck
+          ? h(
+              "p",
+              { class: "precheck" },
+              `בדיקה מוקדמת: ייתכן שהטקסט שגוי (${v.precheck.reasons.map((r) => r.label.he).join(", ")}). בדקו מול העמוד המלא לפני "מדויק".`,
+              h(
+                "span",
+                { class: "muted small block", lang: "en", dir: "ltr" },
+                `Pre-check: the text may be wrong (${v.precheck.reasons.map((r) => r.label.en).join(", ")}). Check it against the full page before "Exact".`,
+              ),
+            )
+          : null,
+        v.runs.some((r) => r.attention) && !v.precheck
           ? h("p", { class: "legend muted small" }, h("mark", { class: "attn" }, "מסומן"), " = כאן מנועי ה-OCR קראו אחרת; בדקו היטב. / OCR engines disagree here; look closely.")
           : null,
         revisiting && mine ? h("p", { class: "mine" }, `ההחלטה שלך: ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "", " · החלטה חדשה תחליף אותה.") : null,

@@ -12,6 +12,7 @@ import { buildExport } from "../../src/tasks/export";
 import { lineVerify, normalizeLineDecision } from "../../src/tasks/line_verify";
 import { lineVerifyImporter } from "../../src/tasks/line_verify/importer";
 import { decisionsFileProblems, itemsFileProblems, type LvItemsFile } from "../../src/tasks/line_verify/schema";
+import type { LineVerifyPayload } from "../../src/tasks/line_verify";
 import type { BatchRecord, DecisionRecord, ProposalRecord } from "../../src/tasks/types";
 
 const FIXTURE_DIR = "test/fixtures/line_verify";
@@ -39,6 +40,10 @@ describe("line_verify_items.v1", () => {
     ["an unknown provenance", (f: any) => (f.items[0].candidate_provenance = "ocr"), "candidate_provenance"],
     ["an unknown source", (f: any) => (f.pages[0].source = "heocr_restricted"), "source must be one of"],
     ["a closed licence", (f: any) => (f.pages[0].text_license = "all rights reserved"), "open licence"],
+    ["a NonCommercial licence", (f: any) => (f.pages[0].text_license = "CC BY-NC-SA 4.0"), "not NonCommercial"],
+    ["a v1.1 source in v1", (f: any) => (f.pages[0].source = "sefaria_edition"), "source must be one of"],
+    ["a v1.1 field in v1", (f: any) => (f.pages[0].script = "rashi"), "script is a line_verify_items.v1.1 field"],
+    ["a blind pass in v1", (f: any) => (f.blind_second_pass = []), "blind_second_pass is a line_verify_items.v1.1 field"],
     ["a missing attribution", (f: any) => (f.pages[0].attribution = ""), "attribution"],
     ["an image outside pages/", (f: any) => (f.pages[0].image = "../x.jpg"), "image must be"],
     ["a line on an unknown page", (f: any) => (f.items[0].page_id = "nope"), "not a page of this bundle"],
@@ -81,6 +86,58 @@ describe("line_verify_items.v1", () => {
     const g = clone(fixture);
     g.pages[0]!.attribution = "changed wording";
     expect(contentSha256(lineVerifyImporter.bundle(g).proposals[0]!.contentKey)).toBe(contentSha256(a.contentKey));
+  });
+});
+
+describe("line_verify_items.v1.1", () => {
+  const v11 = JSON.parse(readFileSync("test/fixtures/line_verify_v11/items.json", "utf8")) as LvItemsFile;
+
+  it("accepts the synthetic v1.1 fixture", () => {
+    expect(itemsFileProblems(v11)).toEqual([]);
+  });
+
+  it.each([
+    ["a page without its script", (f: any) => delete f.pages[0].script, "script must be one of"],
+    ["an unknown script", (f: any) => (f.pages[0].script = "cursive"), "script must be one of"],
+    ["an unknown source", (f: any) => (f.pages[0].source = "ocr"), "source must be one of"],
+    ["an OCR provenance", (f: any) => (f.items[0].candidate_provenance = "tesseract"), "candidate_provenance"],
+    ["a flag without reasons", (f: any) => (f.items[0].precheck = { likely_wrong: true, reasons: [] }), "exactly when likely_wrong"],
+    ["reasons without a flag", (f: any) => (f.items[0].precheck = { likely_wrong: false, reasons: ["digits"] }), "exactly when likely_wrong"],
+    ["an unknown reason", (f: any) => (f.items[0].precheck = { likely_wrong: true, reasons: ["vibes"] }), "precheck.reasons"],
+    ["a pre-check that proposes text", (f: any) => (f.items[0].precheck = "שורה"), "precheck must be"],
+    ["a blind pass of an unknown line", (f: any) => f.blind_second_pass.push("nope"), "not an item of this bundle"],
+    ["a line listed twice for the blind pass", (f: any) => f.blind_second_pass.push(f.blind_second_pass[0]), "listed twice"],
+    ["an item id that looks like a pass 2", (f: any) => (f.items[0].item_id = `${f.items[0].item_id}@pass2`), "must not contain @pass2"],
+  ])("refuses %s", (_, mutate, message) => {
+    const f = clone(v11);
+    mutate(f);
+    expect(itemsFileProblems(f).join("\n")).toContain(message);
+  });
+
+  it("adds a gated, unaided pass-2 proposal for each blind line, after every pass-1 line", () => {
+    const b = lineVerifyImporter.bundle(v11);
+    expect(b.proposals).toHaveLength(v11.items.length + v11.blind_second_pass!.length);
+    const pass2 = b.proposals.filter((p) => p.externalId.endsWith("@pass2"));
+    expect(pass2.map((p) => p.externalId.replace("@pass2", "")).sort()).toEqual([...v11.blind_second_pass!].sort());
+    expect(Math.min(...pass2.map((p) => p.rank))).toBe(v11.items.length);
+    for (const p of pass2) {
+      const x = p.payload as unknown as LineVerifyPayload;
+      expect(p.gate).toEqual({ kind: "after_confirm", ref: x.item_id });
+      expect(p.confidence).toBe("blind_second_pass");
+      expect(x).toMatchObject({ pass: 2, blind: true, precheck: null, attention_spans: [] });
+      const first = b.proposals.find((q) => q.externalId === x.item_id)!;
+      expect(first.gate).toBeUndefined();
+      expect((first.payload as unknown as LineVerifyPayload).candidate_text).toBe(x.candidate_text);
+      expect(contentSha256(first.contentKey)).not.toBe(contentSha256(p.contentKey));
+    }
+    const flagged = b.proposals.filter((p) => (p.payload as unknown as LineVerifyPayload).precheck);
+    expect(flagged.map((p) => (p.payload as unknown as LineVerifyPayload).precheck)).toEqual([{ reasons: ["spelling"] }, { reasons: ["edge_mismatch", "digits"] }]);
+    expect(b.items[1]!.payload).toMatchObject({ script: "rashi" });
+  });
+
+  it("keeps v1 lines' content keys as they were, so decisions made before v1.1 stay current", () => {
+    const keys = lineVerifyImporter.bundle(fixture).proposals.map((p) => Object.keys(p.contentKey as object).sort());
+    for (const k of keys) expect(k).toEqual(["box", "candidate_text", "context_box", "item_id", "page_id", "page_sha256"]);
   });
 });
 
