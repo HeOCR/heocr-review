@@ -101,6 +101,10 @@ export interface TaskType {
   id: string;
   label: Label;
   options: DecisionOption[];
+  /** The options of one proposal, when they differ from `options` (line_verify's blind second pass). */
+  optionsFor?(proposal: ProposalRecord): DecisionOption[];
+  /** A reviewer's decision on this proposal is final: it cannot be changed (line_verify's blind second pass). */
+  finalDecision?(proposal: ProposalRecord): boolean;
   /** Which of the next proposals' images the browser fetches ahead (default: crop and page). */
   prefetch?: (keyof ProposalMedia)[];
   toView(proposal: ProposalRecord): ProposalViewBody;

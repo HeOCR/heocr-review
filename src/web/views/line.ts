@@ -3,10 +3,11 @@
  * smaller context band, then the candidate transcription in large RTL type with the attention spans marked.
  * Keyboard first: Enter exact, E edit, N print has niqqud, U unreadable, M misaligned, S skip, B back; every key has a
  * button. A line the agent pre-check flags (v1.1 batches) says why, and is not marked exact before the full page has
- * been opened; the flag is only where to look and never proposes a text.
+ * been opened; the flag is only where to look and never proposes a text. A blind second pass ("type" mode) shows no
+ * candidate: the reviewer types the line from a blank box (Ctrl+Enter saves), and the answer is final.
  */
 import type { AttentionRun } from "../../shared/attention";
-import type { BatchSummary, LineVerifyView, NextResponse, Progress, ProposalView } from "../../shared/api";
+import type { BatchSummary, DecisionOption, LineVerifyView, NextResponse, Progress, ProposalView } from "../../shared/api";
 import type { Box, ImageView } from "../../shared/media";
 import { visibleTokens } from "../../shared/visible";
 import { hasNiqqud } from "../../shared/niqqud";
@@ -143,7 +144,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   async function act(value: string, text?: string): Promise<void> {
     if (!current || busy) return;
-    if ((value === "exact" || value === "pointed_print") && !ready) return status("התמונה עוד נטענת. / The image is still loading.");
+    if ((value === "exact" || value === "pointed_print" || value === "typed") && !ready) return status("התמונה עוד נטענת. / The image is still loading.");
     if (value === "exact" && view()?.precheck && !sawPage) {
       return status("הבדיקה המוקדמת סימנה את השורה: פתחו קודם את העמוד המלא (P). / The pre-check flagged this line: open the full page first (P).");
     }
@@ -189,7 +190,10 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   function startEdit(): void {
     const v = view();
-    if (!v || editing || !current) return;
+    if (editing) return editing.focus();
+    if (!v || !current) return;
+    const typing = v.mode === "type";
+    if (typing && current.mine) return; // a blind pass is final
     const box = root.querySelector(".editbox") as HTMLElement;
     const area = h("textarea", {
       dir: "rtl",
@@ -202,7 +206,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       "aria-label": "השורה המתוקנת / the corrected line",
     });
     const mineText = (current.mine?.value === "edited" || current.mine?.value === "pointed_print") && current.mine.text !== null ? current.mine.text : null;
-    area.value = mineText ?? v.candidate;
+    area.value = mineText ?? v.candidate; // "" on a blind pass: nothing to start from
     // The print is pointed and the candidate is not: correct the letters only; the decision is pointed_print.
     const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
     pointed.checked = current.mine?.value === "pointed_print";
@@ -210,12 +214,15 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       "label",
       { class: "row check", for: "lv-pointed" },
       pointed,
-      " בדפוס יש ניקוד: תקנו את האותיות בלבד, בלי ניקוד / Print has niqqud: fix the letters only, without niqqud",
+      typing
+        ? " בדפוס יש ניקוד: הקלידו את האותיות בלבד, בלי ניקוד / Print has niqqud: type the letters only, without niqqud"
+        : " בדפוס יש ניקוד: תקנו את האותיות בלבד, בלי ניקוד / Print has niqqud: fix the letters only, without niqqud",
     );
     const preview = h("div", { class: "preview texts" });
     const update = () => {
       // A line is one line: a pasted line break becomes a space.
       if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
+      if (typing) return; // nothing to compare with: the candidate is never sent
       const cmp = compare(v.candidate, area.value, "", "");
       preview.replaceChildren(
         h("div", { class: "row" }, h("span", { class: "lab" }, "מקור:"), cmp.current),
@@ -229,8 +236,13 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         status("עם \"בדפוס יש ניקוד\" מקלידים אותיות בלבד, בלי ניקוד. / With \"print has niqqud\", type letters only, without niqqud.");
         return;
       }
+      if (typing && hasNiqqud(text)) {
+        status("מקלידים אותיות בלבד. אם בדפוס יש ניקוד, סמנו זאת. / Type letters only. If the print has niqqud, tick the box.");
+        return;
+      }
+      if (typing && !text.trim()) return status("הקלידו את השורה. / Type the line.");
       cancel();
-      void act(pointed.checked ? "pointed_print" : "edited", text);
+      void act(typing ? (pointed.checked ? "pointed_print" : "typed") : pointed.checked ? "pointed_print" : "edited", text);
     };
     const cancel = () => {
       editing = null;
@@ -247,7 +259,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         e.preventDefault(); // no line breaks in a line
       } else if (e.key === "Escape") {
         e.preventDefault();
-        cancel();
+        if (typing) area.blur();
+        else cancel();
       }
     });
     box.replaceChildren(
@@ -257,8 +270,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       h(
         "div",
         { class: "row" },
-        h("button", { type: "button", class: "primary", onclick: save }, "שמירת התיקון / Save ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
-        h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
+        h("button", { type: "button", class: "primary", onclick: save }, typing ? "שמירה (סופית) / Save (final) " : "שמירת התיקון / Save ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
+        typing ? null : h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
       ),
     );
     box.hidden = false;
@@ -266,6 +279,63 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     update();
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
+  }
+
+  /** The blind second pass: the line, its context, a blank box to type it in, and no candidate. */
+  function renderTyping(p: ProposalView, v: LineVerifyView, mine: DecisionOption | undefined): void {
+    const btn = (value: string, key: string, cls: string) => {
+      const o = p.options.find((x) => x.value === value);
+      return h("button", { type: "button", class: `act ${cls}`, onclick: () => void act(value), "data-value": value, title: o?.label.en ?? value }, h("span", {}, o?.label.he ?? value), h("kbd", { dir: "ltr" }, key));
+    };
+    mount(
+      root,
+      progressBar(progress),
+      h(
+        "article",
+        { class: "card proposal" },
+        h(
+          "header",
+          { class: "meta" },
+          h("span", { class: "tag", title: "Blind second pass" }, "מעבר שני (עיוור)"),
+          v.script ? h("span", { class: `tag script-${v.script.id}`, title: v.script.label.en }, v.script.label.he) : null,
+          h("span", { class: "muted small title", dir: "auto" }, `${p.itemTitle} · שורה ${v.lineIndex}`),
+        ),
+        h(
+          "p",
+          { class: "ask" },
+          "הקלידו את השורה המסומנת כפי שהיא בסריקה, אות באות. הטקסט נשמר סופית.",
+          h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Type the marked line as the scan shows it, letter by letter. Saving is final."),
+        ),
+        h("div", { class: "linebox" }),
+        mine ? h("p", { class: "mine" }, `ההחלטה שלך (סופית): ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "") : null,
+        h("div", { class: "editbox", hidden: true }),
+        h("p", { class: "msg", role: "status" }),
+        h("div", { class: "ctxbox" }),
+        h(
+          "p",
+          { class: "attrib muted small" },
+          h("span", { class: "block" }, "מקור / Source: ", h("bdi", { dir: "auto" }, `${v.bookTitle}${v.pageLabel ? `, עמ' ${v.pageLabel}` : ""}`)),
+        ),
+      ),
+      h(
+        "nav",
+        { class: "actions six" },
+        btn("unreadable", "U", "bad"),
+        btn("misaligned", "M", "bad"),
+        h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
+      ),
+      h(
+        "div",
+        { class: "subnav" },
+        h("button", { type: "button", class: "small", onclick: back, disabled: history.length === 0 }, "→ הקודם ", h("kbd", { dir: "ltr" }, "B")),
+        h("button", { type: "button", class: "small", onclick: () => setZoom(-1), "aria-label": "הקטנה / zoom out" }, "−"),
+        h("button", { type: "button", class: "small", onclick: () => setZoom(1), "aria-label": "הגדלה / zoom in" }, "+"),
+        current && p.mine ? h("button", { type: "button", class: "small", onclick: () => void loadNext().catch(fail) }, "לתור ←") : null,
+      ),
+    );
+    renderStrip();
+    renderContext();
+    if (!mine) startEdit();
   }
 
   function renderStrip(): void {
@@ -344,6 +414,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       );
     };
     const mine = p.mine ? option(p.mine.value) : undefined;
+    if (v.mode === "type") return renderTyping(p, v, mine);
     mount(
       root,
       progressBar(progress),
@@ -451,6 +522,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     // A focused button or link handles its own Enter and Space.
     if (target && (target.tagName === "BUTTON" || target.tagName === "A") && (e.key === "Enter" || e.key === " ")) return;
     if (!current || current.view.kind !== "line_verify") return;
+    const typing = current.view.mode === "type";
     // Holding a key down must not decide line after line.
     if (e.repeat) return e.preventDefault();
     // e.code is the physical key, so the shortcuts work in a Hebrew keyboard layout too.
@@ -478,6 +550,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       KeyX: () => setZoom(-1),
       KeyP: togglePage,
     };
+    // A blind pass has no verdict keys: Enter or E goes back to the typing box.
+    if (typing) for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN"]) actions[k] = startEdit;
     const fn = actions[e.code];
     if (fn) {
       e.preventDefault();

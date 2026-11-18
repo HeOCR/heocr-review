@@ -9,7 +9,10 @@
  * Items v1.1 (2026-11-18, for data-collection's P-hist eval hold-out) is additive: edition-text sources and
  * provenances, a page `script` (square or rashi), an item `precheck` ("look here", never a correction) and a top-level
  * `blind_second_pass` (the item ids that get a blind second pass). Decisions on a v1.1 batch are exported as
- * `line_verify_decisions.v1.2`: v1.1 plus each decision's `pass` (1, or 2 for the blind second pass).
+ * `line_verify_decisions.v1.2`: v1.1 plus each decision's `pass` (1, or 2 for the blind second pass). Pass 2 is typed
+ * from a blank box (heocr-eval, 2026-11-18: showing the candidate again would reproduce the bias it measures), so its
+ * decisions are `typed` (the reviewer's text), `pointed_print` (with the letters typed, no niqqud), `unreadable` or
+ * `misaligned`, and say `same_reviewer` (the pass-2 reviewer also decided the line's pass 1: intra-rater).
  */
 import { pyLen, reviewerIdProblems, validDate } from "../reference_audit/schema";
 import { hasNiqqud } from "../../shared/niqqud";
@@ -46,6 +49,8 @@ export const STRATA = ["hard", "random"] as const;
 export const RELEASE_SPLITS = ["train", "validation", "test"] as const;
 export const DECISION_VALUES_V1 = ["exact", "edited", "unreadable", "misaligned"] as const;
 export const DECISION_VALUES = [...DECISION_VALUES_V1, "pointed_print"] as const;
+/** A blind second pass (v1.2): typed from a blank box, never a verdict on a candidate it was not shown. */
+export const PASS2_DECISION_VALUES = ["typed", "pointed_print", "unreadable", "misaligned"] as const;
 export { hasNiqqud };
 
 /** Batch ids appear in the app's URLs (/api/batches/<id>/next). */
@@ -110,12 +115,14 @@ export interface LvDecision {
   decision_id: string;
   item_id: string;
   reviewer: string;
-  decision: (typeof DECISION_VALUES)[number];
+  decision: (typeof DECISION_VALUES)[number] | (typeof PASS2_DECISION_VALUES)[number];
   text?: string;
   /** Additive to the v1 contract: SHA-256 of the UTF-8 candidate_text the reviewer judged (see README). */
   candidate_sha256?: string;
   /** v1.2 only, and required there: 2 for the blind second pass. */
   pass?: 1 | 2;
+  /** v1.2, pass-2 decisions only, and required there: the reviewer also decided the line's pass 1. */
+  same_reviewer?: boolean;
   /** v1.2, pass-1 decisions on blind lines only: the pass-1 answer changed after the reviewer first decided pass 2. */
   revised_after_pass2?: boolean;
   /** With revised_after_pass2: true, the pass-1 decision that stood then (null if none did). */
@@ -311,9 +318,10 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
         problems.push(`${label}: pass1_at_pass2 comes exactly with revised_after_pass2: true`);
       }
     } else {
-      for (const key of ["pass", "revised_after_pass2", "pass1_at_pass2"]) if (key in d) problems.push(`${label}: ${key} is a ${DECISIONS_SCHEMA_V12} field`);
+      for (const key of ["pass", "same_reviewer", "revised_after_pass2", "pass1_at_pass2"]) if (key in d) problems.push(`${label}: ${key} is a ${DECISIONS_SCHEMA_V12} field`);
     }
     const pass2 = v12 && d.pass === 2;
+    if (v12 && (pass2 ? typeof d.same_reviewer !== "boolean" : "same_reviewer" in d)) problems.push(`${label}: same_reviewer is a boolean on pass-2 decisions only`);
     if (!nonEmpty(d.decision_id)) problems.push(`${label}: decision_id must be a non-empty string`);
     else if (ids.has(d.decision_id)) problems.push(`${label}: decision_id listed twice`);
     else if (
@@ -327,8 +335,16 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     const key = `${String(d.item_id)}\u0000${String(d.reviewer)}\u0000${pass2 ? 2 : 1}`;
     if (item && decided.has(key)) problems.push(`${label}: a second decision by ${String(d.reviewer)} for ${item.item_id}; one per reviewer and pass`);
     decided.add(key);
-    if (!oneOf(allowed, d.decision)) problems.push(`${label}: decision must be one of ${join(allowed)} in ${String(payload.schema_version)}`);
-    if (d.decision === "edited") {
+    if (pass2) {
+      if (!oneOf(PASS2_DECISION_VALUES, d.decision)) problems.push(`${label}: a pass-2 decision must be one of ${join(PASS2_DECISION_VALUES)}`);
+      else if (d.decision === "typed" || d.decision === "pointed_print") {
+        const textProblems = lineTextProblems(d.text);
+        if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: text ${p}`));
+        else if (hasNiqqud(d.text as string)) problems.push(`${label}: typed text holds the letters only, without niqqud or marks`);
+      } else if ("text" in d) problems.push(`${label}: only a typed or pointed_print decision carries text`);
+    } else if (!oneOf(allowed, d.decision)) {
+      problems.push(`${label}: decision must be one of ${join(allowed)} in ${String(payload.schema_version)}`);
+    } else if (d.decision === "edited") {
       const textProblems = lineTextProblems(d.text);
       if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: text ${p}`));
       else if (item && d.text === item.candidate_text) problems.push(`${label}: an edit equal to the candidate is exact; record exact`);

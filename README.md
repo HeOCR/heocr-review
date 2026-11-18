@@ -20,10 +20,15 @@ Three task types:
   Items v1.1 (data-collection's old-print eval hold-out, 2026-11-18) adds candidates from published edition text
   (Sefaria, Project Gutenberg, Ben-Yehuda, Wikisource; never OCR), the page's script (square or Rashi), the agent
   pre-check's "look here" (a reason, never a text; a flagged line cannot be marked exact before the full page is
-  opened) and a blind second pass for listed lines, gated as in page review below: it opens to a reviewer 24 hours
-  after their own text answer (exact, edited or print has niqqud), with no pre-check and no marks, and closes their
-  pass-1 line until it is decided. A v1.1 batch exports `line_verify_decisions.v1.2`: each decision's `pass`, and on
-  a blind line's pass 1 revised after pass 2, `revised_after_pass2` and the pass-1 answer that stood then.
+  opened) and a blind second pass for listed lines, gated as in page review below. The blind pass is typed from a
+  blank box (heocr-eval: showing the candidate again would reproduce the very bias the pass measures): the candidate,
+  its marks and the pre-check never reach the browser, and the typed answer is final. It opens 24 hours after a text
+  answer on pass 1 (exact, edited or print has niqqud); by the batch's `pass2_reviewer` setting, to the same reviewer
+  (`same`, the default) or only to a reviewer who never decided the line's pass 1 (`other`, for once volunteers
+  review). While it is open and undecided, the reviewer's pass-1 line is closed to them. A v1.1 batch exports
+  `line_verify_decisions.v1.2`: each decision's `pass`; on pass 2 the decision `typed` (or `pointed_print` with the
+  letters, `unreadable`, `misaligned`) and `same_reviewer`; on a blind line's pass 1 revised after pass 2,
+  `revised_after_pass2` and the pass-1 answer that stood then.
 - **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
   layer, or stock Tesseract; never a HeOCR model), corrects it line by line (edit, print has niqqud, not on the page,
   unreadable, merge, split, move, add) and confirms that the lines, as corrected, are the page's text in reading
@@ -166,6 +171,13 @@ that is roughly 1,500 + pages ≈ 2,000 files and, at 50-150 KB a crop, about 10
 static-asset limits (20,000 files per version on the free plan, 25 MiB a file) and far lighter for a phone than
 shipping full-resolution pages. A decision is pinned to the line's text, boxes and page image: if a re-export changes
 any of them, earlier decisions on that line become stale (kept, never exported).
+
+Batch settings, which a re-import keeps (`migrations/0006_batch_settings.sql`):
+
+```sh
+npm run batch-setting -- --batch <id> --target local|preview|production                       # read
+npm run batch-setting -- --batch <id> --pass2-reviewer other --by <who> --target preview       # change
+```
 
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
 `npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan). `test/fixtures/line_verify_v11/` is

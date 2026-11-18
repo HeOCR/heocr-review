@@ -19,6 +19,7 @@
     "import-subset": "tsx scripts/import-subset.ts",
     "export": "tsx scripts/export.ts",
     "maintainer-decided": "tsx scripts/maintainer-decided.ts",
+    "batch-setting": "tsx scripts/batch-setting.ts",
     "deploy:preview": "tsx scripts/deploy.ts preview"
   },
   "devDependencies": {

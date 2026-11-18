@@ -21,19 +21,34 @@ export const BLIND_DELAY_MS = 24 * 60 * 60 * 1000;
 const SETTLED = "('confirm', 'exact', 'edited', 'pointed_print')";
 
 /**
- * Whether proposal p is open to reviewer ?2 under its gate (migrations/0002_proposal_gates.sql). `reserves` binds a
+ * Who a batch's blind second pass goes to (migrations/0006_batch_settings.sql): 'same', the reviewer who answered pass
+ * 1, 24 hours later; or 'other' (line_verify only), a reviewer who never decided the line's pass 1, 24 hours after
+ * another reviewer's answer.
+ */
+const PASS2_MODE = "COALESCE((SELECT s.pass2_reviewer FROM batch_settings s WHERE s.batch_id = p.batch_id), 'same')";
+
+/**
+ * Whether proposal p is open to reviewer ?2 under its gate (migrations/0002_proposal_gates.sql; a blind second pass
+ * also by the batch's pass2_reviewer setting, 0006). `reserves` binds a
  * JSON array of the reserve proposal ids assigned so far, `cutoff` the ISO time before which a first-pass decision
  * must have been made.
  */
 function eligible(reserves: number, cutoff: number): string {
   return `(p.gate_kind IS NULL
     OR (p.gate_kind = 'reserve' AND p.id IN (SELECT value FROM json_each(?${reserves})))
-    OR (p.gate_kind = 'after_confirm'
+    OR (p.gate_kind = 'after_confirm' AND ${PASS2_MODE} = 'same'
       AND EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND q.active = 1 AND d.reviewer_id = ?2
           AND d.superseded_at IS NULL AND d.value IN ${SETTLED} AND d.proposal_sha256 = q.content_sha256)
       AND (SELECT MIN(d.created_at) FROM proposals q JOIN decisions d ON d.proposal_id = q.id
-        WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND d.reviewer_id = ?2) <= ?${cutoff}))`;
+        WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND d.reviewer_id = ?2) <= ?${cutoff})
+    OR (p.gate_kind = 'after_confirm' AND ${PASS2_MODE} = 'other'
+      AND NOT EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
+        WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND d.reviewer_id = ?2)
+      AND EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
+        WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND q.active = 1 AND d.reviewer_id <> ?2
+          AND d.superseded_at IS NULL AND d.value IN ${SETTLED} AND d.proposal_sha256 = q.content_sha256
+          AND (SELECT MIN(e.created_at) FROM decisions e WHERE e.proposal_id = q.id AND e.reviewer_id = d.reviewer_id) <= ?${cutoff})))`;
 }
 
 async function openReserves(db: D1Database, batchId: string): Promise<number[]> {
@@ -185,7 +200,7 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     externalId: p.externalId,
     itemTitle: p.itemTitle,
     view: type.toView(p),
-    options: type.options,
+    options: type.optionsFor?.(p) ?? type.options,
     mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
     ...(batch.taskType === PAGE_REVIEW ? { draft } : {}),
   };
