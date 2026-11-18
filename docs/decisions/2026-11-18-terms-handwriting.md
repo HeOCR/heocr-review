@@ -1,7 +1,7 @@
-# 2026-11-18: terms cover handwritten pages and typed text (DRAFT, awaiting the maintainer)
+# 2026-11-18: terms cover handwritten pages and typed text
 
-**Status: not approved.** Drafted on lead's request and held until lead brings it to the maintainer, together
-with the volunteer-launch review. This PR merges only on his word.
+**Status: approved** by the maintainer on 2026-11-18. Merging deploys nothing; production still waits for the
+volunteer-launch review with him.
 
 - **Proposed change:** the smallest edit to the contribution terms that covers the handwriting (H) transcription
   task (task type `line_transcribe`, HeOCR/heocr-review#20). There, volunteers type new text from scratch from
@@ -21,6 +21,9 @@ with the volunteer-launch review. This PR merges only on his word.
 - **Covers:** `src/shared/terms.ts` (`TERMS_HE`, `TERMS_EN`, `TERMS_VERSION`), `public/terms.html` (items 1 and 2,
   the version), `public/index.html` (the about sentence, the terms version) and `src/tasks/export.ts`
   (`CONTRIBUTION_LICENCES`).
-- **Approved by:** — (pending).
+- **Approved by:** the maintainer, on 2026-11-18, relayed word for word by heocr-lead. Lead explained the change to
+  him in plain terms: volunteers will also type the text of handwritten pages, that typed text is CC0 like
+  everything else, nothing new is collected, and everyone accepts the terms again before their next decision. His
+  answer: "Approve".
 
 — contrib[claude/claude-code#shay-macbook-m4]@heocr/opensource
