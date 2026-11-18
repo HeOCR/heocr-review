@@ -6,8 +6,8 @@ import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved ones: terms 2026-11-12-v1, privacy 2026-11-18-v3", () => {
-    expect(TERMS_VERSION).toBe("2026-11-12-v1");
+  it("versions are the approved ones: terms 2026-11-18-v1, privacy 2026-11-18-v3", () => {
+    expect(TERMS_VERSION).toBe("2026-11-18-v1");
     expect(PRIVACY_VERSION).toBe("2026-11-18-v3");
   });
 

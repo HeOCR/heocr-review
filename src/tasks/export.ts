@@ -18,6 +18,7 @@ export const CONTRIBUTION_LICENCES: Record<string, string> = {
   "2026-11-07-draft-1": "CC-BY-SA-4.0",
   "2026-11-07-v1": "CC-BY-SA-4.0",
   "2026-11-12-v1": "CC0-1.0",
+  "2026-11-18-v1": "CC0-1.0",
 };
 export const MAINTAINER_RELICENCE = "docs/decisions/2026-11-12-cc0.md";
 
