@@ -45,6 +45,9 @@ export const SCRIPTS = ["square", "rashi"] as const;
 export const PRECHECK_REASONS = ["edge_mismatch", "spelling", "digits"] as const;
 /** A line's blind second pass is the proposal `<item_id>@pass2` (as in page_review). */
 export const PASS2_SUFFIX = "@pass2";
+/** How the export's blind_second_pass.sha256 is computed, so a reader can check it against the bundle. */
+export const BLIND_LIST_SHA256_OF = "the blind_second_pass item ids, sorted (by code unit), joined by \"\\n\", as UTF-8";
+export const PASS2_REVIEWERS = ["same", "other"] as const;
 export const STRATA = ["hard", "random"] as const;
 export const RELEASE_SPLITS = ["train", "validation", "test"] as const;
 export const DECISION_VALUES_V1 = ["exact", "edited", "unreadable", "misaligned"] as const;
@@ -299,6 +302,15 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
   const allowed: readonly string[] = payload.schema_version === "line_verify_decisions.v1" ? DECISION_VALUES_V1 : DECISION_VALUES;
   const v12 = payload.schema_version === DECISIONS_SCHEMA_V12;
   const problems: string[] = [];
+  if (v12) {
+    const mode = isObj(payload.pass2_reviewer) ? payload.pass2_reviewer : {};
+    if (!oneOf(PASS2_REVIEWERS, mode.mode)) problems.push(`pass2_reviewer.mode must be one of ${join(PASS2_REVIEWERS)}`);
+    if (!(mode.set_at === null || typeof mode.set_at === "string")) problems.push("pass2_reviewer.set_at must be a timestamp or null");
+    const list = isObj(payload.blind_second_pass) ? payload.blind_second_pass : {};
+    if (!(isInt(list.count) && list.count >= 0 && typeof list.sha256 === "string" && SHA256.test(list.sha256))) {
+      problems.push("blind_second_pass must give the list's count and sha256");
+    } else if (list.count !== items.filter((i) => i.blind).length) problems.push("blind_second_pass.count is not the number of blind lines");
+  }
   if (payload.batch_id !== batchId) problems.push("batch_id must match the items' batch_id");
   if (!Array.isArray(payload.decisions)) return [...problems, "decisions must be a list"];
   const known = new Map(items.map((i) => [i.item_id, i]));

@@ -30,6 +30,8 @@ export interface BatchRecord {
   /** Task-type metadata about the imported file, kept for the export. */
   source: Record<string, unknown>;
   minReviewers: number;
+  /** The batch's settings (migrations/0006_batch_settings.sql); absent where a record is built without them. */
+  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null };
 }
 
 export interface ProposalRecord {

@@ -18,6 +18,7 @@ import { sha256Hex } from "../../shared/sha256";
 import type { BatchRecord, DecisionRecord, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType } from "../types";
 import {
   DECISIONS_SCHEMA,
+  BLIND_LIST_SHA256_OF,
   DECISIONS_SCHEMA_V12,
   ITEMS_SCHEMA_V11,
   decisionId,
@@ -64,6 +65,8 @@ export interface LineVerifyPayload {
 /** What the importer stores per batch (batches.source_json). */
 export interface LineVerifySource {
   schema_version: string;
+  /** v1.1: the bundle's blind_second_pass list, as a count and a checksum (BLIND_LIST_SHA256_OF). */
+  blind_second_pass?: { count: number; sha256: string };
   batch_id: string;
   description: string;
   created_at: string;
@@ -133,6 +136,11 @@ const label = (labels: Record<string, Label>, id: string): Label => labels[id] ?
 
 const passOf = (p: ProposalRecord): 1 | 2 => payloadOf(p).pass ?? 1;
 export const isPass2 = (p: ProposalRecord) => passOf(p) === 2;
+
+/** The checksum of a blind_second_pass list (BLIND_LIST_SHA256_OF). */
+export function blindListSha256(ids: string[]): string {
+  return sha256Hex([...ids].sort().join("\n"));
+}
 /** The bundle's item id of a line (both passes). */
 const itemIdOf = (p: ProposalRecord): string => payloadOf(p).item_id ?? p.externalId;
 const isV11 = (batch: BatchRecord) => sourceOf(batch).schema_version === ITEMS_SCHEMA_V11;
@@ -284,7 +292,18 @@ export const lineVerify: TaskType = {
       });
     return {
       fileName: "line_verify_decisions.json",
-      content: { schema_version: v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA, batch_id: sourceOf(batch).batch_id, decisions },
+      content: {
+        schema_version: v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
+        batch_id: sourceOf(batch).batch_id,
+        // v1.2: which mode the blind pass ran in, and which list it ran on (heocr-eval, so a later reader can tell).
+        ...(v12
+          ? {
+              pass2_reviewer: { mode: batch.settings?.pass2Reviewer ?? "same", set_at: batch.settings?.pass2ReviewerSetAt ?? null },
+              blind_second_pass: { ...(sourceOf(batch).blind_second_pass ?? { count: 0, sha256: blindListSha256([]) }), sha256_of: BLIND_LIST_SHA256_OF },
+            }
+          : {}),
+        decisions,
+      },
     };
   },
 

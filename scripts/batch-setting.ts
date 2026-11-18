@@ -9,11 +9,10 @@
  * hours after another reviewer's answer (inter-rater; heocr-eval: switch it on once volunteers review the batch).
  * Changing it affects only lines not yet served; decisions already made keep their same_reviewer in the export.
  */
+import { PASS2_REVIEWERS } from "../src/tasks/line_verify/schema";
 import { parseArgs, str, target } from "./lib/args";
 import { inline } from "./lib/sql";
 import { d1Query } from "./lib/wrangler";
-
-export const PASS2_REVIEWERS = ["same", "other"] as const;
 
 export const READ_SQL = `SELECT b.id, b.task_type, COALESCE(s.pass2_reviewer, 'same') AS pass2_reviewer, s.updated_at, s.updated_by
   FROM batches b LEFT JOIN batch_settings s ON s.batch_id = b.id WHERE b.id = ?1`;

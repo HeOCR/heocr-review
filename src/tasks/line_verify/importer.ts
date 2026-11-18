@@ -7,7 +7,7 @@
  */
 import type { Box } from "../../shared/media";
 import type { ImportBundle, TaskImporter } from "../import";
-import { TASK_TYPE_ID, type LineVerifyPayload, type LineVerifySource } from "./index";
+import { TASK_TYPE_ID, blindListSha256, type LineVerifyPayload, type LineVerifySource } from "./index";
 import { ITEMS_SCHEMA_V11, PASS2_SUFFIX, itemsFileProblems, type LvItem, type LvItemsFile, type LvPage, type PixelBox } from "./schema";
 
 const fraction = (box: PixelBox, page: LvPage): Box => {
@@ -38,6 +38,9 @@ export const lineVerifyImporter: TaskImporter = {
       description: file.description ?? "",
       created_at: file.created_at,
       generator: file.generator,
+      ...(file.schema_version === ITEMS_SCHEMA_V11
+        ? { blind_second_pass: { count: (file.blind_second_pass ?? []).length, sha256: blindListSha256(file.blind_second_pass ?? []) } }
+        : {}),
     };
     const used = new Set(file.items.map((it) => it.page_id));
     const v11 = file.schema_version === ITEMS_SCHEMA_V11;

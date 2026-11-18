@@ -9,6 +9,9 @@ export interface BatchRow {
   source_json: string;
   min_reviewers: number;
   status: string;
+  /** From batch_settings (null: no row, the default). */
+  pass2_reviewer?: string | null;
+  pass2_reviewer_set_at?: string | null;
 }
 
 export interface ProposalRow {
@@ -47,6 +50,7 @@ export function toBatch(row: BatchRow): BatchRecord & { status: string } {
     source: JSON.parse(row.source_json) as Record<string, unknown>,
     minReviewers: row.min_reviewers,
     status: row.status,
+    settings: { pass2Reviewer: row.pass2_reviewer === "other" ? "other" : "same", pass2ReviewerSetAt: row.pass2_reviewer_set_at ?? null },
   };
 }
 
@@ -86,7 +90,10 @@ export function toDecision(row: DecisionRow): DecisionRecord {
 export const PROPOSAL_COLUMNS = `p.id, p.batch_id, p.external_id, i.external_id AS item_external_id, i.title AS item_title,
   p.category, p.confidence, p.rank, p.payload_json, p.media_json, p.content_sha256, p.active`;
 
-export const BATCH_SQL = "SELECT id, task_type, title, source_json, min_reviewers, status FROM batches";
+export const BATCH_SQL = `SELECT id, task_type, title, source_json, min_reviewers, status,
+  (SELECT s.pass2_reviewer FROM batch_settings s WHERE s.batch_id = batches.id) AS pass2_reviewer,
+  (SELECT s.updated_at FROM batch_settings s WHERE s.batch_id = batches.id) AS pass2_reviewer_set_at
+  FROM batches`;
 export const DECISION_SQL = `SELECT id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at,
   decided_on, superseded_at FROM decisions`;
 

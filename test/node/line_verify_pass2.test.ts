@@ -1,13 +1,19 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { settingProblem } from "../../scripts/batch-setting";
-import { normalizeTypedDecision } from "../../src/tasks/line_verify";
+import { blindListSha256, normalizeTypedDecision } from "../../src/tasks/line_verify";
 import { decisionsFileProblems } from "../../src/tasks/line_verify/schema";
 
 const ITEM = "wikisource_he:x__p0001#L001";
 const items = [{ item_id: ITEM, candidate_text: "שורה", blind: true }];
+const HEADER = {
+  pass2_reviewer: { mode: "same", set_at: null },
+  blind_second_pass: { count: 1, sha256: blindListSha256([ITEM]), sha256_of: "x" },
+};
 const file = (d: Record<string, unknown>) => ({
   schema_version: "line_verify_decisions.v1.2",
   batch_id: "b",
+  ...HEADER,
   decisions: [{ decision_id: `decision:${ITEM}@pass2:rv_1a2b3c4d`, item_id: ITEM, reviewer: "rv_1a2b3c4d", pass: 2, same_reviewer: true, decided_at: "2026-11-18", checked_by: "human", ...d }],
 });
 
@@ -32,10 +38,27 @@ describe("blind second pass decisions (v1.2)", () => {
 
   it("refuses same_reviewer on pass 1, and pass-1 values like typed", () => {
     const one = { decision_id: `decision:${ITEM}:rv_1a2b3c4d`, item_id: ITEM, reviewer: "rv_1a2b3c4d", pass: 1, decided_at: "2026-11-18", checked_by: "human" };
-    const f = (d: Record<string, unknown>) => ({ schema_version: "line_verify_decisions.v1.2", batch_id: "b", decisions: [{ ...one, ...d }] });
+    const f = (d: Record<string, unknown>) => ({ schema_version: "line_verify_decisions.v1.2", batch_id: "b", ...HEADER, decisions: [{ ...one, ...d }] });
     expect(decisionsFileProblems(f({ decision: "exact" }), "b", items)).toEqual([]);
     expect(decisionsFileProblems(f({ decision: "exact", same_reviewer: true }), "b", items).join("\n")).toContain("same_reviewer");
     expect(decisionsFileProblems(f({ decision: "typed", text: "שורה" }), "b", items).join("\n")).toContain("decision must be one of");
+  });
+
+  it("needs the header: the pass2_reviewer mode and the blind list's count and sha256", () => {
+    const ok = file({ decision: "unreadable" });
+    for (const [mutate, message] of [
+      [(f: any) => delete f.pass2_reviewer, "pass2_reviewer.mode"],
+      [(f: any) => (f.pass2_reviewer.mode = "anyone"), "pass2_reviewer.mode"],
+      [(f: any) => (f.blind_second_pass.sha256 = "x"), "count and sha256"],
+      [(f: any) => (f.blind_second_pass.count = 2), "number of blind lines"],
+    ] as const) {
+      const f = structuredClone(ok);
+      mutate(f);
+      expect(decisionsFileProblems(f, "b", items).join("\n")).toContain(message);
+    }
+    // The checksum does not depend on the bundle's order.
+    expect(blindListSha256(["b", "a"])).toBe(blindListSha256(["a", "b"]));
+    expect(blindListSha256(["a", "b"])).toBe(createHash("sha256").update("a\nb", "utf8").digest("hex"));
   });
 
   it("normalizes what the reviewer typed: NFC, trimmed, one line, letters only", () => {
