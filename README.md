@@ -37,7 +37,9 @@ Three task types:
   0..kraken_lines-1 exactly once. One typing is a typed line's reference; a batch setting can require two independent
   typings for a book group's typed lines (eval's registered fallback). A v1.2 batch exports
   `line_verify_decisions.v1.3`: v1.2 plus each decision's `kind`, `box_reason` on a typed line's not_on_page, the
-  two-typings setting, and `pages` (per page: kraken_lines, resolved lines, done).
+  two-typings setting, and `pages` (per page: kraken_lines, resolved lines, done, unreadable lines). On a v1.2 verify
+  line, misaligned (the candidate is not this line) opens a blank box: the decision carries the line as typed, so
+  every line still gets a text, and the misaligned count measures the aligner (heocr-eval).
 - **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
   layer, or stock Tesseract; never a HeOCR model), corrects it line by line (edit, print has niqqud, not on the page,
   unreadable, merge, split, move, add) and confirms that the lines, as corrected, are the page's text in reading

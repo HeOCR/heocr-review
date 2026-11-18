@@ -17,7 +17,8 @@ export const BLIND_DELAY_MS = 24 * 60 * 60 * 1000;
 /**
  * The pass-1 answers that open a blind second pass ('after_confirm'): a page_review confirm, or a line_verify answer
  * that gives the line's text (exact, edited, pointed_print, or typed on a typed line). A line marked unreadable,
- * misaligned or with a box problem gets no pass 2.
+ * misaligned (without a typed text: v1 and v1.1 lines) or with a box problem gets no pass 2; a v1.2 misaligned line,
+ * typed, does.
  */
 const SETTLED = "('confirm', 'exact', 'edited', 'pointed_print', 'typed')";
 
@@ -50,7 +51,7 @@ function eligible(reserves: number, cutoff: number): string {
     OR (p.gate_kind = 'after_confirm' AND ${PASS2_MODE} = 'same'
       AND EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND q.active = 1 AND d.reviewer_id = ?2
-          AND d.superseded_at IS NULL AND d.value IN ${SETTLED} AND d.proposal_sha256 = q.content_sha256)
+          AND d.superseded_at IS NULL AND (d.value IN ${SETTLED} OR (d.value = 'misaligned' AND d.text IS NOT NULL)) AND d.proposal_sha256 = q.content_sha256)
       AND (SELECT MIN(d.created_at) FROM proposals q JOIN decisions d ON d.proposal_id = q.id
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND d.reviewer_id = ?2) <= ?${cutoff})
     OR (p.gate_kind = 'after_confirm' AND ${PASS2_MODE} = 'other'
@@ -58,7 +59,7 @@ function eligible(reserves: number, cutoff: number): string {
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND d.reviewer_id = ?2)
       AND EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
         WHERE q.batch_id = p.batch_id AND q.external_id = p.gate_ref AND q.active = 1 AND d.reviewer_id <> ?2
-          AND d.superseded_at IS NULL AND d.value IN ${SETTLED} AND d.proposal_sha256 = q.content_sha256
+          AND d.superseded_at IS NULL AND (d.value IN ${SETTLED} OR (d.value = 'misaligned' AND d.text IS NOT NULL)) AND d.proposal_sha256 = q.content_sha256
           AND (SELECT MIN(e.created_at) FROM decisions e WHERE e.proposal_id = q.id AND e.reviewer_id = d.reviewer_id) <= ?${cutoff})))`;
 }
 

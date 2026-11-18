@@ -19,7 +19,8 @@
  * running heads, page numbers, catchwords and glosses); each page says its `segmenter`, `kraken_lines` and
  * `book_group`, and its items cover line_index 0..kraken_lines-1 exactly once. A typed line's box problems are H's:
  * not_one_line, no_text, continued. Decisions on a v1.2 batch are exported as `line_verify_decisions.v1.3`: v1.2 plus
- * each decision's `kind`, `box_reason` on not_on_page, and a `pages` list saying which pages are done.
+ * each decision's `kind`, `box_reason` on not_on_page, and a `pages` list saying which pages are done and how many
+ * of their lines are unreadable. On a v1.2 verify line, `misaligned` carries the line as typed (`text`).
  */
 import { pyLen, reviewerIdProblems, validDate } from "../reference_audit/schema";
 import { hasNiqqud } from "../../shared/niqqud";
@@ -397,8 +398,18 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     if (!Array.isArray(payload.pages)) problems.push("pages must list every page with its kraken_lines, resolved and done");
     else {
       for (const pg of payload.pages as unknown[]) {
-        const ok = isObj(pg) && nonEmpty(pg.page_id) && isInt(pg.kraken_lines) && isInt(pg.resolved) && pg.resolved >= 0 && pg.resolved <= pg.kraken_lines && pg.done === (pg.resolved === pg.kraken_lines);
-        if (!ok) problems.push(`pages: ${JSON.stringify(isObj(pg) ? pg.page_id : pg)} must give kraken_lines, resolved (at most kraken_lines) and done`);
+        const ok =
+          isObj(pg) &&
+          nonEmpty(pg.page_id) &&
+          isInt(pg.kraken_lines) &&
+          isInt(pg.resolved) &&
+          pg.resolved >= 0 &&
+          pg.resolved <= pg.kraken_lines &&
+          pg.done === (pg.resolved === pg.kraken_lines) &&
+          isInt(pg.unreadable) &&
+          pg.unreadable >= 0 &&
+          pg.unreadable <= pg.kraken_lines;
+        if (!ok) problems.push(`pages: ${JSON.stringify(isObj(pg) ? pg.page_id : pg)} must give kraken_lines, resolved (at most kraken_lines), done and unreadable`);
       }
     }
   }
@@ -474,6 +485,11 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
       } else if ("text" in d) problems.push(`${label}: only a typed or pointed_print decision carries text`);
     } else if (!oneOf(allowed, d.decision)) {
       problems.push(`${label}: decision must be one of ${join(allowed)} in ${String(payload.schema_version)}`);
+    } else if (v13 && d.decision === "misaligned" && !pass2) {
+      // v1.3 verify lines: misaligned carries the line as typed (letters only), scored like a typed line.
+      const textProblems = lineTextProblems(d.text);
+      if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: a misaligned line's text ${p}`));
+      else if (hasNiqqud(d.text as string)) problems.push(`${label}: typed text holds the letters only, without niqqud or marks`);
     } else if (d.decision === "edited") {
       const textProblems = lineTextProblems(d.text);
       if (textProblems.length) problems.push(...textProblems.map((p) => `${label}: text ${p}`));

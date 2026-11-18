@@ -197,11 +197,16 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (id !== undefined) open(id).catch(fail);
   }
 
-  function startEdit(): void {
+  /**
+   * The edit box. `misaligned` (a v1.2 verify line whose candidate is not this line): a blank box; the decision is
+   * misaligned with the line as typed (heocr-eval: every line needs a text, and the count measures the aligner).
+   */
+  function startEdit(asMisaligned = false): void {
     const v = view();
     if (editing) return editing.focus();
     if (!v || !current) return;
     const typing = v.mode === "type";
+    if (asMisaligned) return startMisaligned();
     if (typing && current.mine && v.pass === 2) return; // a blind pass is final
     const box = root.querySelector(".editbox") as HTMLElement;
     const area = h("textarea", {
@@ -288,6 +293,57 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     update();
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
+  }
+
+  function startMisaligned(): void {
+    const box = root.querySelector(".editbox") as HTMLElement;
+    const area = h("textarea", { dir: "rtl", lang: "he", rows: 2, spellcheck: "false", autocomplete: "off", autocapitalize: "off", maxlength: 1000, "aria-label": "השורה כפי שהיא בסריקה / the line as the scan shows it" });
+    area.value = current?.mine?.value === "misaligned" && current.mine.text ? current.mine.text : "";
+    const cancel = () => {
+      editing = null;
+      box.replaceChildren();
+      box.hidden = true;
+    };
+    const save = () => {
+      const text = area.value;
+      if (!text.trim()) return status("הקלידו את השורה. / Type the line.");
+      if (hasNiqqud(text)) return status("מקלידים אותיות בלבד, בלי ניקוד. / Type letters only, without niqqud.");
+      cancel();
+      void act("misaligned", text);
+    };
+    area.addEventListener("input", () => {
+      if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
+    });
+    area.addEventListener("keydown", (e) => {
+      if (e.isComposing) return;
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        save();
+      } else if (e.key === "Enter") e.preventDefault();
+      else if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      }
+    });
+    box.replaceChildren(
+      h("p", { class: "muted small" }, "הטקסט המוצע אינו השורה הזאת: הקלידו את השורה כפי שהיא בסריקה, אותיות בלבד. / The candidate is not this line: type the line as the scan shows it, letters only."),
+      area,
+      h(
+        "div",
+        { class: "row" },
+        h("button", { type: "button", class: "primary", onclick: save }, "שמירה: לא תואם / Save as misaligned ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
+        h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
+      ),
+    );
+    box.hidden = false;
+    editing = area;
+    area.focus();
+  }
+
+  /** Misaligned: with a typed text where the line needs one (v1.2 verify lines), else a verdict alone. */
+  function misaligned(): void {
+    if (current?.options.find((o) => o.value === "misaligned")?.withText) startEdit(true);
+    else void act("misaligned");
   }
 
   /**
@@ -484,10 +540,10 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         "nav",
         { class: "actions six" },
         btn("exact", "Enter", "ok", () => void act("exact")),
-        btn("edited", "E", "edit", startEdit),
+        btn("edited", "E", "edit", () => startEdit()),
         btn("pointed_print", "N", "ok pointed", () => void act("pointed_print")),
         btn("unreadable", "U", "bad", () => void act("unreadable")),
-        btn("misaligned", "M", "bad", () => void act("misaligned")),
+        btn("misaligned", "M", "bad", misaligned),
         h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
       ),
       h(
@@ -546,14 +602,14 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       Enter: () => void act("exact"),
       NumpadEnter: () => void act("exact"),
       Digit1: () => void act("exact"),
-      KeyE: startEdit,
-      Digit2: startEdit,
+      KeyE: () => startEdit(),
+      Digit2: () => startEdit(),
       // e.code: the physical N key, which is מ in a Hebrew layout.
       KeyN: () => void act("pointed_print"),
       KeyU: () => void act("unreadable"),
       Digit3: () => void act("unreadable"),
-      KeyM: () => void act("misaligned"),
-      Digit4: () => void act("misaligned"),
+      KeyM: misaligned,
+      Digit4: misaligned,
       KeyS: () => void doSkip(),
       Digit5: () => void doSkip(),
       KeyB: back,
@@ -568,7 +624,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     };
     // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
     if (typing) {
-      for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = startEdit;
+      for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = () => startEdit();
       for (const o of current.options) {
         const key = TYPING_KEYS[o.value];
         if (key) actions[key[1]] = () => void act(o.value);
