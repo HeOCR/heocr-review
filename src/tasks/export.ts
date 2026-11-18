@@ -7,7 +7,7 @@
  * every reviewer's current decision (one per reviewer per proposal); the consumer applies a proposal when at least
  * min_reviewers of them agree. The ledger records the same outcome per proposal, plus superseded and stale history.
  */
-import type { BatchRecord, Credit, DecisionRecord, ExportFile, ProposalRecord, ResolvedProposal } from "./types";
+import type { BatchRecord, Credit, DecisionRecord, ExportFile, ProposalRecord, ResolvedProposal, VerifyVote } from "./types";
 import { taskType } from "./registry";
 
 /**
@@ -33,6 +33,8 @@ export interface ExportInput {
   /** line_consensus: reviewers an admin excluded from agreement in this batch, and the maintainer's decisions. */
   exclusions?: { reviewerId: string; excludedAt: string }[];
   maintainerDecisions?: string[];
+  /** line_verify volunteer_v1: each decision's verify_votes row. */
+  verifyVotes?: VerifyVote[];
 }
 
 export interface ExportResult {
@@ -89,7 +91,7 @@ export function buildExport(input: ExportInput): ExportResult {
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
   const resolved = resolveProposals(batch, proposals, decisions);
-  const decisionsFile = type.exportDecisions(batch, resolved, { exportedAt, exclusions: input.exclusions ?? [], maintainerDecisions: input.maintainerDecisions ?? [] });
+  const decisionsFile = type.exportDecisions(batch, resolved, { exportedAt, exclusions: input.exclusions ?? [], maintainerDecisions: input.maintainerDecisions ?? [], verifyVotes: input.verifyVotes ?? [] });
   const problems = type.validateExport(batch, proposals, decisionsFile.content);
   const count = (status: ResolvedProposal["status"]) => resolved.filter((r) => r.status === status).length;
   const reviewers = new Set(decisions.map((d) => d.reviewerId));

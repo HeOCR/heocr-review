@@ -31,7 +31,7 @@ export interface BatchRecord {
   source: Record<string, unknown>;
   minReviewers: number;
   /** The batch's settings (migrations/0006_batch_settings.sql); absent where a record is built without them. */
-  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null };
+  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null; resolution: "single" | "volunteer_v1" };
 }
 
 export interface ProposalRecord {
@@ -97,6 +97,16 @@ export interface ExportExtra {
   exclusions: { reviewerId: string; excludedAt: string }[];
   /** Ids of decisions an admin made in a volunteer batch (migrations/0005_line_consensus.sql). */
   maintainerDecisions: string[];
+  /** line_verify volunteer_v1: what each decision recorded when it was made (migrations/0009). */
+  verifyVotes?: VerifyVote[];
+}
+
+export interface VerifyVote {
+  decisionId: string;
+  counted: boolean;
+  notCountedReason: string | null;
+  step: string;
+  byAdmin: boolean;
 }
 
 export interface TaskType {

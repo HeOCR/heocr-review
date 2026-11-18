@@ -14,6 +14,7 @@ export interface BatchRow {
   pass2_reviewer_set_at?: string | null;
   two_typings_groups?: string | null;
   two_typings_set_at?: string | null;
+  resolution?: string | null;
 }
 
 export interface ProposalRow {
@@ -57,6 +58,7 @@ export function toBatch(row: BatchRow): BatchRecord & { status: string } {
       pass2ReviewerSetAt: row.pass2_reviewer_set_at ?? null,
       twoTypingsGroups: row.two_typings_groups ? (JSON.parse(row.two_typings_groups) as string[]) : [],
       twoTypingsSetAt: row.two_typings_set_at ?? null,
+      resolution: row.resolution === "volunteer_v1" ? "volunteer_v1" : "single",
     },
   };
 }
@@ -101,7 +103,8 @@ export const BATCH_SQL = `SELECT id, task_type, title, source_json, min_reviewer
   (SELECT s.pass2_reviewer FROM batch_settings s WHERE s.batch_id = batches.id) AS pass2_reviewer,
   (SELECT s.updated_at FROM batch_settings s WHERE s.batch_id = batches.id) AS pass2_reviewer_set_at,
   (SELECT s.two_typings_groups FROM batch_settings s WHERE s.batch_id = batches.id) AS two_typings_groups,
-  (SELECT s.two_typings_set_at FROM batch_settings s WHERE s.batch_id = batches.id) AS two_typings_set_at
+  (SELECT s.two_typings_set_at FROM batch_settings s WHERE s.batch_id = batches.id) AS two_typings_set_at,
+  (SELECT s.resolution FROM batch_settings s WHERE s.batch_id = batches.id) AS resolution
   FROM batches`;
 export const DECISION_SQL = `SELECT id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at,
   decided_on, superseded_at FROM decisions`;
@@ -123,6 +126,20 @@ export const CONSENSUS_EXPORT_SQL = {
   maintainer: `SELECT m.decision_id FROM maintainer_decisions m JOIN decisions d ON d.id = m.decision_id
     JOIN proposals p ON p.id = d.proposal_id WHERE p.batch_id = ?1`,
 };
+
+/** line_verify volunteer_v1: every decision's verify_votes row in a batch. */
+export const VERIFY_VOTES_SQL = `SELECT v.decision_id, v.counted, v.not_counted_reason, v.step, v.by_admin FROM verify_votes v
+  JOIN proposals p ON p.id = v.proposal_id WHERE p.batch_id = ?1`;
+
+export interface VerifyVoteRow {
+  decision_id: string;
+  counted: number;
+  not_counted_reason: string | null;
+  step: string;
+  by_admin: number;
+}
+
+export const toVerifyVote = (r: VerifyVoteRow) => ({ decisionId: r.decision_id, counted: r.counted === 1, notCountedReason: r.not_counted_reason, step: r.step, byAdmin: r.by_admin === 1 });
 
 export const EXPORT_SQL = {
   batch: `${BATCH_SQL} WHERE id = ?1`,

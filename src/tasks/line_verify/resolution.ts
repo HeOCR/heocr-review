@@ -3,6 +3,9 @@
  * agree, and which step it is at. Pure; the Worker reads and writes D1 (src/worker/verify_resolution.ts).
  */
 
+/** Whose standing counts: the mid-century volunteer batch's gold (as H). */
+export const GATE_BATCH_ID = "newprinted_midcentury_volunteers_v0";
+
 /** line_fold_v1 (heocr-eval, tasks/eval-domains/profiles/line_fold_v1.json), ported exactly. */
 export const LINE_FOLD_V1_SHA256 = "2e2627104be4f27dc3204787dd3ff4f8591d95d1d96294c65833d2773041d317";
 const FOLDS: Record<string, string> = { "\u05be": "-", "\u05f3": "'", "\u05f4": '"', "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u2014": "\u2013" };

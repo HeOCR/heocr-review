@@ -1,6 +1,6 @@
 # line_verify volunteer resolution, v1 (P-hist test batches)
 
-Status: **draft for heocr-eval's and heocr-lead's check** (2026-11-18). The rules are heocr-eval's final scheme of
+Status: **draft for heocr-eval's and heocr-lead's check** (2026-11-18); implemented in the same PR. The rules are heocr-eval's final scheme of
 2026-11-18, after lead's leans; this file says how the app implements them. The code follows in the same PR.
 
 ## Where it applies
@@ -83,12 +83,13 @@ that moment. Progress counts a line as covered once it is resolved or unresolved
 v1.3 plus, for a volunteer_v1 batch:
 
 - every current decision is its own record (as today), with `reviewer` the pseudonymous rv_… id, and new fields
-  `counted` (boolean), `not_counted_reason` (`fewer_than_20_gold`, `below_floor` or `excluded_by_admin`; only when
-  not counted) and `step` (`pass1`, `pass2`, `third`, `maintainer`, `fourth`, or `uncounted` when it did not count);
+  `counted` (boolean), `not_counted_reason` (`fewer_than_20_gold`, `below_floor` or `excluded_by_admin`, or
+  `not_recorded` for a decision with no verify_votes row; only when not counted) and `step` (`pass1`, `pass2`,
+  `third`, `maintainer`, `fourth`, or `uncounted` when it did not count);
 - a `lines` list: per line, `item_id`, `kind`, `resolution` (`agreed`, `majority`, `to_maintainer`, `unresolved`,
-  `pending`), `reference` (`{ class: "text" | "pointed" | action, text }` when resolved, else null) and the
-  `decision_id`s that formed the pair;
-- the header gains `resolution: "volunteer_v1"`, the gate batch id and `line_fold_v1`'s sha256.
+  `pending`), `reference` (`{ class: "text" | "pointed" | action, text }` when resolved, else null) and `pair`, the
+  two `decision_id`s that formed it (null when not resolved);
+- the header gains `resolution: "volunteer_v1"`, `gate_batch_id` and `line_fold_v1_sha256`.
 
 The app's results are for routing; eval's ingest may recompute them from the records.
 

@@ -38,8 +38,13 @@ export const DECISIONS_SCHEMA = "line_verify_decisions.v1.1";
 export const DECISIONS_SCHEMA_V12 = "line_verify_decisions.v1.2";
 /** Decisions on a v1.2 batch: v1.2 plus `kind` on every decision, `box_reason`, and the pages list. */
 export const DECISIONS_SCHEMA_V13 = "line_verify_decisions.v1.3";
+/** Decisions on a volunteer_v1 batch (docs/specs/line_verify_volunteer_resolution_v1.md): v1.3 plus counted, step, lines. */
+export const DECISIONS_SCHEMA_V14 = "line_verify_decisions.v1.4";
+export const VOTE_STEPS = ["pass1", "pass2", "third", "maintainer", "fourth", "uncounted"] as const;
+export const NOT_COUNTED_REASONS = ["fewer_than_20_gold", "below_floor", "excluded_by_admin", "not_recorded"] as const;
+export const LINE_RESOLUTIONS = ["agreed", "majority", "to_maintainer", "unresolved", "pending"] as const;
 /** Every version validates; a v1 file may not use `pointed_print`, only v1.2+ carries `pass`, only v1.3 `kind`. */
-export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA, DECISIONS_SCHEMA_V12, DECISIONS_SCHEMA_V13] as const;
+export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA, DECISIONS_SCHEMA_V12, DECISIONS_SCHEMA_V13, DECISIONS_SCHEMA_V14] as const;
 export const KINDS = ["verify", "type"] as const;
 /** A typed line's box problems (as in H): exported as decision not_on_page with this box_reason. */
 export const BOX_REASONS = ["not_one_line", "no_text", "continued"] as const;
@@ -150,6 +155,10 @@ export interface LvDecision {
   decision: (typeof DECISION_VALUES)[number] | (typeof PASS2_DECISION_VALUES)[number] | (typeof TYPE_DECISION_VALUES)[number];
   /** v1.3 only, and required there. */
   kind?: (typeof KINDS)[number];
+  /** v1.4 (volunteer_v1 batches): whether it counted, why not, and its routing step. */
+  counted?: boolean;
+  not_counted_reason?: (typeof NOT_COUNTED_REASONS)[number];
+  step?: (typeof VOTE_STEPS)[number];
   /** v1.3: exactly on not_on_page. */
   box_reason?: (typeof BOX_REASONS)[number];
   text?: string;
@@ -388,7 +397,8 @@ export interface ItemRef {
 export function decisionsFileProblems(payload: unknown, batchId: string, items: ItemRef[]): string[] {
   if (!isObj(payload) || !oneOf(DECISIONS_SCHEMAS, payload.schema_version)) return [`schema_version must be one of ${join(DECISIONS_SCHEMAS)}`];
   const allowed: readonly string[] = payload.schema_version === "line_verify_decisions.v1" ? DECISION_VALUES_V1 : DECISION_VALUES;
-  const v13 = payload.schema_version === DECISIONS_SCHEMA_V13;
+  const v14 = payload.schema_version === DECISIONS_SCHEMA_V14;
+  const v13 = payload.schema_version === DECISIONS_SCHEMA_V13 || v14;
   const v12 = payload.schema_version === DECISIONS_SCHEMA_V12 || v13;
   const problems: string[] = [];
   if (v13) {
@@ -422,6 +432,25 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
       problems.push("blind_second_pass must give the list's count and sha256");
     } else if (list.count !== items.filter((i) => i.blind).length) problems.push("blind_second_pass.count is not the number of blind lines");
   }
+  if (v14) {
+    if (payload.resolution !== "volunteer_v1") problems.push("resolution must be volunteer_v1");
+    if (!nonEmpty(payload.gate_batch_id)) problems.push("gate_batch_id must name the standing batch");
+    if (!(typeof payload.line_fold_v1_sha256 === "string" && SHA256.test(payload.line_fold_v1_sha256))) problems.push("line_fold_v1_sha256 must be a SHA-256");
+    const exported = new Set(Array.isArray(payload.decisions) ? (payload.decisions as Obj[]).map((d) => d.decision_id) : []);
+    const knownItems = new Set(items.map((i) => i.item_id));
+    if (!Array.isArray(payload.lines)) problems.push("lines must list every line's resolution");
+    else {
+      for (const l of payload.lines as unknown[]) {
+        const line: Obj = isObj(l) ? l : {};
+        const at = `line ${JSON.stringify(line.item_id ?? null)}`;
+        if (!(typeof line.item_id === "string" && knownItems.has(line.item_id))) problems.push(`${at}: not an item of ${batchId}`);
+        if (!oneOf(LINE_RESOLUTIONS, line.resolution)) problems.push(`${at}: resolution must be one of ${join(LINE_RESOLUTIONS)}`);
+        const resolved = line.resolution === "agreed" || line.resolution === "majority";
+        if (resolved !== (isObj(line.reference) && Array.isArray(line.pair))) problems.push(`${at}: a reference and its pair come exactly with agreed or majority`);
+        if (Array.isArray(line.pair) && !(line.pair.length === 2 && line.pair.every((id) => exported.has(id)))) problems.push(`${at}: pair must name two exported decisions`);
+      }
+    }
+  }
   if (payload.batch_id !== batchId) problems.push("batch_id must match the items' batch_id");
   if (!Array.isArray(payload.decisions)) return [...problems, "decisions must be a list"];
   const known = new Map(items.map((i) => [i.item_id, i]));
@@ -446,6 +475,16 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     if (v13 && !oneOf(KINDS, d.kind)) problems.push(`${label}: kind must be one of ${join(KINDS)}`);
     else if (v13 && item?.kind && d.kind !== item.kind) problems.push(`${label}: kind must be the item's (${item.kind})`);
     if (!v13) for (const key of ["kind", "box_reason"]) if (key in d) problems.push(`${label}: ${key} is a ${DECISIONS_SCHEMA_V13} field`);
+    if (v14) {
+      if (typeof d.counted !== "boolean") problems.push(`${label}: counted must be a boolean`);
+      if (!oneOf(VOTE_STEPS, d.step)) problems.push(`${label}: step must be one of ${join(VOTE_STEPS)}`);
+      else if ((d.counted === true) !== (d.step !== "uncounted")) problems.push(`${label}: step is uncounted exactly when counted is false`);
+      if (d.counted === false ? !oneOf(NOT_COUNTED_REASONS, d.not_counted_reason) : "not_counted_reason" in d) {
+        problems.push(`${label}: not_counted_reason (${join(NOT_COUNTED_REASONS)}) comes exactly with counted: false`);
+      }
+    } else {
+      for (const key of ["counted", "step", "not_counted_reason"]) if (key in d) problems.push(`${label}: ${key} is a ${DECISIONS_SCHEMA_V14} field`);
+    }
     const typedLine = v13 && d.kind === "type";
     const pass2 = v12 && d.pass === 2;
     if (v12 && (pass2 ? typeof d.same_reviewer !== "boolean" : "same_reviewer" in d)) problems.push(`${label}: same_reviewer is a boolean on pass-2 decisions only`);

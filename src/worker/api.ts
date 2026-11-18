@@ -15,6 +15,8 @@ import type { Env } from "./env";
 import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
+import type { LineRouting } from "../tasks/line_verify/resolution";
+import { isVolunteerV1, openFor, recordVolunteerDecision, routingOf, volunteerExtras } from "./verify_resolution";
 import {
   afterLineDecision,
   assertConsensusEnabled,
@@ -176,7 +178,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
       taskType: b.taskType,
       taskLabel: type.label,
       title: b.title,
-      progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now),
+      progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
       subsets: await subsetsOf(ctx.env.DB, b.id),
     });
   }
@@ -203,7 +205,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
     filter = await loadSubset(ctx.env.DB, batch.id, subsetId);
     if (!filter) throw new HttpError(404, "not_found");
   }
-  return json(await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter));
+  return json(await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, isAdmin(ctx.env, reviewer.id)));
 }
 
 async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
@@ -265,6 +267,15 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   // Volunteer lines: a decision is final (only a reviewer's first decision on a line could count). So is a blind
   // second pass: typed before the reviewer could see the candidate, it must not change once they can.
   if (existing && (isConsensus(batch) || taskType(batch.taskType)!.finalDecision?.(proposal))) throw new HttpError(409, "decided", "this line is decided");
+  // A volunteer_v1 line (line_verify volunteer resolution): decisions are final, and only its routing step's
+  // reviewers may decide it (the admin alone at the maintainer step; anyone else at the fourth).
+  const admin = isAdmin(ctx.env, reviewer.id);
+  let volunteerBefore: LineRouting | null = null;
+  if (isVolunteerV1(batch)) {
+    if (existing) throw new HttpError(409, "decided", "this line is decided");
+    volunteerBefore = await routingOf(db, proposal);
+    if (!openFor(volunteerBefore, admin)) throw new HttpError(409, "not_open", "this line is not open to you");
+  }
   let decisionId: string;
   if (
     existing &&
@@ -289,6 +300,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
       db.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id),
     ]);
   }
+  if (volunteerBefore) await recordVolunteerDecision(db, batch, proposal, decisionId, reviewer.id, admin, volunteerBefore, iso(ctx.now));
   // The page is decided: its draft is done with (page_review).
   await db.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
   if (isConsensus(batch)) {
@@ -299,7 +311,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     decisionId,
     value: normalized.value,
     text: normalized.text,
-    progress: await progressFor(db, batch, reviewer.id, ctx.now),
+    progress: await progressFor(db, batch, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
   });
 }
 
@@ -356,7 +368,7 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
     .bind(reviewer.id, proposal.id, iso(ctx.now))
     .run();
   if (isConsensus(batch)) return json({ ok: true, progress: await consensusProgress(ctx.env.DB, batch, reviewer.id, true) });
-  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
+  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)) });
 }
 
 export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
@@ -367,7 +379,7 @@ export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
   await ctx.env.DB.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id IN (SELECT id FROM proposals WHERE batch_id = ?2)")
     .bind(reviewer.id, batch.id)
     .run();
-  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now) });
+  return json({ ok: true, progress: await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)) });
 }
 
 async function requireAdmin(ctx: Ctx): Promise<ReviewerRow> {
@@ -382,7 +394,7 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
   for (const batch of await listBatches(ctx.env.DB, false)) {
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
-    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? await volunteerExtras(ctx.env.DB, batch.id) : {};
     const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
     const perReviewer = new Map<string, number>();
     for (const d of rows.decisions) if (d.supersededAt === null) perReviewer.set(d.reviewerId, (perReviewer.get(d.reviewerId) ?? 0) + 1);
@@ -405,7 +417,7 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   if (!batch) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
-  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : {};
+  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? await volunteerExtras(ctx.env.DB, batch.id) : {};
   const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
   return json({
     counts: result.counts,
