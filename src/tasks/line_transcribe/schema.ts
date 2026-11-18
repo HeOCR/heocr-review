@@ -275,12 +275,14 @@ export interface HExportLine {
 /**
  * A split line: the piece whose reference is the typed line (`first`), and the pieces whose reference is continued
  * that join it. A continued piece joins the nearest piece to its right in the same row that is not itself
- * continued (by geometry: box order is not reliable inside a fragmented row).
+ * continued or another box problem (by geometry: box order is not reliable inside a fragmented row).
  */
 export interface HExportJoin {
   page_key: string;
+  /** The piece the line is typed in; null when no piece in the row can hold it (reason "unattached": re-box). */
   first: number | null;
   pieces: number[];
+  reason: "unattached" | null;
 }
 
 export interface HExportPageFlag {

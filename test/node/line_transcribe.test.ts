@@ -79,18 +79,23 @@ describe("box problems", () => {
     expect(agreementAction("edit")).toBe("edit");
   });
 
-  it("join a continued piece to the nearest piece on its right in the row, whatever the box order", () => {
-    // One row split in three, numbered out of order; a second row whole; a stray continued piece with nothing to its right.
+  it("join a continued piece to the nearest piece on its right in the row that can hold the line, whatever the box order", () => {
+    type Role = "continued" | "box_problem" | "line";
+    const L = (i: number, box: [number, number, number, number], role: Role) => ({ page_key: "p", i, box, role });
     const lines = [
-      { page_key: "p", i: 0, box: [100, 100, 300, 160] as [number, number, number, number], continued: true },
-      { page_key: "p", i: 1, box: [650, 105, 900, 165] as [number, number, number, number], continued: false },
-      { page_key: "p", i: 2, box: [320, 98, 630, 158] as [number, number, number, number], continued: true },
-      { page_key: "p", i: 3, box: [100, 200, 900, 260] as [number, number, number, number], continued: false },
-      { page_key: "p", i: 4, box: [920, 300, 980, 360] as [number, number, number, number], continued: true },
+      // One row split in three, numbered out of order.
+      L(0, [100, 100, 300, 160], "continued"),
+      L(1, [650, 105, 900, 165], "line"),
+      L(2, [320, 98, 630, 158], "continued"),
+      // A whole row.
+      L(3, [100, 200, 900, 260], "line"),
+      // A continued piece whose right neighbour was marked no text: unattached, not joined to it or across rows.
+      L(4, [100, 300, 400, 360], "continued"),
+      L(5, [450, 300, 900, 360], "box_problem"),
     ];
     expect(joinsOf(lines)).toEqual([
-      { page_key: "p", first: null, pieces: [4] },
-      { page_key: "p", first: 1, pieces: [0, 2] },
+      { page_key: "p", first: null, pieces: [4], reason: "unattached" },
+      { page_key: "p", first: 1, pieces: [0, 2], reason: null },
     ]);
   });
 });

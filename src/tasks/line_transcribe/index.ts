@@ -147,21 +147,23 @@ function referenceReason(ds: { value: string }[]): BoxReason | "mixed" | null {
 
 /**
  * Split lines: each piece whose reference is continued joins the nearest piece to its right in the same row (boxes
- * overlapping by at least half the shorter one's height) whose reference is not continued. Hebrew runs right to
- * left, so the line's first piece is its rightmost; box order is not used (unreliable inside a fragmented row).
+ * overlapping by at least half the shorter one's height) that can hold the line: its reference is not a box problem
+ * (continued, no text, not one line), or it is still pending. Hebrew runs right to left, so the line's first piece
+ * is its rightmost; box order is not used (unreliable inside a fragmented row). A piece with no such piece is
+ * unattached (`first` null), never joined across rows: data-collection re-boxes it.
  */
-export function joinsOf(lines: { page_key: string; i: number; box: PixelBox; continued: boolean }[]): HExportJoin[] {
+export function joinsOf(lines: { page_key: string; i: number; box: PixelBox; role: "continued" | "box_problem" | "line" }[]): HExportJoin[] {
   const out: HExportJoin[] = [];
   const byPage = new Map<string, typeof lines>();
   for (const l of lines) byPage.set(l.page_key, [...(byPage.get(l.page_key) ?? []), l]);
   for (const [page_key, ls] of byPage) {
     const groups = new Map<number | null, number[]>();
-    for (const piece of ls.filter((l) => l.continued)) {
+    for (const piece of ls.filter((l) => l.role === "continued")) {
       const [x0, y0, x1, y1] = piece.box;
       const cx = (x0 + x1) / 2;
       let best: { i: number; d: number } | null = null;
       for (const t of ls) {
-        if (t.continued || t.i === piece.i) continue;
+        if (t.role !== "line" || t.i === piece.i) continue;
         const overlap = Math.min(y1, t.box[3]) - Math.max(y0, t.box[1]);
         if (overlap < 0.5 * Math.min(y1 - y0, t.box[3] - t.box[1])) continue;
         const tx = (t.box[0] + t.box[2]) / 2;
@@ -171,7 +173,7 @@ export function joinsOf(lines: { page_key: string; i: number; box: PixelBox; con
       const first = best?.i ?? null;
       groups.set(first, [...(groups.get(first) ?? []), piece.i]);
     }
-    for (const [first, pieces] of groups) out.push({ page_key, first, pieces: pieces.sort((a, b) => a - b) });
+    for (const [first, pieces] of groups) out.push({ page_key, first, pieces: pieces.sort((a, b) => a - b), reason: first === null ? "unattached" : null });
   }
   return out.sort((a, b) => a.page_key.localeCompare(b.page_key) || (a.first ?? -1) - (b.first ?? -1));
 }
@@ -246,7 +248,14 @@ function exportFile(batch: BatchRecord, resolved: ResolvedProposal[], extra: Exp
     strata,
     decisions,
     lines,
-    joins: joinsOf(lines.map((l) => ({ page_key: l.page_key, i: l.i, box: l.box, continued: l.reference?.box_reason === "continued" }))),
+    joins: joinsOf(
+      lines.map((l) => ({
+        page_key: l.page_key,
+        i: l.i,
+        box: l.box,
+        role: l.reference?.box_reason === "continued" ? "continued" : l.reference?.action === "not_on_page" ? "box_problem" : "line",
+      })),
+    ),
     page_flags: (extra.pageFlags ?? []).map(
       (f): HExportPageFlag => ({
         page_key: f.pageKey,

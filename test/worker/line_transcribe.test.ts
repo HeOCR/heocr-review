@@ -272,7 +272,7 @@ describe("handwriting transcription", () => {
     expect(f.lines.find((l) => l.page_key === P1 && l.i === 0)!.reference).toEqual({ action: "not_on_page", text: null, box_reason: "continued" });
     expect(f.lines.find((l) => l.page_key === P1 && l.i === 1)!.reference).toEqual({ action: "not_on_page", text: null, box_reason: "mixed" });
     // Line 0 is a piece with no piece to its right in its row (the fixture's rows are whole lines).
-    expect(f.joins).toEqual([{ page_key: P1, first: null, pieces: [0] }]);
+    expect(f.joins).toEqual([{ page_key: P1, first: null, pieces: [0], reason: "unattached" }]);
   });
 
   it("a volunteer reports text outside the boxes on a page they were served; it goes to the maintainer's queue and the export", async () => {

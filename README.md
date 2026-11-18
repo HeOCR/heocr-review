@@ -264,8 +264,8 @@ Page images are stored upright with EXIF orientation applied, because boxes are 
   - *no text* (`no_text`): a false box;
   - *box doesn't hold one line* (`not_on_page`): two lines merged in one box.
 
-  The export's `joins` attaches each continued piece to the nearest piece on its right in the same row, by geometry
-  and not by box order. The line band shows the whole width of the page, so the rest of a split row is in view.
+  The export's `joins` attaches each continued piece to the nearest piece on its right in the same row that isn't a
+  box problem, by geometry and not by box order. A piece with none is `unattached` and goes back for re-boxing. The line band shows the whole width of the page, so the rest of a split row is in view.
 - **Text outside the boxes:** a volunteer can report that the page has a text line no box covers. The report doesn't
   decide the line they are on. Reported pages wait in the maintainer's admin queue, drawn with their boxes, for him
   to confirm (re-box the page) or dismiss. Reports and answers go in the export's `page_flags`.
