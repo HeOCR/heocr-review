@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { settingProblem } from "../../scripts/batch-setting";
+import { settingProblem, twoTypingsProblem } from "../../scripts/batch-setting";
 import { blindListSha256, normalizeTypedDecision } from "../../src/tasks/line_verify";
 import { decisionsFileProblems } from "../../src/tasks/line_verify/schema";
 
@@ -71,6 +71,36 @@ describe("blind second pass decisions (v1.2)", () => {
   });
 });
 
+describe("typed lines (v1.3)", () => {
+  const T = "benyehuda_nli_aligned:x__p0003#L001";
+  const titems = [{ item_id: T, candidate_text: "", kind: "type" as const, blind: false }];
+  const tfile = (d: Record<string, unknown>) => ({
+    schema_version: "line_verify_decisions.v1.3",
+    batch_id: "b",
+    pass2_reviewer: { mode: "same", set_at: null },
+    blind_second_pass: { count: 0, sha256: blindListSha256([]), sha256_of: "x" },
+    two_typings: { groups: [], set_at: null },
+    pages: [{ page_id: "p", book_group: "early", kraken_lines: 1, resolved: 1, done: true }],
+    decisions: [{ decision_id: `decision:${T}:rv_1a2b3c4d`, item_id: T, reviewer: "rv_1a2b3c4d", pass: 1, kind: "type", decided_at: "2026-11-18", checked_by: "human", ...d }],
+  });
+  it.each([[{ decision: "typed", text: "שורה" }], [{ decision: "not_on_page", box_reason: "continued" }], [{ decision: "unreadable" }], [{ decision: "pointed_print", text: "שורה" }]])(
+    "accepts %j",
+    (d) => expect(decisionsFileProblems(tfile(d), "b", titems)).toEqual([]),
+  );
+  it.each([
+    [{ decision: "exact" }, "a typed line's decision must be one of"],
+    [{ decision: "not_on_page" }, "box_reason"],
+    [{ decision: "typed", text: "x", box_reason: "no_text" }, "box_reason"],
+    [{ decision: "typed", text: "x", candidate_sha256: "0".repeat(64) }, "no candidate_sha256"],
+    [{ decision: "typed", text: "x", kind: "verify" }, "kind must be the item's"],
+  ])("refuses %j", (d, message) => expect(decisionsFileProblems(tfile(d), "b", titems).join("\n")).toContain(message));
+  it("checks the pages list", () => {
+    const f = tfile({ decision: "unreadable" });
+    f.pages[0]!.done = false;
+    expect(decisionsFileProblems(f, "b", titems).join("\n")).toContain("pages:");
+  });
+});
+
 describe("batch-setting", () => {
   const row = { id: "b", task_type: "line_verify", pass2_reviewer: "same", updated_at: null, updated_by: null };
   it("changes pass2_reviewer on line_verify batches only, and says who", () => {
@@ -80,5 +110,15 @@ describe("batch-setting", () => {
     expect(settingProblem(row, "anyone", "x")).toContain("must be one of");
     expect(settingProblem({ ...row, task_type: "page_review" }, "other", "x")).toContain("line_verify batches only");
     expect(settingProblem(row, "other", " ")).toContain("--by");
+  });
+
+  it("switches two typings on for named book groups of a v1.2 batch only", () => {
+    const v12 = { ...row, schema_version: "line_verify_items.v1.2" };
+    expect(twoTypingsProblem(v12, "early", ["early", "later"], "lead")).toEqual({ groups: ["early"] });
+    expect(twoTypingsProblem(v12, "later, early,early", ["early", "later"], "lead")).toEqual({ groups: ["early", "later"] });
+    expect(twoTypingsProblem(v12, "none", ["early"], "lead")).toEqual({ groups: [] });
+    expect(twoTypingsProblem(v12, "middle", ["early"], "lead")).toMatchObject({ problem: expect.stringContaining("not book groups") });
+    expect(twoTypingsProblem({ ...row, schema_version: "line_verify_items.v1.1" }, "early", ["early"], "lead")).toMatchObject({ problem: expect.stringContaining("v1.2 batches only") });
+    expect(twoTypingsProblem(v12, "early", ["early"], "")).toMatchObject({ problem: expect.stringContaining("--by") });
   });
 });

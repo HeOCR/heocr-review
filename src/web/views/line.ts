@@ -106,6 +106,15 @@ const KEYS: [string, string, string][] = [
   ["P", "עמוד מלא", "page"],
 ];
 
+/** The keys of the typing screen's answers without text: [shown, e.code]. */
+const TYPING_KEYS: Record<string, [string, string]> = {
+  unreadable: ["U", "KeyU"],
+  misaligned: ["M", "KeyM"],
+  not_one_line: ["J", "KeyJ"],
+  no_text: ["T", "KeyT"],
+  continued: ["K", "KeyK"],
+};
+
 /** `startAt` opens one line first (link #p/<id>); then the queue continues. */
 export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
   const root = h("div", { class: "review lineverify" });
@@ -193,7 +202,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (editing) return editing.focus();
     if (!v || !current) return;
     const typing = v.mode === "type";
-    if (typing && current.mine) return; // a blind pass is final
+    if (typing && current.mine && v.pass === 2) return; // a blind pass is final
     const box = root.querySelector(".editbox") as HTMLElement;
     const area = h("textarea", {
       dir: "rtl",
@@ -205,7 +214,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       maxlength: 1000,
       "aria-label": "השורה המתוקנת / the corrected line",
     });
-    const mineText = (current.mine?.value === "edited" || current.mine?.value === "pointed_print") && current.mine.text !== null ? current.mine.text : null;
+    const mineText = (current.mine?.value === "edited" || current.mine?.value === "pointed_print" || current.mine?.value === "typed") && current.mine.text !== null ? current.mine.text : null;
     area.value = mineText ?? v.candidate; // "" on a blind pass: nothing to start from
     // The print is pointed and the candidate is not: correct the letters only; the decision is pointed_print.
     const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
@@ -270,7 +279,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       h(
         "div",
         { class: "row" },
-        h("button", { type: "button", class: "primary", onclick: save }, typing ? "שמירה (סופית) / Save (final) " : "שמירת התיקון / Save ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
+        h("button", { type: "button", class: "primary", onclick: save }, typing && v.pass === 2 ? "שמירה (סופית) / Save (final) " : typing ? "שמירה / Save " : "שמירת התיקון / Save ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
         typing ? null : h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
       ),
     );
@@ -281,8 +290,12 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     area.setSelectionRange(area.value.length, area.value.length);
   }
 
-  /** The blind second pass: the line, its context, a blank box to type it in, and no candidate. */
+  /**
+   * A line typed from a blank box: a typed line (no candidate) or any line's blind second pass. The line, its context,
+   * the box, and the answers that are not text (unreadable, and a typed line's box problems or a pass-2 misaligned).
+   */
   function renderTyping(p: ProposalView, v: LineVerifyView, mine: DecisionOption | undefined): void {
+    const final = v.pass === 2;
     const btn = (value: string, key: string, cls: string) => {
       const o = p.options.find((x) => x.value === value);
       return h("button", { type: "button", class: `act ${cls}`, onclick: () => void act(value), "data-value": value, title: o?.label.en ?? value }, h("span", {}, o?.label.he ?? value), h("kbd", { dir: "ltr" }, key));
@@ -296,18 +309,22 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         h(
           "header",
           { class: "meta" },
-          h("span", { class: "tag", title: "Blind second pass" }, "מעבר שני (עיוור)"),
+          final ? h("span", { class: "tag", title: "Blind second pass" }, "מעבר שני (עיוור)") : h("span", { class: "tag", title: "Typing" }, "הקלדה"),
           v.script ? h("span", { class: `tag script-${v.script.id}`, title: v.script.label.en }, v.script.label.he) : null,
           h("span", { class: "muted small title", dir: "auto" }, `${p.itemTitle} · שורה ${v.lineIndex}`),
         ),
         h(
           "p",
           { class: "ask" },
-          "הקלידו את השורה המסומנת כפי שהיא בסריקה, אות באות. הטקסט נשמר סופית.",
-          h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Type the marked line as the scan shows it, letter by letter. Saving is final."),
+          `הקלידו את השורה המסומנת כפי שהיא בסריקה, אות באות${final ? ". הטקסט נשמר סופית." : ", גם כותרת, מספר עמוד או מילת קישור."}`,
+          h(
+            "span",
+            { class: "muted small block", lang: "en", dir: "ltr" },
+            final ? "Type the marked line as the scan shows it, letter by letter. Saving is final." : "Type the marked line as the scan shows it, letter by letter: running heads, page numbers and catchwords too.",
+          ),
         ),
         h("div", { class: "linebox" }),
-        mine ? h("p", { class: "mine" }, `ההחלטה שלך (סופית): ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "") : null,
+        mine ? h("p", { class: "mine" }, `ההחלטה שלך${final ? " (סופית)" : ""}: ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "", final ? "" : " · החלטה חדשה תחליף אותה.") : null,
         h("div", { class: "editbox", hidden: true }),
         h("p", { class: "msg", role: "status" }),
         h("div", { class: "ctxbox" }),
@@ -320,8 +337,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       h(
         "nav",
         { class: "actions six" },
-        btn("unreadable", "U", "bad"),
-        btn("misaligned", "M", "bad"),
+        ...p.options.filter((o) => !o.withText).map((o) => btn(o.value, TYPING_KEYS[o.value]?.[0] ?? "", "bad")),
         h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
       ),
       h(
@@ -335,7 +351,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     );
     renderStrip();
     renderContext();
-    if (!mine) startEdit();
+    if (!mine || !final) startEdit();
   }
 
   function renderStrip(): void {
@@ -550,8 +566,14 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       KeyX: () => setZoom(-1),
       KeyP: togglePage,
     };
-    // A blind pass has no verdict keys: Enter or E goes back to the typing box.
-    if (typing) for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN"]) actions[k] = startEdit;
+    // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
+    if (typing) {
+      for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = startEdit;
+      for (const o of current.options) {
+        const key = TYPING_KEYS[o.value];
+        if (key) actions[key[1]] = () => void act(o.value);
+      }
+    }
     const fn = actions[e.code];
     if (fn) {
       e.preventDefault();
