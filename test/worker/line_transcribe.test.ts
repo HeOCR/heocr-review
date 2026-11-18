@@ -100,7 +100,8 @@ async function serveUntil(c: Client, externalId: string): Promise<number> {
 
 describe("handwriting transcription", () => {
   it("is served to the maintainer only until a volunteer has accepted terms that cover typing handwritten pages", async () => {
-    devTerms = undefined;
+    // Terms later than any the volunteer accepted: not served.
+    devTerms = "2099-01-01-v1";
     const a = await counting("t-terms");
     const list = await call<{ batches: { id: string }[] }>(a, "GET", "/api/batches");
     expect(list.body.batches.map((b) => b.id)).not.toContain(H);
@@ -113,6 +114,10 @@ describe("handwriting transcription", () => {
     await m.acceptTerms();
     expect((await call<{ batches: { id: string }[] }>(m, "GET", "/api/batches")).body.batches.map((b) => b.id)).toContain(H);
     expect((await call(m, "GET", `/api/batches/${H}/next`)).status).toBe(200);
+    // The real requirement: the current terms (2026-11-18-v1, heocr-review#21) cover typing, so a volunteer on them is served.
+    devTerms = undefined;
+    const v = await counting("t-terms-now");
+    expect((await call<{ batches: { id: string }[] }>(v, "GET", "/api/batches")).body.batches.map((x) => x.id)).toContain(H);
   });
 
   it("is open to anyone, but only volunteers at the mid-century floor count toward agreement", async () => {
