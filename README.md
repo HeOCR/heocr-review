@@ -389,8 +389,10 @@ The deploy script:
 - applies migrations and builds the frontend;
 - deploys with `GOOGLE_CLIENT_ID` as a var;
 - reads the secrets from `~/.config/heocr/<worker>.secrets.json` (`heocr-review.secrets.json`) (mode 0600, generated on the first
-  deploy): `SESSION_SECRET`, `REVIEWER_ID_SECRET` and `ADMIN_REVIEWER_IDS`. Back the file up: if
-  `REVIEWER_ID_SECRET` changes, every reviewer gets a new id.
+  deploy): `SESSION_SECRET`, `REVIEWER_ID_SECRET` and `ADMIN_REVIEWER_IDS`. If `REVIEWER_ID_SECRET` changes,
+  every reviewer gets a new id. **Recovery source:** the maintainer's 1Password, Private vault, secure note
+  "HeOCR review Worker secrets", one field per key (backed up and checked against the file on 2026-11-19). If the
+  file is lost, the maintainer restores it from there (mode 0600); never generate new ones for production.
 
 The admin is the maintainer's reviewer id, as `ADMIN_REVIEWER_IDS` in that file. It appears under *Settings* after
 signing in; add it there and redeploy. The Google OAuth client must list the Worker's origin as an authorised
