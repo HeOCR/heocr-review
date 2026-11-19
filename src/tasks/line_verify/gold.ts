@@ -169,6 +169,7 @@ export function goldImport(file: GoldFile): { items: ImportItem[]; proposals: Im
     const context = contextBoxOf(g.box, page);
     const candidate = g.kind === "verify" ? g.prefill_shown! : "";
     const gold: GoldMark = { gold_id: g.gold_id, answer: g.answer, planted_error: g.planted_error };
+    const precheck = goldPrecheck(g.gold_id, g.kind);
     const payload: LineVerifyPayload & { gold: GoldMark } = {
       page_id: page.page_id,
       line_index: g.i,
@@ -186,7 +187,7 @@ export function goldImport(file: GoldFile): { items: ImportItem[]; proposals: Im
       pass: 1,
       kind: g.kind,
       blind: false,
-      precheck: null,
+      precheck,
       page: {
         source: SOURCE_AS(page.source) as LineVerifyPayload["page"]["source"],
         book_id: page.book_id,
@@ -213,7 +214,7 @@ export function goldImport(file: GoldFile): { items: ImportItem[]; proposals: Im
       payload: payload as unknown as Record<string, unknown>,
       pageBox: fraction(g.box, page),
       contextBox: fraction(context, page),
-      contentKey: { gold_id: g.gold_id, page_sha256: page.sha256, box: g.box, context_box: context, candidate_text: candidate, kind: g.kind, answer: g.answer },
+      contentKey: { gold_id: g.gold_id, page_sha256: page.sha256, box: g.box, context_box: context, candidate_text: candidate, kind: g.kind, answer: g.answer, precheck },
     };
   });
   return { items, proposals };
@@ -222,16 +223,51 @@ export function goldImport(file: GoldFile): { items: ImportItem[]; proposals: Im
 // ---------------------------------------------------------------------------------------------------------------
 // Serving, grading and standing
 
-/** The reviewer's schedule seed in [0, 1): the first 32 bits of sha256("phist_gold|" + reviewer_id). */
-export const scheduleSeed = (reviewerId: string) => parseInt(sha256Hex(`phist_gold|${reviewerId}`).slice(0, 8), 16) / 2 ** 32;
+/** A seeded number in [0, 1): the first 32 bits of sha256(key). */
+const unit = (key: string) => parseInt(sha256Hex(key).slice(0, 8), 16) / 2 ** 32;
+
+/**
+ * The reviewer's gold position in one block of the schedule, seeded per block (heocr-eval, #33 review): the same
+ * offset in every block would let a reviewer learn where gold falls. `block` names the phase and the block's number.
+ */
+export const blockOffset = (reviewerId: string, block: string, size: number) => Math.floor(unit(`phist_gold|${reviewerId}|${block}`) * size);
 
 /**
  * Whether the reviewer's n-th line (0-based; n counts their decisions in all volunteer_v1_1 batches, gold included)
  * is a gold line: one at a seeded offset in each block of FRONT_BLOCK while n < FRONT_LINES, then in each BLOCK.
  */
-export function goldDue(n: number, seed: number): boolean {
-  if (n < FRONT_LINES) return n % FRONT_BLOCK === Math.floor(seed * FRONT_BLOCK);
-  return (n - FRONT_LINES) % BLOCK === Math.floor(seed * BLOCK);
+export function goldDue(n: number, reviewerId: string): boolean {
+  if (n < FRONT_LINES) return n % FRONT_BLOCK === blockOffset(reviewerId, `f${Math.floor(n / FRONT_BLOCK)}`, FRONT_BLOCK);
+  const m = n - FRONT_LINES;
+  return m % BLOCK === blockOffset(reviewerId, `r${Math.floor(m / BLOCK)}`, BLOCK);
+}
+
+/**
+ * The agent pre-check ("look here") on the P-hist test lines, measured on phist_holdout_v2_2page (2026-11-19): 134 of
+ * its 615 verify lines carry one (typed lines never do), with this mix of reasons. A gold verify line carries one at
+ * the same rate and mix, seeded by its gold_id, so the note's absence does not mark gold (heocr-eval, #33 review).
+ */
+export const PRECHECK_RATE = 134 / 615;
+export const PRECHECK_MIX: [string[], number][] = [
+  [["spelling"], 45],
+  [["edge_mismatch"], 30],
+  [["digits"], 22],
+  [["edge_mismatch", "spelling"], 15],
+  [["digits", "spelling"], 10],
+  [["edge_mismatch", "digits", "spelling"], 7],
+  [["edge_mismatch", "digits"], 5],
+];
+
+/** A gold verify line's pre-check (null for most, and always for typed lines). */
+export function goldPrecheck(goldId: string, kind: "verify" | "type"): { reasons: string[] } | null {
+  if (kind !== "verify" || unit(`phist_gold_precheck|${goldId}`) >= PRECHECK_RATE) return null;
+  const total = PRECHECK_MIX.reduce((a, [, w]) => a + w, 0);
+  let x = unit(`phist_gold_precheck_reasons|${goldId}`) * total;
+  for (const [reasons, w] of PRECHECK_MIX) {
+    if (x < w) return { reasons };
+    x -= w;
+  }
+  return { reasons: PRECHECK_MIX[0]![0] };
 }
 
 /** The order in which a reviewer meets the gold lines: by sha256("phist_gold|" + reviewer_id + "|" + gold_id). */

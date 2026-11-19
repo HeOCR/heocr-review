@@ -35,7 +35,10 @@ to `single` and `volunteer_v1`. Both P-hist test batches move to it. They have 0
   that marks it as gold.
   - A `verify` gold line shows `prefill_shown` as its candidate, with the planted error where there is one.
   - A `type` gold line shows the blank box.
-  - The same options apply, and no pre-check note is shown.
+  - The same options apply. A pre-check note ("look here") is shown as on the test lines: a `verify` gold line carries
+    one at the test lines' rate (134 of 615 verify lines on phist_holdout_v2_2page) and reason mix, seeded by its
+    gold_id. A `type` gold line has none, like a typed test line. Its provenance is `none`, the value the importer
+    stores for a typed test line whose bundle provenance is null.
   - Its context box follows the bundles' rule: the line box widened by 1.5 line heights above and below, clamped to the
     page. Measured on the P-hist v2 bundle, the median is 1.5 above and 1.5 below, at the line's own width.
 - **Page metadata:** each gold line carries its page's entry from the file's `pages` block (source, book, title, page
@@ -50,7 +53,8 @@ Each reviewer has one gold schedule across all `volunteer_v1_1` batches, seeded 
 
 - **When:** when `next` would serve the reviewer their n-th line in a `volunteer_v1_1` batch (n counts their decisions
   in all such batches, gold included), it serves a gold line instead if n falls on the schedule.
-  - **Front-loaded:** for a reviewer's first 75 lines, one in each block of 5, at a seeded offset in the block. That
+  - **Front-loaded:** for a reviewer's first 75 lines, one in each block of 5, at an offset seeded per reviewer and
+    per block (`sha256("phist_gold|" + reviewer_id + "|" + block)`), so the position varies from block to block. That
     gives 15 gold lines by line 75, the second gate's minimum.
   - **Then:** one in each block of 15, at a seeded offset in the block.
   - The 65 lines last a reviewer about 790 lines.
