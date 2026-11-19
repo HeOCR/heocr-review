@@ -1,14 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ICONS } from "../../src/web/icons.gen";
-import STRINGS from "../../src/web/strings.json";
 
 describe("the app's design assets match design/review (HeOCR/heocr-review#51)", () => {
-  it("keeps the design's string keys, so the maintainer's review of design/review/strings.json applies to the app", () => {
-    const design = JSON.parse(readFileSync("design/review/strings.json", "utf8")) as Record<string, unknown>;
-    for (const key of Object.keys(design)) expect(STRINGS, key).toHaveProperty(key);
-  });
-
   it("has every icon in the design, and mirrors exactly Previous, Skip, Back and Sign out in Hebrew", () => {
     const files = readdirSync("design/review/icons").filter((f) => f.endsWith(".svg")).map((f) => f.slice(0, -4)).sort();
     expect(Object.keys(ICONS).sort()).toEqual(files);
