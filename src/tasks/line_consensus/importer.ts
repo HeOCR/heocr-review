@@ -19,6 +19,7 @@ import {
   LINE_ITEMS_FILE,
   MAINTAINER_FILE,
   REGISTERED_SHA256,
+  SUPERSEDED_FILES,
   VOLUNTEER_BATCH_ID,
   aiFlagsProblems,
   exclusionKeys,
@@ -85,7 +86,7 @@ function aiIndex(ai: AiFlagsFile | undefined): Map<string, { flagged: Set<number
 export const lineConsensusImporter: TaskImporter = {
   taskType: TASK_TYPE_ID,
   bundleFile: LINE_ITEMS_FILE,
-  sidecars: [EXCLUSIONS_FILE, MAINTAINER_FILE, AI_FILE, GOLD_FILE],
+  sidecars: [EXCLUSIONS_FILE, MAINTAINER_FILE, AI_FILE, GOLD_FILE, ...Object.keys(SUPERSEDED_FILES)],
   registeredSha256: REGISTERED_SHA256,
   mustBeRegistered: [LINE_ITEMS_FILE, EXCLUSIONS_FILE, GOLD_FILE],
   // One reading-resolution image per page; the browser cuts each line from it (no file per line: 18,000 crops
@@ -96,6 +97,7 @@ export const lineConsensusImporter: TaskImporter = {
 
   problems(raw: unknown, sidecars?: Record<string, unknown>): string[] {
     const out = lineItemsProblems(raw);
+    for (const [old, now] of Object.entries(SUPERSEDED_FILES)) if (sidecars?.[old] !== undefined) out.push(`${old} is superseded by ${now}: the bundle must carry ${now} only`);
     const ex = sidecars?.[EXCLUSIONS_FILE];
     const md = sidecars?.[MAINTAINER_FILE];
     const ai = sidecars?.[AI_FILE];

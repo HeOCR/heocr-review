@@ -253,8 +253,10 @@ npm run import -- --task line_consensus --bundle <bundle dir> --target local|pre
 
 Community volunteers review the mid-century pages one printed line at a time (task type `line_consensus`; maintainer's
 decision and eval's amendment of 2026-11-18, heocr-restricted-eval `preregistration/midcentury_volunteers_2026-11-18`).
-The bundle holds eval's registered `line_items_v1.json` and `volunteer_exclusions_v1.json` (their sha256 must be the
-registered ones, `REGISTERED_SHA256` in `src/tasks/line_consensus/schema.ts`), `maintainer_decided.json` (the pages the
+The bundle holds eval's registered `line_items_v1.json` and `volunteer_exclusions_v2.json` (their sha256 must be the
+registered ones, `REGISTERED_SHA256` in `src/tasks/line_consensus/schema.ts`; exclusions v2, heocr-restricted-eval#91,
+adds the private-names screen's drops with reason `privacy` and supersedes v1, which the import refuses),
+`maintainer_decided.json` (the pages the
 maintainer had decided, which keep his references), the batch's `ai_flags.json`, `pages/` and, once registered,
 `gold_v1.json`.
 
