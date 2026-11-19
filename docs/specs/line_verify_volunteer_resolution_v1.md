@@ -94,6 +94,10 @@ v1.3 plus, for a volunteer_v1 batch:
 
 The app's results are for routing; eval's ingest may recompute them from the records.
 
+`counted`, `not_counted_reason`, `step` and `pair` follow from a reviewer's standing, which the privacy policy keeps
+to admins. A public copy is the public view (`npm run export -- --public`; README, "Public copies"), which strips
+them and refuses to write a file that still has one.
+
 ## Not in v1
 
 No planted P-hist gold (the mid-century gold is the proxy, per eval). No reviewer sees counts of how others answered.

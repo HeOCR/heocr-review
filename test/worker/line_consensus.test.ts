@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { LineConsensusView, NextResponse } from "../../src/shared/api";
 import { TERMS_VERSION } from "../../src/shared/terms";
+import { publicFiles, publicProblems } from "../../src/tasks/public_export";
 import { goldOffset } from "../../src/worker/consensus";
 import { handle } from "../../src/worker/index";
 import { Client, ORIGIN } from "./helpers";
@@ -179,6 +180,25 @@ describe("volunteer line review", () => {
     const file = exp.body.files["line_consensus_decisions.json"]!;
     expect(file.lines.find((l) => l.page_key === A && l.i === 1)).toMatchObject({ outcome: "maintainer", reference: { action: "edit", text: "שורה 1 בעמוד 1!" } });
     expect(file.decisions.filter((d) => d.page_key === A && d.i === 1).map((d) => d.role)).toEqual(["first", "second", "third", "maintainer"]);
+    // The public view (scripts/export.ts --public): no gold-line decisions, standings, counted status or exclusions.
+    expect(publicProblems(file).length).toBeGreaterThan(0);
+    const gold = new Set(
+      (await env.DB.prepare("SELECT external_id FROM proposals WHERE batch_id = ?1 AND json_extract(payload_json, '$.gold') IS NOT NULL").bind(LINES).all<{ external_id: string }>()).results.map((r) => r.external_id),
+    );
+    expect(gold.size).toBeGreaterThan(0);
+    const ledger = exp.body.files["line_consensus_decisions_ledger.json"]!;
+    expect((ledger as unknown as { proposals: { proposal_id: string }[] }).proposals.some((p) => gold.has(p.proposal_id))).toBe(true);
+    const [pub, pubLedger] = publicFiles({ fileName: "line_consensus_decisions.json", content: file }, { fileName: "line_consensus_decisions_ledger.json", content: ledger }, gold);
+    expect(pub!.fileName).toBe("line_consensus_decisions.public.json");
+    const pd = pub!.content as { decisions: Record<string, unknown>[]; lines: unknown[]; reviewers?: unknown; admin_exclusions?: unknown };
+    expect(pd.decisions.length).toBe(file.decisions.filter((d) => d.role !== "gold").length);
+    expect(pd.decisions.some((d) => "counted" in d || "gold_hit" in d || "not_counted_reason" in d)).toBe(false);
+    expect(pd.reviewers).toBeUndefined();
+    expect(pd.admin_exclusions).toBeUndefined();
+    expect(pd.lines).toEqual(file.lines);
+    expect((pubLedger!.content as { proposals: { proposal_id: string }[] }).proposals.some((p) => gold.has(p.proposal_id))).toBe(false);
+    expect(publicProblems(pd, gold)).toEqual([]);
+    expect(publicProblems(pubLedger!.content, gold)).toEqual([]);
   });
 
   it("decisions are final, and a line not served to you cannot be decided", async () => {

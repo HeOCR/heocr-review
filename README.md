@@ -317,6 +317,21 @@ stood at that moment (its page action, lines, hints shown and `decided_at`), whi
 
 The admin can also download both files from the app (`/app/#admin`, *Export*).
 
+**Public copies.** The files above are for eval's and hocrgen's ingest. A line_consensus export carries each
+volunteer's gold record and standing, and a volunteer_v1 line_verify export each decision's `counted`,
+`not_counted_reason` and `step`. The privacy policy says accuracy is visible to admins only and never published.
+Anything that goes to a public repository or release is therefore the public view:
+
+```sh
+npm run export -- --batch <id> --target production --out out/ --public
+npm run check-public -- out/<name>.public.json out/<name>_ledger.public.json
+```
+
+`--public` writes `<name>.public.json` and `<name>_ledger.public.json` instead (`src/tasks/public_export.ts`). They
+have no `counted`, `not_counted_reason`, `step`, `gold_id`, `gold_hit`, per-reviewer list, `admin_exclusions` or
+`pair`, and no decisions on gold lines. `check-public` refuses any file that still has one, and prints key paths
+only. A reference_audit export has none of these, so its public view is the same content.
+
 ## Deploy
 
 Credentials live in `~/.config/heocr/cloudflare.env`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`,
