@@ -23,6 +23,10 @@ Each item is owned by the session named, and all of them must hold before step 0
 6. **Volunteer review switched on:** a heocr-review PR that sets `CONSENSUS_ENABLED` to `"1"` in the production
    `vars` of `wrangler.jsonc`, merged before step 2.
 7. **P-hist test batches:** the bundles whose sha256 eval pinned, already checked on preview.
+8. **The maintainer's line-level gold batch** (`newprinted_midcentury_goldlines_v0`, live since 2026-11-19): production
+   has no per-batch access control, so it is "admin only" only while the maintainer is the only reviewer. Before the
+   launch deploy, close it (status `closed`) once its lines are decided and exported to eval, or gate it in the launch
+   code. Volunteers must never be served it.
 
 ## The privacy text
 

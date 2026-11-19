@@ -54,8 +54,12 @@ export const BOX_REASONS = ["not_one_line", "no_text", "continued"] as const;
 export const TYPE_APP_VALUES = ["typed", "pointed_print", "unreadable", ...BOX_REASONS] as const;
 /** A typed line's decisions as exported (v1.3). */
 export const TYPE_DECISION_VALUES = ["typed", "pointed_print", "unreadable", "not_on_page"] as const;
-export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned"] as const;
-export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned"] as const;
+/**
+ * reshumot_scanned and knesset_plenary: the mid-century pages of the admin-only line-level gold batch
+ * (newprinted_midcentury_goldlines_v0, heocr-restricted-eval#95), live on production since 2026-11-19.
+ */
+export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned", "reshumot_scanned", "knesset_plenary"] as const;
+export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned", "publisher_ocr_layer"] as const;
 /** v1.1 adds edition texts: the candidate is a published edition's text, never OCR. */
 export const SOURCES_V11 = [...SOURCES, "sefaria_edition", "gutenberg_edition", "benyehuda_text", "wikisource_he"] as const;
 export const PROVENANCES_V11 = [
