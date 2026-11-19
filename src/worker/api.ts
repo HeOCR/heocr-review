@@ -15,7 +15,7 @@ import type { Env } from "./env";
 import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
-import { LIMITS, clientKey, enforce, pruneRateLimits } from "./ratelimit";
+import { LIMITS, clientKey, enforce, enforceProfileHour, enforceWriteDay } from "./ratelimit";
 
 const PROVIDERS: Record<string, IdentityProvider> = { google: googleProvider, dev: devProvider };
 
@@ -72,7 +72,7 @@ export async function signIn(ctx: Ctx, providerId: string): Promise<Response> {
   assertSameOrigin(ctx.request);
   const provider = Object.prototype.hasOwnProperty.call(PROVIDERS, providerId) ? PROVIDERS[providerId] : undefined;
   if (!provider || !provider.enabled(ctx.env, ctx.request)) throw new HttpError(404, "not_found");
-  await enforce(ctx.env.DB, LIMITS.signInMinute, await clientKey(ctx.env, ctx.request), ctx.now);
+  enforce(LIMITS.signInMinute, await clientKey(ctx.env, ctx.request), ctx.now);
   const body = await readJson(ctx.request);
   const { subject } = await provider.authenticate(body, ctx.env, ctx.request);
   const id = await reviewerIdFor(ctx.env, provider.id, subject);
@@ -85,7 +85,6 @@ export async function signIn(ctx: Ctx, providerId: string): Promise<Response> {
     .run();
   const reviewer = (await getReviewer(ctx.env.DB, id))!;
   if (reviewer.blocked) throw new HttpError(403, "blocked");
-  if (Math.random() < 0.05) ctx.exec.waitUntil(pruneRateLimits(ctx.env.DB, ctx.now));
   return json(me(ctx.env, reviewer), 200, { "set-cookie": await createSessionCookie(ctx.env, id, ctx.now) });
 }
 
@@ -102,7 +101,7 @@ export async function getMe(ctx: Ctx): Promise<Response> {
 export async function acceptTerms(ctx: Ctx): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.profileHour, reviewer.id, ctx.now);
+  await enforceProfileHour(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request);
   if (body.termsVersion !== TERMS_VERSION) throw new HttpError(409, "terms_changed", "reload to see the current terms");
   if (body.accept !== true) throw new HttpError(400, "consent_required");
@@ -138,7 +137,7 @@ function displayNameStatements(db: D1Database, reviewerId: string, name: string 
 export async function setDisplayName(ctx: Ctx): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.profileHour, reviewer.id, ctx.now);
+  await enforceProfileHour(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request);
   let name: string | null = null;
   if (body.displayName !== null) {
@@ -153,7 +152,7 @@ export async function setDisplayName(ctx: Ctx): Promise<Response> {
 
 export async function batches(ctx: Ctx): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.readMinute, reviewer.id, ctx.now);
   const list = await listBatches(ctx.env.DB, true);
   const out: BatchSummary[] = [];
   for (const b of list) {
@@ -179,7 +178,7 @@ async function openBatch(ctx: Ctx, id: string) {
 
 export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
   const subsetId = new URL(ctx.request.url).searchParams.get("subset");
@@ -222,7 +221,7 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
 
 export async function showProposal(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.readMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.readMinute, reviewer.id, ctx.now);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id) });
 }
@@ -231,8 +230,8 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
-  await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
-  await enforce(ctx.env.DB, LIMITS.writeDay, reviewer.id, ctx.now);
+  enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
+  await enforceWriteDay(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
@@ -285,8 +284,8 @@ export async function saveDraft(ctx: Ctx, id: number): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
-  await enforce(ctx.env.DB, LIMITS.draftMinute, reviewer.id, ctx.now);
-  await enforce(ctx.env.DB, LIMITS.draftDay, reviewer.id, ctx.now);
+  enforce(LIMITS.draftMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.draftDay, reviewer.id, ctx.now);
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (batch.taskType !== PAGE_REVIEW) throw new HttpError(400, "invalid_draft", "drafts are for page review");
@@ -315,7 +314,7 @@ export async function saveDraft(ctx: Ctx, id: number): Promise<Response> {
 export async function clearDraft(ctx: Ctx, id: number): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.draftMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.draftMinute, reviewer.id, ctx.now);
   const { proposal } = await activeProposal(ctx, id, reviewer.id);
   await ctx.env.DB.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
   return json({ ok: true });
@@ -324,7 +323,7 @@ export async function clearDraft(ctx: Ctx, id: number): Promise<Response> {
 export async function skip(ctx: Ctx, id: number): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   await ctx.env.DB.prepare("INSERT OR IGNORE INTO skips (reviewer_id, proposal_id, created_at) VALUES (?1, ?2, ?3)")
     .bind(reviewer.id, proposal.id, iso(ctx.now))
@@ -335,7 +334,7 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
 export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
-  await enforce(ctx.env.DB, LIMITS.writeMinute, reviewer.id, ctx.now);
+  enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId);
   await ctx.env.DB.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id IN (SELECT id FROM proposals WHERE batch_id = ?2)")
     .bind(reviewer.id, batch.id)
