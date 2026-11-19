@@ -1,15 +1,17 @@
 # line_verify volunteer resolution v1.1: P-hist gold (addendum)
 
-Status: **draft for heocr-eval's and heocr-lead's check** (2026-11-19). It is the spec only; the code follows in the
-same PR once the open questions below are answered. It extends
+Status: **agreed** (2026-11-19). heocr-eval answered the open questions, and heocr-lead confirmed the privacy text and
+the two design leans. The code follows in this PR. It extends
 [line_verify_volunteer_resolution_v1.md](line_verify_volunteer_resolution_v1.md) (v1). Everything v1 says still
 holds unless this file changes it.
 
 The rule is eval's: a decision on a P-hist test line counts only when its reviewer has standing on the mid-century
 gold (as in v1) **and** at least 90% on at least 15 P-hist gold lines. The P-hist gold lines are eval's
-`phist_gold_v1_1.json` (heocr-restricted-eval `preregistration/phist_volunteer_gold_2026-11-19/`, sha256
-`99bbf813fe94f3184d13abc98de550301e78ec99f5ac94b18e6c11e9e7408bed`). There are 66 lines from 9 audit2 (P-hist dev)
-books, none reserved: 22 `verify` (8 with a planted error) and 44 `type`.
+`phist_gold_v1_1_1.json` (heocr-restricted-eval#93, `preregistration/phist_volunteer_gold_2026-11-19/`, sha256
+`08bdb75e62485cd9cd3a9597c56712f25d05cabd7dc0157aa97813f0981c6393`). There are 65 lines on 19 pages from 9 audit2
+(P-hist dev) books, none reserved: 22 `verify` (8 with a planted error) and 43 `type`. v1.1.1 adds a `pages` block in
+the P-hist bundles' page format (attribution, licence, size), and drops every line from pointed print (see Grading).
+v1.1 (`99bbf813…`, no page metadata) is superseded, and the import refuses it.
 
 ## Where it applies
 
@@ -22,7 +24,7 @@ to `single` and `volunteer_v1`. Both P-hist test batches move to it. They have 0
 - **Import:** `npm run import-gold -- --batch <id> --gold <dir> [--target ...]` adds the gold lines to an existing
   `volunteer_v1_1` batch as proposals with external id `gold:<gold_id>` and `payload.gold = { gold_id, answer,
   planted_error }`.
-  - `<dir>` holds `phist_gold_v1_1.json` and its page images.
+  - `<dir>` holds `phist_gold_v1_1_1.json` and its page images.
   - The import refuses any file whose sha256 is not the registered one, and any image whose sha256 differs from the
     record.
   - It is idempotent. Each P-hist batch gets the same 66 lines.
@@ -35,8 +37,9 @@ to `single` and `volunteer_v1`. Both P-hist test batches move to it. They have 0
   - The same options apply, and no pre-check note is shown.
   - Its context box follows the bundles' rule: the line box widened by 1.5 line heights above and below, clamped to the
     page. Measured on the P-hist v2 bundle, the median is 1.5 above and 1.5 below, at the line's own width.
-- **Page metadata:** this is the attribution line, title, licence and size the view shows for every line. The
-  importer needs it per gold page (see open question 1).
+- **Page metadata:** each gold line carries its page's entry from the file's `pages` block (source, book, title, page
+  label, licence, attribution, size, script, book group), copied into the payload as for a bundle line, so the view
+  shows a real attribution. The import refuses a gold line whose page has no entry, and a page licence that is not open.
 - **Finality:** a gold decision is final, as every decision on these batches is.
 
 ## Placement
@@ -45,8 +48,11 @@ Each reviewer has one gold schedule across all `volunteer_v1_1` batches, seeded 
 `sha256("phist_gold|" + reviewer_id)`, as the mid-century gold is seeded by its own prefix.
 
 - **When:** when `next` would serve the reviewer their n-th line in a `volunteer_v1_1` batch (n counts their decisions
-  in all such batches, gold included), it serves a gold line instead if n falls on the schedule. The schedule is about
-  1 in 15, at a seeded offset in each block of 15 (see open question 2 for the first lines).
+  in all such batches, gold included), it serves a gold line instead if n falls on the schedule.
+  - **Front-loaded:** for a reviewer's first 75 lines, one in each block of 5, at a seeded offset in the block. That
+    gives 15 gold lines by line 75, the second gate's minimum.
+  - **Then:** one in each block of 15, at a seeded offset in the block.
+  - The 65 lines last a reviewer about 790 lines.
 - **Which line:** the next gold line in the reviewer's seeded order whose `gold_id` they have not decided in any such
   batch and that is not pulled. Gold is served only while the batch still has a normal line for the reviewer; when
   the gold runs out, none is served. A reviewer sees each gold line at most once.
@@ -60,8 +66,9 @@ Each reviewer has one gold schedule across all `volunteer_v1_1` batches, seeded 
   - **exact** is a hit only on a `verify` line with no planted error;
   - **edited** or **typed** is a hit when its folded text equals the folded answer;
   - **misaligned** with typed text is graded as text;
-  - every non-text answer is a miss: unreadable, not one line, no text, continued, and print has niqqud (open
-    question 3).
+  - every non-text answer is a miss: unreadable, not one line, no text, continued, and print has niqqud. That is fair
+    because v1.1.1 has no gold line from pointed print (pages with a reference niqqud ratio of 0.02 or more, and
+    answers carrying a mark).
 - **Grading time:** at decision time, and stored with the decision.
 
 ## Who counts
@@ -109,24 +116,15 @@ Privacy policy 2026-11-18-v3's check-lines item says:
 > is visible to admins only and never published. If it falls below the threshold, your decisions stop counting toward
 > agreement between volunteers.
 
-That describes P-hist gold as written. Read this way, no text change and no new approval is needed. **For lead to
-confirm.**
+That describes P-hist gold as written. heocr-lead confirmed (2026-11-19) that the item is not batch-specific and
+covers P-hist gold, so no text change and no new approval is needed.
 
-## Open questions (eval, then lead)
+## Decided (2026-11-19)
 
-1. **Page metadata.** `phist_gold_v1_1.json` has no `book_title`, `page_label`, `text_license`, `attribution`,
-   `width`, `height`, `script` or `book_group` for its 20 pages. Can v1.1.1 add a `pages` block in the P-hist bundles'
-   page format? Without it the gold lines would show a blank attribution, which would mark them as gold.
-2. **Early lines.** At 1 in 15, a reviewer reaches 15 graded gold lines after about 225 lines, and decisions are judged
-   at decision time. So their first ~225 P-hist decisions never count. That is wasted work, unless they are routed and
-   later decided again. The 66 lines last a reviewer about 990 lines.
-   - **Suggestion:** 1 in 5 for a reviewer's first 75 lines (15 gold), then 1 in 15. Their 66 lines then last about
-     800 lines.
-   - **Or:** count decisions retroactively once standing is reached, as the mid-century line_consensus does
-     ("past ones included"). That reverses v1's "recorded at decision time".
-3. **Print has niqqud.** Is it a miss even when its letters fold to the answer? Eval's rule says non-text answers are
-   misses. The P-hist pages are unpointed, so a pointed answer there is a misreading, but please confirm.
-4. **One schedule or one per batch.** One schedule across both P-hist batches (proposed), so a reviewer's 15 gold lines
-   can come from either.
+1. **Page metadata:** in the file (v1.1.1, a `pages` block). Lead: gold lines must carry real page attribution.
+2. **Early lines:** front-loaded, 1 in 5 for the first 75 lines, then 1 in 15. Decisions stay judged at decision time,
+   with no retroactive counting. Lead agreed.
+3. **Print has niqqud:** a miss; v1.1.1 has no gold line from pointed print.
+4. **Schedule:** one seeded schedule per reviewer across both P-hist batches, with no gold_id repeated.
 
 — contrib[claude/claude-code#shay-macbook-m4]@heocr/opensource
