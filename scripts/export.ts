@@ -1,18 +1,22 @@
 /**
  * Export a batch's decisions from D1 in the consumer's format, plus the full ledger.
  *
- *   npm run export -- --batch e2d4_reference_audit_v1 [--target local|preview|production] [--out out/]
+ *   npm run export -- --batch e2d4_reference_audit_v1 [--target local|preview|production] [--out out/] [--public]
  *
  * Writes the task type's decisions file (reference_audit_decisions.json: exactly hocrgen's
  * reference_audit_decisions.v1; line_verify_decisions.json: line_verify_decisions.v1.1, or v1.2 for a v1.1 batch, with
  * each decision's pass), one decision per reviewer per proposal, and <name>_ledger.json (every decision of every reviewer, reviewer counts, conflicts, and opted-in
  * credits). Validates the decisions file before writing; prints counts only.
+ * With --public it writes only the public view instead (<name>.public.json and <name>_ledger.public.json, see
+ * src/tasks/public_export.ts): no per-pseudonym accuracy, standing or counted status, and no gold-line decisions.
+ * Anything that goes to a public repository or release is the public view, and passes `npm run check-public`.
  * Then copy the decisions file over hocrgen's docs/reference_audit_decisions.json in a PR, and check it there:
  *   python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildExport, formatJson } from "../src/tasks/export";
+import { goldProposalIds, publicFiles } from "../src/tasks/public_export";
 import { CONSENSUS_EXPORT_SQL, EXPORT_SQL, VERIFY_VOTES_SQL, toBatch, toCredit, toDecision, toProposal, toVerifyVote, type BatchRow, type CreditRow, type DecisionRow, type ProposalRow, type VerifyVoteRow } from "../src/tasks/rows";
 import { parseArgs, str, target } from "./lib/args";
 import { inline } from "./lib/sql";
@@ -26,9 +30,10 @@ function main(): void {
   const one = <T>(sql: string) => d1Query<T>(t, inline(sql, batchId))[0] ?? [];
   const batchRow = one<BatchRow>(EXPORT_SQL.batch)[0];
   if (!batchRow) throw new Error(`no batch ${batchId} in ${t}`);
+  const proposals = one<ProposalRow>(EXPORT_SQL.proposals).map(toProposal);
   const result = buildExport({
     batch: toBatch(batchRow),
-    proposals: one<ProposalRow>(EXPORT_SQL.proposals).map(toProposal),
+    proposals,
     decisions: one<DecisionRow>(EXPORT_SQL.decisions).map(toDecision),
     credits: one<CreditRow>(EXPORT_SQL.credits).map(toCredit),
     ...(batchRow.task_type === "line_consensus"
@@ -43,8 +48,9 @@ function main(): void {
   });
   if (result.problems.length) throw new Error(`the export does not validate:\n  ${result.problems.slice(0, 20).join("\n  ")}`);
   mkdirSync(out, { recursive: true });
-  for (const f of [result.decisionsFile, result.ledgerFile]) writeFileSync(join(out, f.fileName), formatJson(f.content));
-  console.log(JSON.stringify({ batch: batchId, target: t, out, files: [result.decisionsFile.fileName, result.ledgerFile.fileName], counts: result.counts }, null, 2));
+  const files = flags.public === true ? publicFiles(result.decisionsFile, result.ledgerFile, goldProposalIds(proposals)) : [result.decisionsFile, result.ledgerFile];
+  for (const f of files) writeFileSync(join(out, f.fileName), formatJson(f.content));
+  console.log(JSON.stringify({ batch: batchId, target: t, out, public: flags.public === true, files: files.map((f) => f.fileName), counts: result.counts }, null, 2));
 }
 
 try {

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { NextResponse, ProposalView } from "../../src/shared/api";
 import { decisionsFileProblems } from "../../src/tasks/line_verify/schema";
+import { publicFiles, publicProblems } from "../../src/tasks/public_export";
 import { handle } from "../../src/worker/index";
 import { ORIGIN } from "./helpers";
 
@@ -186,6 +187,14 @@ describe("line_verify volunteer resolution v1", () => {
       return { item_id: r.external_id, candidate_text: x.candidate_text, kind: x.kind, blind: false };
     });
     expect(decisionsFileProblems(file, VOL, items)).toEqual([]);
+    // The public view: no counted, step, reason or pair; the lines' references stay.
+    expect(publicProblems(file).length).toBeGreaterThan(0);
+    const [pub] = publicFiles({ fileName: "line_verify_decisions.json", content: file }, { fileName: "line_verify_decisions_ledger.json", content: res.body.files["line_verify_decisions_ledger.json"] }, new Set());
+    const pd = pub!.content as { decisions: Record<string, unknown>[]; lines: Record<string, unknown>[] };
+    expect(pd.decisions.length).toBe(file.decisions.length);
+    expect(pd.decisions.some((d) => "counted" in d || "step" in d || "not_counted_reason" in d)).toBe(false);
+    expect(pd.lines.some((x) => "pair" in x)).toBe(false);
+    expect(pd.lines.find((x) => x.item_id === HARDEST)).toMatchObject({ resolution: "agreed", reference: { class: "text" } });
   });
 
   it("leaves batches without the setting as they were", async () => {
