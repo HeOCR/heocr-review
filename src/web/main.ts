@@ -74,8 +74,18 @@ async function route(): Promise<void> {
     const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100}))?$/.exec(hash);
     let batch: BatchSummary | undefined;
     if (linked) {
-      const { proposal } = await get<{ proposal: ProposalView }>(`/api/proposals/${linked[1]}`);
-      batch = batches.find((b) => b.id === proposal.batchId);
+      try {
+        const { proposal } = await get<{ proposal: ProposalView }>(`/api/proposals/${linked[1]}`);
+        batch = batches.find((b) => b.id === proposal.batchId);
+      } catch (err) {
+        // A link to a line that is no longer served (taken out of its batch, or closed): drop the stale link and show
+        // the tasks, instead of "Failed to load".
+        if (err instanceof ApiFailure && (err.status === 404 || err.status === 409)) {
+          history.replaceState(null, "", location.pathname + location.search);
+          return route();
+        }
+        throw err;
+      }
     } else if (chosen) batch = batches.find((b) => b.id === chosen[1]);
     else if (batches.length === 1) batch = batches[0];
     if (!batch) {
