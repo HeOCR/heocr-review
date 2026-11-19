@@ -16,6 +16,7 @@ import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import type { LineRouting } from "../tasks/line_verify/resolution";
+import { dropPointedBook } from "./pointed_books";
 import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
 import { isVolunteerV1, openFor, recordVolunteerDecision, routingOf, volunteerExtras } from "./verify_resolution";
 import {
@@ -307,6 +308,10 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   }
   if (volunteerBefore) await recordVolunteerDecision(db, batch, proposal, decisionId, reviewer.id, admin, volunteerBefore, iso(ctx.now));
   if (gold) await recordGoldDecision(db, proposal, decisionId, reviewer.id, normalized, iso(ctx.now));
+  // A pointed print: the rest of its book leaves the batch (migrations/0011_pointed_books.sql). Gold is never a signal.
+  if (batch.taskType === "line_verify" && normalized.value === "pointed_print" && !gold) {
+    await dropPointedBook(db, batch, proposal, decisionId, reviewer.id, admin, iso(ctx.now));
+  }
   // The page is decided: its draft is done with (page_review).
   await db.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
   if (isConsensus(batch)) {
