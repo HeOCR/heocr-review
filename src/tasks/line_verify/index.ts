@@ -51,11 +51,14 @@ export interface LineVerifySource {
 export const SOURCE_LABELS: Record<string, Label> = {
   wikisource_he_proofread: { he: "ויקיטקסט", en: "Hebrew Wikisource" },
   benyehuda_nli_aligned: { he: "פרויקט בן־יהודה, סריקת הספרייה הלאומית", en: "Project Ben-Yehuda text, NLI scan" },
+  reshumot_scanned: { he: "רשומות (סריקה)", en: "Reshumot (scan)" },
+  knesset_plenary: { he: "דברי הכנסת", en: "Knesset plenary record" },
 };
 
 export const PROVENANCE_LABELS: Record<string, Label> = {
   wikisource_quality3_single_proofreader: { he: "הוגה בידי מגיה אחד בוויקיטקסט", en: "Proofread once on Wikisource" },
   pby_human_typed_aligned: { he: "הוקלד בידי אדם (בן־יהודה), מותאם לסריקה", en: "Human-typed (Ben-Yehuda), aligned to the scan" },
+  publisher_ocr_layer: { he: "שכבת ה-OCR של ה-PDF", en: "The PDF's OCR layer" },
 };
 
 const OPTIONS: DecisionOption[] = [

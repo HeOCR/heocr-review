@@ -14,8 +14,9 @@ export const ITEMS_SCHEMA = "line_verify_items.v1";
 export const DECISIONS_SCHEMA = "line_verify_decisions.v1.1";
 /** Both versions validate; a v1 file may not use `pointed_print`. */
 export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA] as const;
-export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned"] as const;
-export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned"] as const;
+/** reshumot_scanned and knesset_plenary: the mid-century pages (line-level gold, heocr-restricted-eval#95). */
+export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned", "reshumot_scanned", "knesset_plenary"] as const;
+export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned", "publisher_ocr_layer"] as const;
 export const STRATA = ["hard", "random"] as const;
 export const RELEASE_SPLITS = ["train", "validation", "test"] as const;
 export const DECISION_VALUES_V1 = ["exact", "edited", "unreadable", "misaligned"] as const;
