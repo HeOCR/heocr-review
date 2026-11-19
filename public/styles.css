@@ -229,6 +229,14 @@ main:has(.pagereview) { max-width: 1500px; }
   .prgrid .scan { position: sticky; top: 8px; }
   .prgrid .scan .scroller { max-height: calc(100vh - 90px); }
 }
+/* Phone and narrow screens: the scan stays pinned above the lines (short, zoomable and pannable in its scroller),
+   so every line can be checked against it without scrolling back up. dvh follows the on-screen keyboard. */
+@media (max-width: 999px) {
+  .prgrid .scan { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-bottom: 4px; box-shadow: 0 2px 4px #0002; }
+  .prgrid .scan .viewer { margin: 0; }
+  .prgrid .scan .scroller { max-height: 34vh; max-height: 34dvh; }
+  .prline { scroll-margin-top: calc(34vh + 56px); scroll-margin-top: calc(34dvh + 56px); }
+}
 .prlines { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
 .prline { display: grid; grid-template-columns: 2.2em 1fr; gap: 6px; align-items: start; padding: 4px 6px; border-radius: 8px; border: 1px solid transparent; }
 .prline .num { font-size: 13px; padding-top: 10px; text-align: center; }
