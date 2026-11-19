@@ -3,7 +3,7 @@
  * due, what a gold decision records, and the second standing gate. The rules are in src/tasks/line_verify/gold.ts;
  * this file only reads and writes D1 (migrations/0010_phist_gold.sql).
  */
-import { goldDue, goldHit, goldOrder, phistReason, scheduleSeed, type GoldMark, type PhistReason } from "../tasks/line_verify/gold";
+import { goldDue, goldHit, goldOrder, phistReason, type GoldMark, type PhistReason } from "../tasks/line_verify/gold";
 import type { LineVerifyPayload } from "../tasks/line_verify/index";
 import { PHIST_GOLD_EXPORT_SQL, PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
 import type { BatchRecord, PhistGoldGrade, ProposalRecord } from "../tasks/types";
@@ -27,7 +27,7 @@ export async function dueGold(db: D1Database, batch: BatchRecord, reviewerId: st
     )
     .bind(reviewerId)
     .first<{ n: number }>();
-  if (!goldDue(n?.n ?? 0, scheduleSeed(reviewerId))) return null;
+  if (!goldDue(n?.n ?? 0, reviewerId)) return null;
   const { results } = await db
     .prepare(
       `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id

@@ -10,7 +10,10 @@ import {
   goldImport,
   goldOrder,
   phistReason,
-  scheduleSeed,
+  PRECHECK_MIX,
+  PRECHECK_RATE,
+  blockOffset,
+  goldPrecheck,
   type GoldFile,
 } from "../../src/tasks/line_verify/gold";
 
@@ -56,18 +59,35 @@ describe("P-hist gold file", () => {
 describe("schedule", () => {
   it("puts 15 gold lines in a reviewer's first 75, one per block of 5, then one per block of 15", () => {
     for (const id of ["rv_00000000", "rv_12345678", "rv_deadbeef", "rv_0badf00d"]) {
-      const seed = scheduleSeed(id);
-      const due = Array.from({ length: FRONT_LINES + 3 * BLOCK }, (_, n) => goldDue(n, seed));
+      const due = Array.from({ length: FRONT_LINES + 3 * BLOCK }, (_, n) => goldDue(n, id));
       expect(due.slice(0, FRONT_LINES).filter(Boolean)).toHaveLength(15);
       for (let b = 0; b < FRONT_LINES / 5; b++) expect(due.slice(b * 5, b * 5 + 5).filter(Boolean)).toHaveLength(1);
       for (let b = 0; b < 3; b++) expect(due.slice(FRONT_LINES + b * BLOCK, FRONT_LINES + (b + 1) * BLOCK).filter(Boolean)).toHaveLength(1);
     }
   });
 
+  it("varies the offset from block to block (seeded per block, not one offset per reviewer)", () => {
+    const offsets = Array.from({ length: 15 }, (_, b) => blockOffset("rv_12345678", `f${b}`, 5));
+    expect(new Set(offsets).size).toBeGreaterThan(1);
+  });
+
   it("orders gold lines per reviewer, deterministically", () => {
     const ids = ["a", "b", "c", "d", "e"];
     expect(goldOrder("rv_1", ids)).toEqual(goldOrder("rv_1", [...ids].reverse()));
     expect(new Set(goldOrder("rv_1", ids))).toEqual(new Set(ids));
+  });
+});
+
+describe("pre-check mirror", () => {
+  it("gives gold verify lines a pre-check at the test lines' rate and mix, typed lines none", () => {
+    const ids = Array.from({ length: 20000 }, (_, i) => `g${i}`);
+    const pre = ids.map((g) => goldPrecheck(g, "verify"));
+    const rate = pre.filter(Boolean).length / ids.length;
+    expect(Math.abs(rate - PRECHECK_RATE)).toBeLessThan(0.01);
+    const spelling = pre.filter((p) => p && p.reasons.join() === "spelling").length / pre.filter(Boolean).length;
+    expect(Math.abs(spelling - PRECHECK_MIX[0]![1] / 134)).toBeLessThan(0.02);
+    expect(ids.slice(0, 500).every((g) => goldPrecheck(g, "type") === null)).toBe(true);
+    expect(goldPrecheck("g7", "verify")).toEqual(goldPrecheck("g7", "verify"));
   });
 });
 

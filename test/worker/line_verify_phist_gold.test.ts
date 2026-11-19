@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { NextResponse } from "../../src/shared/api";
-import { FRONT_BLOCK, goldDue, goldOrder, scheduleSeed } from "../../src/tasks/line_verify/gold";
+import { goldDue, goldOrder } from "../../src/tasks/line_verify/gold";
 import { publicFiles, publicProblems } from "../../src/tasks/public_export";
 import { handle } from "../../src/worker/index";
 import { ORIGIN } from "./helpers";
@@ -88,11 +88,11 @@ const goldIds = async () =>
   (await env.DB.prepare("SELECT id, json_extract(payload_json, '$.gold.gold_id') AS gold_id, json_extract(payload_json, '$.gold.answer.text') AS answer, json_extract(payload_json, '$.kind') AS kind FROM proposals WHERE batch_id = ?1 AND json_extract(payload_json, '$.gold') IS NOT NULL ORDER BY id").bind(VOL).all<{ id: number; gold_id: string; answer: string; kind: string }>()).results;
 const grades = async (reviewerId: string) => (await env.DB.prepare("SELECT gold_id, hit FROM phist_gold_grades WHERE reviewer_id = ?1").bind(reviewerId).all<{ gold_id: string; hit: number }>()).results;
 
-/** A counting reviewer (mid-century standing) whose gold schedule puts a gold line first (offset 0 in its block of 5). */
+/** A counting reviewer (mid-century standing) whose gold schedule puts a gold line first. */
 async function goldFirst(prefix: string): Promise<R> {
   for (let k = 0; k < 40; k++) {
     const r = await R.make(`${prefix}-${k}`, { standing: true });
-    if (Math.floor(scheduleSeed(r.id) * FRONT_BLOCK) === 0) return r;
+    if (goldDue(0, r.id)) return r;
   }
   throw new Error("no reviewer with offset 0");
 }
@@ -122,7 +122,8 @@ async function nextNormal(r: R, gold: Set<number>): Promise<number> {
   for (;;) {
     const p = (await r.next()).body.proposal!;
     if (!gold.has(p.id)) return p.id;
-    await r.decide(p.id, { value: "typed", text: "שורה" });
+    const typed = p.view.kind === "line_verify" && p.view.lineKind === "type";
+    expect((await r.decide(p.id, typed ? { value: "typed", text: "שורה" } : { value: "exact" })).status).toBe(200);
   }
 }
 
@@ -130,7 +131,6 @@ describe("line_verify P-hist gold (volunteer_v1_1)", () => {
   it("serves gold on the reviewer's seeded schedule, unlabelled, outside the normal queue and progress", async () => {
     const r = await R.make("sched", { standing: true });
     const gold = new Set((await goldIds()).map((g) => g.id));
-    const seed = scheduleSeed(r.id);
     let n = 0;
     let goldServed = 0;
     for (;;) {
@@ -138,7 +138,7 @@ describe("line_verify P-hist gold (volunteer_v1_1)", () => {
       const p = res.body.proposal;
       if (!p) break;
       expect(res.body.progress.total).toBe(11); // the fixture's lines only
-      expect(gold.has(p.id)).toBe(goldDue(n, seed));
+      expect(gold.has(p.id)).toBe(goldDue(n, r.id));
       if (gold.has(p.id)) {
         goldServed++;
         // Nothing in what the browser gets says gold: no gold mark, no answer, no gold id.
