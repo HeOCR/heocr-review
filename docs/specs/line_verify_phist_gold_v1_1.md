@@ -35,10 +35,11 @@ to `single` and `volunteer_v1`. Both P-hist test batches move to it. They have 0
   that marks it as gold.
   - A `verify` gold line shows `prefill_shown` as its candidate, with the planted error where there is one.
   - A `type` gold line shows the blank box.
-  - The same options apply. A pre-check note ("look here") is shown as on the test lines: a `verify` gold line carries
-    one at the test lines' rate (134 of 615 verify lines on phist_holdout_v2_2page) and reason mix, seeded by its
-    gold_id. A `type` gold line has none, like a typed test line. Its provenance is `none`, the value the importer
-    stores for a typed test line whose bundle provenance is null.
+  - The same options apply. **No pre-check note** is shown on a gold line: the test lines' notes come from an agent
+    pass that gold never had, and a drawn reason would mislead on exactly the lines that measure the reviewer
+    (heocr-eval). **Known limitation:** 134 of the test batch's 615 verify lines carry a note, and gold verify lines
+    never do; a weak signal, accepted as the lesser harm. A typed gold line's provenance is `none`, the value the
+    importer stores for a typed test line whose bundle provenance is null.
   - Its context box follows the bundles' rule: the line box widened by 1.5 line heights above and below, clamped to the
     page. Measured on the P-hist v2 bundle, the median is 1.5 above and 1.5 below, at the line's own width.
 - **Page metadata:** each gold line carries its page's entry from the file's `pages` block (source, book, title, page

@@ -10,10 +10,7 @@ import {
   goldImport,
   goldOrder,
   phistReason,
-  PRECHECK_MIX,
-  PRECHECK_RATE,
   blockOffset,
-  goldPrecheck,
   type GoldFile,
 } from "../../src/tasks/line_verify/gold";
 
@@ -78,16 +75,9 @@ describe("schedule", () => {
   });
 });
 
-describe("pre-check mirror", () => {
-  it("gives gold verify lines a pre-check at the test lines' rate and mix, typed lines none", () => {
-    const ids = Array.from({ length: 20000 }, (_, i) => `g${i}`);
-    const pre = ids.map((g) => goldPrecheck(g, "verify"));
-    const rate = pre.filter(Boolean).length / ids.length;
-    expect(Math.abs(rate - PRECHECK_RATE)).toBeLessThan(0.01);
-    const spelling = pre.filter((p) => p && p.reasons.join() === "spelling").length / pre.filter(Boolean).length;
-    expect(Math.abs(spelling - PRECHECK_MIX[0]![1] / 134)).toBeLessThan(0.02);
-    expect(ids.slice(0, 500).every((g) => goldPrecheck(g, "type") === null)).toBe(true);
-    expect(goldPrecheck("g7", "verify")).toEqual(goldPrecheck("g7", "verify"));
+describe("pre-check", () => {
+  it("gives gold lines no pre-check note (the test lines' notes come from an agent pass gold never had)", () => {
+    for (const p of goldImport(fixture()).proposals) expect((p.payload as { precheck: unknown }).precheck).toBeNull();
   });
 });
 
