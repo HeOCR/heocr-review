@@ -28,7 +28,7 @@
 | Current | Becomes | Why |
 |---|---|---|
 | `button.primary` | `.act.primary` on answers; `button.primary` still works elsewhere | One button style |
-| `.act.ok`, `.act.bad`, `.act.edit`, `.act.skip`, `.act.pointed` | plain `.act` (Exact, Correct, Save: `.act.primary`) | Answers are not coloured |
+| `.act.ok`, `.act.bad`, `.act.edit`, `.act.skip` | plain `.act` (Exact, Correct, Save: `.act.primary`) | Answers are not coloured |
 | `button.small` | `.act.quiet` (both are styled) | Same quiet control everywhere |
 | `button.big` with `.sub` | `.act.primary` | One language, one line |
 | `.tag.look`, `.tag.ai` | `.tag.look` for both | One look-here style |

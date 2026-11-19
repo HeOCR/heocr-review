@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "node scripts/build-web.mjs",
-    "dev": "npm run build && wrangler dev",
+    "dev": "npm run build && wrangler dev --infer-origin-from-routes=false",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && tsc -p tsconfig.node.json && tsc -p test/worker/tsconfig.json",
     "test": "npm run build && VITE_CONFIG_NATIVE_IGNORE_WARNING=true vitest run",

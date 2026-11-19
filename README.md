@@ -151,6 +151,18 @@ Tests run the Worker in workerd with a local D1 (`@cloudflare/vitest-plugin`). T
 through hocrgen's own validator (`python -m hocrgen.tools.reference_audit`). That needs a hocrgen checkout in
 `HOCRGEN_DIR` (default `~/clones/hocrgen`); CI checks out `HeOCR/hocrgen` and makes the test mandatory.
 
+### Design
+
+The app follows the designer's set in `design/review/` (HeOCR/heocr-review#51), adopted in steps
+(HeOCR/heocr-review#53–#58, in `design/review/CLASSMAP.md`'s order). The app loads `public/css/tokens.css`,
+`fonts.css` and `review.css` (copies of the design's, checked byte for byte by a test) and the subset fonts in
+`public/fonts/`. Views not adopted yet render in `main.legacy`, styled by `public/css/bridge.css` (the old styles,
+scoped); each step removes its part. The public pages keep `public/styles.css` until step 5.
+
+- Icons are generated from `design/review/icons/` by `node scripts/gen-icons.mjs` into `src/web/icons.gen.ts`.
+- `npm run dev` passes `--infer-origin-from-routes=false`, so the local Worker sees `localhost` (and the dev
+  sign-in works) despite the `review.heocr.org` route.
+
 ## Proposals in
 
 Only openly licensed pages may be imported: Wikisource scans and text are fine. The import script refuses
