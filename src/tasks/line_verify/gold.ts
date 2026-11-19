@@ -169,7 +169,7 @@ export function goldImport(file: GoldFile): { items: ImportItem[]; proposals: Im
     const context = contextBoxOf(g.box, page);
     const candidate = g.kind === "verify" ? g.prefill_shown! : "";
     const gold: GoldMark = { gold_id: g.gold_id, answer: g.answer, planted_error: g.planted_error };
-    const precheck = goldPrecheck(g.gold_id, g.kind);
+    const precheck = GOLD_PRECHECK;
     const payload: LineVerifyPayload & { gold: GoldMark } = {
       page_id: page.page_id,
       line_index: g.i,
@@ -243,32 +243,13 @@ export function goldDue(n: number, reviewerId: string): boolean {
 }
 
 /**
- * The agent pre-check ("look here") on the P-hist test lines, measured on phist_holdout_v2_2page (2026-11-19): 134 of
- * its 615 verify lines carry one (typed lines never do), with this mix of reasons. A gold verify line carries one at
- * the same rate and mix, seeded by its gold_id, so the note's absence does not mark gold (heocr-eval, #33 review).
+ * Gold lines carry no pre-check note (heocr-eval, #39 review). The test lines' notes come from an agent pass that gold
+ * never had; a drawn reason would point at words that are not the problem, on exactly the lines that measure the
+ * reviewer. Known limitation: 134 of the test batch's 615 verify lines carry a note and gold verify lines never do, a
+ * weak signal accepted as the lesser harm. If the agent pre-check is ever run over the gold verify lines, store what it
+ * says here instead.
  */
-export const PRECHECK_RATE = 134 / 615;
-export const PRECHECK_MIX: [string[], number][] = [
-  [["spelling"], 45],
-  [["edge_mismatch"], 30],
-  [["digits"], 22],
-  [["edge_mismatch", "spelling"], 15],
-  [["digits", "spelling"], 10],
-  [["edge_mismatch", "digits", "spelling"], 7],
-  [["edge_mismatch", "digits"], 5],
-];
-
-/** A gold verify line's pre-check (null for most, and always for typed lines). */
-export function goldPrecheck(goldId: string, kind: "verify" | "type"): { reasons: string[] } | null {
-  if (kind !== "verify" || unit(`phist_gold_precheck|${goldId}`) >= PRECHECK_RATE) return null;
-  const total = PRECHECK_MIX.reduce((a, [, w]) => a + w, 0);
-  let x = unit(`phist_gold_precheck_reasons|${goldId}`) * total;
-  for (const [reasons, w] of PRECHECK_MIX) {
-    if (x < w) return { reasons };
-    x -= w;
-  }
-  return { reasons: PRECHECK_MIX[0]![0] };
-}
+export const GOLD_PRECHECK = null;
 
 /** The order in which a reviewer meets the gold lines: by sha256("phist_gold|" + reviewer_id + "|" + gold_id). */
 export function goldOrder(reviewerId: string, goldIds: string[]): string[] {
