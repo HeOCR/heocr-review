@@ -1,7 +1,7 @@
 /**
  * Add eval's registered P-hist gold (docs/specs/line_verify_phist_gold_v1_1.md) to a volunteer_v1_1 line_verify batch:
  *
- *   npm run import-gold -- --batch <id> --gold <dir with phist_gold_v1_1_1.json and its page images> [--target local|preview|production] [--dry-run]
+ *   npm run import-gold -- --batch <id> --gold <dir with phist_gold_v1_1_1.json and its page images> [--target local|production] [--dry-run]
  *
  * The file's sha256 must be the registered one, and each page image must match its record. The gold lines are
  * upserted as proposals of the batch (crops into public/media/, gitignored), with nothing else in the batch changed:
@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import { PHIST_GOLD_FILE, PHIST_GOLD_SHA256, PHIST_GOLD_SUPERSEDED, goldFileProblems, goldImport, type GoldFile } from "../src/tasks/line_verify/gold";
 import type { ProposalMedia } from "../src/tasks/types";
 import { parseArgs, str, target } from "./lib/args";
+import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
 import { buildImportStatements } from "./lib/importsql";
 import { bundleImageProblems, cutLines, safeSegment, sha256File } from "./lib/media";
 import { inline } from "./lib/sql";
@@ -64,14 +65,17 @@ async function main(): Promise<void> {
   const sqlPath = join(ROOT, ".import", `${safeSegment(batchId)}.gold.sql`);
   writeFileSync(sqlPath, statements.join("\n") + "\n");
   const summary = { batch: batchId, gold_file: PHIST_GOLD_FILE, sha256: sha, pages: items.length, gold_lines: proposals.length, sql: sqlPath, target: t };
+  // Add-only: no deactivation.
+  const estimate = estimateImportWrites({ items: items.length, proposals: proposals.length, existingProposals: 0 });
   if (flags["dry-run"] === true) {
-    console.log(JSON.stringify({ ...summary, applied: false }, null, 2));
+    console.log(JSON.stringify({ ...summary, estimated_rows_written: estimate, applied: false }, null, 2));
     return;
   }
+  await checkWriteBudget(t, estimate, flags);
   d1File(t, sqlPath);
   const after = d1Query<{ gold: number }>(t, inline("SELECT COUNT(*) AS gold FROM proposals WHERE batch_id = ?1 AND active = 1 AND json_extract(payload_json, '$.gold') IS NOT NULL", batchId))[0]?.[0];
   console.log(JSON.stringify({ ...summary, applied: true, active_gold: after?.gold }, null, 2));
-  console.log(`Deploy so the gold crops are served: ${t === "preview" ? "npm run deploy:preview" : t === "production" ? "tsx scripts/deploy.ts production --yes-production" : "(local)"}`);
+  console.log(`Deploy so the gold crops are served: ${t === "production" ? "tsx scripts/deploy.ts production --yes-production" : "(local: npm run dev)"}`);
 }
 
 main().catch((err: unknown) => {

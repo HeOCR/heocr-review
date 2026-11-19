@@ -2,7 +2,7 @@
  * Load a batch subset (a filter in the app) from a registered definition file:
  *
  *   npm run import-subset -- --file <interim_v1.json> --batch newprinted_midcentury_v0 [--title "סט ביניים"]
- *     [--target local|preview|production [--yes-production]] [--dry-run]
+ *     [--target local|production [--yes-production]] [--dry-run]
  *
  * The file's sha256 must be the registered one (scripts/lib/subset.ts), its manifest_sha256 the batch's, and every
  * member an active, ungated proposal of the batch. Only the subset tables change (migrations/0003_subsets.sql); the

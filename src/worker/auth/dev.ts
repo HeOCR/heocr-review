@@ -1,6 +1,6 @@
 /**
  * Dev-only sign-in for local development and tests. It cannot be enabled on a deployed Worker: it needs all of
- *   - ENVIRONMENT === "development" (wrangler.jsonc sets "production" and "preview"; only .dev.vars says
+ *   - ENVIRONMENT === "development" (wrangler.jsonc sets "production"; only .dev.vars says
  *     "development", and wrangler never uploads .dev.vars),
  *   - DEV_AUTH_BYPASS === "1" (.dev.vars only; test/worker/guards.test.ts refuses it in wrangler.jsonc), and
  *   - a loopback request host (a Worker on workers.dev or a custom domain never sees one).

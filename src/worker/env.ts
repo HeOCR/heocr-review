@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
-  /** "production" | "preview" | "development". Only "development" (from .dev.vars) can enable the dev sign-in. */
+  /** "production" | "development". Only "development" (from .dev.vars) can enable the dev sign-in. */
   ENVIRONMENT: string;
   GOOGLE_CLIENT_ID?: string;
   /** Secret: signs session cookies. Rotating it signs everyone out. */
@@ -11,8 +11,8 @@ export interface Env {
   /** Secret or var: comma-separated reviewer ids (rv_...) that may see progress and export. */
   ADMIN_REVIEWER_IDS?: string;
   /**
-   * "1" switches on volunteer line review (task type line_consensus): preview only, until the maintainer approves
-   * the privacy text for gold lines and accuracy.
+   * "1" switches on volunteer line review (task type line_consensus). Production sets it at the launch
+   * (docs/runbooks/volunteer-launch.md); a local Worker sets it in .dev.vars.
    */
   CONSENSUS_ENABLED?: string;
   /** .dev.vars only. */

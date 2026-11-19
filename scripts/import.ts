@@ -2,7 +2,7 @@
  * Import a task's source file and its page images into HeOCR Review.
  *
  *   # reference_audit, from hocrgen's bundle (python -m hocrgen.tools.reference_audit --export-dir B --page-images P):
- *   npm run import -- --task reference_audit --bundle <B> [--pages-dir <P>] [--target local|preview|production]
+ *   npm run import -- --task reference_audit --bundle <B> [--pages-dir <P>] [--target local|production]
  *   # or from a proposals file and page images (this script cuts the crops):
  *   npm run import -- --task reference_audit --proposals <proposals.json> --pages-dir <P> [--target ...]
  *   # line_verify, from a line_verify_items.v1 bundle (items.json and pages/; this script cuts the line crops):
@@ -11,7 +11,7 @@
  *   npm run import -- --task page_review --bundle <B> [--target ...]
  *   # line_consensus, the volunteer line batch (line_items_v1.json, volunteer_exclusions_v3.json,
  *   # maintainer_decided.json, ai_flags.json, optional gold_v1.json, and pages/; this script cuts the line crops):
- *   npm run import -- --task line_consensus --bundle <B> [--target local|preview]
+ *   npm run import -- --task line_consensus --bundle <B> [--target local|production --yes-production]
  *   options: [--min-reviewers 1] [--title <batch title shown in the app>] [--dry-run]
  *
  * --pages-dir holds one image per item, named by the item id after its source prefix
@@ -27,6 +27,7 @@ import { importer } from "../src/tasks/importers";
 import type { ProposalMedia } from "../src/tasks/types";
 import { parseArgs, str, target } from "./lib/args";
 import { assertOpenSource } from "./lib/guard";
+import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
 import { buildImportSql } from "./lib/importsql";
 import {
   bundleImageProblems,
@@ -183,10 +184,14 @@ async function main(): Promise<void> {
     sql: sqlPath,
     target: t,
   };
+  const existingProposals =
+    t === "local" ? 0 : (d1Query<{ n: number }>(t, inline("SELECT COUNT(*) AS n FROM proposals WHERE batch_id = ?1", bundle.batch.id))[0]?.[0]?.n ?? 0);
+  const estimate = estimateImportWrites({ items: bundle.items.length, proposals: bundle.proposals.length, existingProposals, afterRowsPerProposal: task.afterImportSql ? 2 : 0 });
   if (flags["dry-run"] === true) {
-    console.log(JSON.stringify({ ...summary, applied: false }, null, 2));
+    console.log(JSON.stringify({ ...summary, estimated_rows_written: estimate, applied: false }, null, 2));
     return;
   }
+  await checkWriteBudget(t, estimate, flags);
   d1Migrate(t);
   const existing = d1Query<{ task_type: string }>(t, inline("SELECT task_type FROM batches WHERE id = ?1", bundle.batch.id))[0] ?? [];
   if (existing[0] && existing[0].task_type !== bundle.batch.taskType) {
@@ -199,7 +204,7 @@ async function main(): Promise<void> {
   )[0]?.[0];
   console.log(JSON.stringify({ ...summary, applied: true, active_proposals: counts?.active, stored_proposals: counts?.total }, null, 2));
   if (t !== "local") {
-    const cmd = t === "preview" ? "npm run deploy:preview" : "tsx scripts/deploy.ts production --yes-production";
+    const cmd = "tsx scripts/deploy.ts production --yes-production";
     console.log(`If new crops were added since the last deploy, deploy so they are served: ${cmd}`);
   }
 }

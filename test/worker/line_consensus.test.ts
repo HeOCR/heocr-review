@@ -18,7 +18,7 @@ beforeEach(async () => {
   admins = "";
 });
 
-/** A request through the Worker with volunteer review switched on (preview) and the given admins. */
+/** A request through the Worker with volunteer review switched on (CONSENSUS_ENABLED=1) and the given admins. */
 async function call<T = Record<string, unknown>>(c: Client, method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
   const headers: Record<string, string> = { origin: ORIGIN, cookie: c.cookie };
   if (body !== undefined) headers["content-type"] = "application/json";
@@ -94,7 +94,7 @@ async function serveUntil(c: Client, externalId: string): Promise<number> {
 const lineState = async (id: number) => env.DB.prepare("SELECT state, needed FROM line_state WHERE proposal_id = ?1").bind(id).first<{ state: string; needed: number }>();
 
 describe("volunteer line review", () => {
-  it("is off unless switched on (preview only): not listed, not served", async () => {
+  it("is off unless switched on: not listed, not served", async () => {
     const c = await volunteer("off");
     const off = { ...env, CONSENSUS_ENABLED: undefined };
     const req = (path: string) => handle(new Request(ORIGIN + path, { headers: { origin: ORIGIN, cookie: c.cookie } }), off, exec);

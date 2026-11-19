@@ -1,7 +1,7 @@
 /**
  * Read or change a batch's settings (migrations/0006_batch_settings.sql), which an import never touches.
  *
- *   npm run batch-setting -- --batch <id> [--target local|preview|production [--yes-production]]
+ *   npm run batch-setting -- --batch <id> [--target local|production [--yes-production]]
  *   npm run batch-setting -- --batch <id> --pass2-reviewer same|other --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --two-typings-groups <group,group|none> --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --resolution single|volunteer_v1|volunteer_v1_1 --by <who> [--target ...]
