@@ -56,7 +56,7 @@ deploy, so there is no separate privacy-text deploy.
      - Production is at 0004 today. `batch_settings` (0006) and `verify_votes` (0009) don't exist there yet, so
        0010 rebuilds tables created empty earlier in the same deploy. The tables that hold data (`decisions`,
        `reviewers`, `consent_events`, `proposals`, `items`, `batches`, `drafts`, `subsets`, `subset_members`) are
-       untouched by 0005–0010, and the counts prove it.
+       untouched by 0005–0011, and the counts prove it.
      - The export file is kept until the launch is verified and heocr-lead closes it out. It is never committed,
        uploaded or sent.
 1. **Media.**
@@ -66,8 +66,9 @@ deploy, so there is no separate privacy-text deploy.
    - Copy the volunteer media hold into `public/media`. From the launch on, it is served.
    - Check that `public/media` has no dropped page, and that the volunteer folder holds exactly the re-cut's pages.
 2. **Deploy code and migrations:** `tsx scripts/deploy.ts production --yes-production`. This applies migrations
-   0005 to 0010 and ships the privacy text above. 0005–0009 are additive. 0010 rebuilds `batch_settings` and
-   `verify_votes` with their rows, to widen two CHECKs.
+   0005 to 0011 and ships the privacy text above. 0005–0009 and 0011 are additive (0011 also sets `pointed_books =
+   keep` on the pointed batch and the gold-lines batch). 0010 rebuilds `batch_settings` and `verify_votes` with their
+   rows, to widen two CHECKs.
    - **Right after it,** before step 3, recount every table from step 0's list. Every count must be unchanged, and the
      new tables are empty. If any count differs, stop, roll back the Worker, and report to heocr-lead. The export is the
      reference.
@@ -82,7 +83,7 @@ deploy, so there is no separate privacy-text deploy.
      decisions. If it refuses, close that batch and stop.
 4. **Deploy again**, so the new media is served. Use the same command; the migrations are a no-op.
 5. **Checks** (all read-only):
-   - migrations 0001 to 0010 are applied;
+   - migrations 0001 to 0011 are applied;
    - `/api/config` gives `termsVersion` 2026-11-18-v1, and `/privacy` shows 2026-11-18-v3;
    - each batch's progress SQL, timed on production D1;
    - one media file per batch returns 200;

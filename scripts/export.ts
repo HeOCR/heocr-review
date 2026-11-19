@@ -17,7 +17,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildExport, formatJson } from "../src/tasks/export";
 import { goldProposalIds, publicFiles } from "../src/tasks/public_export";
-import { CONSENSUS_EXPORT_SQL, EXPORT_SQL, PHIST_GOLD_EXPORT_SQL, VERIFY_VOTES_SQL, toBatch, toCredit, toDecision, toProposal, toVerifyVote, type BatchRow, type CreditRow, type DecisionRow, type ProposalRow, type VerifyVoteRow } from "../src/tasks/rows";
+import { CONSENSUS_EXPORT_SQL, EXPORT_SQL, PHIST_GOLD_EXPORT_SQL, POINTED_DROPS_SQL, VERIFY_VOTES_SQL, toPointedDrop, type PointedDropRow, toBatch, toCredit, toDecision, toProposal, toVerifyVote, type BatchRow, type CreditRow, type DecisionRow, type ProposalRow, type VerifyVoteRow } from "../src/tasks/rows";
 import { parseArgs, str, target } from "./lib/args";
 import { inline } from "./lib/sql";
 import { d1Query } from "./lib/wrangler";
@@ -36,6 +36,7 @@ function main(): void {
     proposals,
     decisions: one<DecisionRow>(EXPORT_SQL.decisions).map(toDecision),
     credits: one<CreditRow>(EXPORT_SQL.credits).map(toCredit),
+    ...(batchRow.task_type === "line_verify" ? { pointedDrops: one<PointedDropRow>(POINTED_DROPS_SQL).map(toPointedDrop) } : {}),
     ...(batchRow.task_type === "line_consensus"
       ? {
           exclusions: one<{ reviewer_id: string; excluded_at: string }>(CONSENSUS_EXPORT_SQL.exclusions).map((r) => ({ reviewerId: r.reviewer_id, excludedAt: r.excluded_at })),

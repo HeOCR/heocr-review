@@ -101,6 +101,18 @@ export interface ExportExtra {
   verifyVotes?: VerifyVote[];
   /** line_verify volunteer_v1_1: each gold decision's grade, and the gold lines pulled now (migrations/0010). */
   phistGold?: { grades: PhistGoldGrade[]; pulled: string[] };
+  /** line_verify: the pointed-book rule's drops, per triggering mark (migrations/0011). */
+  pointedDrops?: PointedDrop[];
+}
+
+export interface PointedDrop {
+  decisionId: string;
+  reviewerId: string | null;
+  triggerItem: string | null;
+  bookId: string;
+  lines: number;
+  restored: number;
+  droppedAt: string;
 }
 
 export interface PhistGoldGrade {

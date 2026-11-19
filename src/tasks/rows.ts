@@ -136,6 +136,35 @@ export const PHIST_GOLD_EXPORT_SQL = {
   pulled: "SELECT gold_id FROM phist_gold_pulls WHERE pulled = 1 ORDER BY gold_id",
 };
 
+/**
+ * line_verify: the pointed-book rule's drops in a batch (migrations/0011), one row per triggering mark: who made it, on
+ * which line, the book, how many lines it took out and how many are active again.
+ */
+export const POINTED_DROPS_SQL = `SELECT d.decision_id, dec.reviewer_id, (SELECT q.external_id FROM proposals q WHERE q.id = dec.proposal_id) AS trigger_item,
+    d.book_id, COUNT(*) AS lines, SUM(p.active) AS restored, MIN(d.dropped_at) AS dropped_at
+  FROM pointed_book_drops d JOIN proposals p ON p.id = d.proposal_id LEFT JOIN decisions dec ON dec.id = d.decision_id
+  WHERE d.batch_id = ?1 GROUP BY d.decision_id, d.book_id ORDER BY dropped_at`;
+
+export interface PointedDropRow {
+  decision_id: string;
+  reviewer_id: string | null;
+  trigger_item: string | null;
+  book_id: string;
+  lines: number;
+  restored: number;
+  dropped_at: string;
+}
+
+export const toPointedDrop = (r: PointedDropRow) => ({
+  decisionId: r.decision_id,
+  reviewerId: r.reviewer_id,
+  triggerItem: r.trigger_item,
+  bookId: r.book_id,
+  lines: r.lines,
+  restored: r.restored,
+  droppedAt: r.dropped_at,
+});
+
 /** line_verify volunteer_v1: every decision's verify_votes row in a batch. */
 export const VERIFY_VOTES_SQL = `SELECT v.decision_id, v.counted, v.not_counted_reason, v.step, v.by_admin FROM verify_votes v
   JOIN proposals p ON p.id = v.proposal_id WHERE p.batch_id = ?1`;

@@ -16,7 +16,7 @@ import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import type { LineRouting } from "../tasks/line_verify/resolution";
-import { dropPointedBook } from "./pointed_books";
+import { dropPointedBook, pointedDropsExtra } from "./pointed_books";
 import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
 import { isVolunteerV1, openFor, recordVolunteerDecision, routingOf, volunteerExtras } from "./verify_resolution";
 import {
@@ -406,7 +406,8 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
     const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
-    const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
+    const drops = batch.taskType === "line_verify" ? await pointedDropsExtra(ctx.env.DB, batch.id) : {};
+    const result = buildExport({ batch, ...rows, ...extras, ...drops, exportedAt: iso(ctx.now) });
     const perReviewer = new Map<string, number>();
     for (const d of rows.decisions) if (d.supersededAt === null) perReviewer.set(d.reviewerId, (perReviewer.get(d.reviewerId) ?? 0) + 1);
     out.push({
@@ -429,7 +430,8 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
   const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
-  const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
+  const drops = batch.taskType === "line_verify" ? await pointedDropsExtra(ctx.env.DB, batch.id) : {};
+  const result = buildExport({ batch, ...rows, ...extras, ...drops, exportedAt: iso(ctx.now) });
   return json({
     counts: result.counts,
     problems: result.problems,
