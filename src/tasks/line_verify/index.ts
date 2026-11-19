@@ -87,6 +87,8 @@ export interface LineVerifySource {
 export const SOURCE_LABELS: Record<string, Label> = {
   wikisource_he_proofread: { he: "ויקיטקסט", en: "Hebrew Wikisource" },
   benyehuda_nli_aligned: { he: "פרויקט בן־יהודה, סריקת הספרייה הלאומית", en: "Project Ben-Yehuda text, NLI scan" },
+  reshumot_scanned: { he: "רשומות (סריקה)", en: "Reshumot (scan)" },
+  knesset_plenary: { he: "דברי הכנסת", en: "Knesset plenary record" },
   sefaria_edition: { he: "ספריא, נוסח המהדורה", en: "Sefaria, the edition's text" },
   gutenberg_edition: { he: "פרויקט גוטנברג, נוסח המהדורה", en: "Project Gutenberg, the edition's text" },
   benyehuda_text: { he: "פרויקט בן־יהודה", en: "Project Ben-Yehuda" },
@@ -96,6 +98,7 @@ export const SOURCE_LABELS: Record<string, Label> = {
 export const PROVENANCE_LABELS: Record<string, Label> = {
   wikisource_quality3_single_proofreader: { he: "הוגה בידי מגיה אחד בוויקיטקסט", en: "Proofread once on Wikisource" },
   pby_human_typed_aligned: { he: "הוקלד בידי אדם (בן־יהודה), מותאם לסריקה", en: "Human-typed (Ben-Yehuda), aligned to the scan" },
+  publisher_ocr_layer: { he: "שכבת ה-OCR של ה-PDF", en: "The PDF's OCR layer" },
   sefaria_exact_edition: { he: "נוסח המהדורה הזאת בספריא", en: "This edition's text on Sefaria" },
   gutenberg_exact_edition: { he: "נוסח המהדורה הזאת בפרויקט גוטנברג", en: "This edition's text on Project Gutenberg" },
   pby_human_typed: { he: "הוקלד בידי אדם (בן־יהודה)", en: "Human-typed (Ben-Yehuda)" },
