@@ -44,6 +44,17 @@ deploy, so there is no separate privacy-text deploy.
    - Record the live Worker version id (`wrangler deployments list`) for rollback.
    - Record a D1 Time Travel bookmark. Reading it changes nothing.
    - Record each production batch's current decision count.
+   - **Full D1 export** (heocr-lead, 2026-11-19), because migration 0010 rebuilds two tables:
+     `npx wrangler d1 export DB --remote --env= --output <private path>`. The output path is outside every repository
+     and every synced folder, mode 0600: the export holds reviewer pseudonyms and every decision. Record its sha256,
+     and a row count per table (`SELECT name FROM sqlite_master WHERE type = 'table'`, then `SELECT COUNT(*)` for each).
+     Print counts only, never rows.
+     - Production is at 0004 today. `batch_settings` (0006) and `verify_votes` (0009) don't exist there yet, so
+       0010 rebuilds tables created empty earlier in the same deploy. The tables that hold data (`decisions`,
+       `reviewers`, `consent_events`, `proposals`, `items`, `batches`, `drafts`, `subsets`, `subset_members`) are
+       untouched by 0005–0010, and the counts prove it.
+     - The export file is kept until the launch is verified and heocr-lead closes it out. It is never committed,
+       uploaded or sent.
 1. **Media.**
    - Run `.import/privacy/recut/media_removal.sh` (local, git-ignored). It moves the dropped pages' images out of
      `public/media/newprinted_midcentury_v0` and out of the volunteer media hold, into
@@ -51,7 +62,11 @@ deploy, so there is no separate privacy-text deploy.
    - Copy the volunteer media hold into `public/media`. From the launch on, it is served.
    - Check that `public/media` has no dropped page, and that the volunteer folder holds exactly the re-cut's pages.
 2. **Deploy code and migrations:** `tsx scripts/deploy.ts production --yes-production`. This applies migrations
-   0005 to 0009, all additive, and ships the privacy text above.
+   0005 to 0010 and ships the privacy text above. 0005–0009 are additive. 0010 rebuilds `batch_settings` and
+   `verify_votes` with their rows, to widen two CHECKs.
+   - **Right after it,** before step 3, recount every table from step 0's list. Every count must be unchanged, and the
+     new tables are empty. If any count differs, stop, roll back the Worker, and report to heocr-lead. The export is the
+     reference.
 3. **Data, production:**
    - Apply `.import/privacy/recut/v0_deactivate_dropped.sql`. It takes the dropped pages out of the maintainer's
      page review, since their images are gone. They had 0 decisions on 2026-11-19; check again first.
@@ -63,7 +78,7 @@ deploy, so there is no separate privacy-text deploy.
      decisions. If it refuses, close that batch and stop.
 4. **Deploy again**, so the new media is served. Use the same command; the migrations are a no-op.
 5. **Checks** (all read-only):
-   - migrations 0001 to 0009 are applied;
+   - migrations 0001 to 0010 are applied;
    - `/api/config` gives `termsVersion` 2026-11-18-v1, and `/privacy` shows 2026-11-18-v3;
    - each batch's progress SQL, timed on production D1;
    - one media file per batch returns 200;
