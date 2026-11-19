@@ -15,9 +15,9 @@ export const AI_FLAGS_SCHEMA = "heocr_midcentury_ai_flags.v0";
 export const DECISIONS_SCHEMA = "line_consensus_decisions.v0";
 
 export const LINE_ITEMS_FILE = "line_items_v1.json";
-export const EXCLUSIONS_FILE = "volunteer_exclusions_v2.json";
+export const EXCLUSIONS_FILE = "volunteer_exclusions_v3.json";
 /** Registered files a newer one replaced: a bundle that still carries one is refused. */
-export const SUPERSEDED_FILES: Record<string, string> = { "volunteer_exclusions_v1.json": EXCLUSIONS_FILE };
+export const SUPERSEDED_FILES: Record<string, string> = { "volunteer_exclusions_v1.json": EXCLUSIONS_FILE, "volunteer_exclusions_v2.json": EXCLUSIONS_FILE };
 export const MAINTAINER_FILE = "maintainer_decided.json";
 export const GOLD_FILE = "gold_v1.json";
 export const AI_FILE = "ai_flags.json";
@@ -26,11 +26,12 @@ export const AI_FILE = "ai_flags.json";
  * eval's files as registered (SHA256SUMS of the amendment folder, heocr-restricted-eval#29). The import refuses any
  * other content: they change only through a new registered file. gold_v1.json is added when eval registers it.
  * Exclusions v2 (heocr-restricted-eval#91, 2026-11-19) adds the 3 pages the private-names screen dropped (reason
- * `privacy`; NOTE_privacy_exclusions_v2_2026-11-19.md) and supersedes v1.
+ * `privacy`; NOTE_privacy_exclusions_v2_2026-11-19.md) and supersedes v1. Exclusions v3 (heocr-restricted-eval#92) adds
+ * the maintainer's edge-case drop, a fourth privacy page, and supersedes v2.
  */
 export const REGISTERED_SHA256: Record<string, string> = {
   [LINE_ITEMS_FILE]: "ea25f3993cd3ec7cc004d353a890783d9747425c1b64efc417b0dcec31d393eb",
-  [EXCLUSIONS_FILE]: "e2f9cdae2a18d7b79747cf6f7dbdaedb0eec96fd403db8a8d50c16c2e480051d",
+  [EXCLUSIONS_FILE]: "4c1dec242e65cc8f497d08a2c4aaadeea5576c77890a8dadb3cf158f3d44edfd",
 };
 /** eval's agreement.py, which src/tasks/line_consensus/consensus.ts ports (named in every export). */
 export const AGREEMENT_PY_SHA256 = "b0c1bb65397186c57457e2677b06bc92d6696e2af929a436ef408115065d40f7";

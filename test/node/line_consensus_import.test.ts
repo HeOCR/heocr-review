@@ -10,7 +10,7 @@ const DIR = "test/fixtures/line_consensus";
 const read = (n: string) => JSON.parse(readFileSync(`${DIR}/${n}`, "utf8")) as Record<string, unknown>;
 const items = () => read("line_items_v1.json");
 const sidecars = (over: Record<string, unknown> = {}) => ({
-  "volunteer_exclusions_v2.json": read("volunteer_exclusions_v2.json"),
+  "volunteer_exclusions_v3.json": read("volunteer_exclusions_v3.json"),
   "maintainer_decided.json": read("maintainer_decided.json"),
   "ai_flags.json": read("ai_flags.json"),
   "gold_v1.json": read("gold_v1.json"),
@@ -26,11 +26,13 @@ describe("line_consensus import", () => {
     expect(lineConsensusImporter.problems(items(), sidecars())).toEqual([]);
   });
 
-  it("refuses a bundle that still carries the superseded exclusions v1", () => {
-    const v1 = read("volunteer_exclusions_v2.json");
-    expect(lineConsensusImporter.problems(items(), sidecars({ "volunteer_exclusions_v1.json": v1 }))).toEqual([
-      "volunteer_exclusions_v1.json is superseded by volunteer_exclusions_v2.json: the bundle must carry volunteer_exclusions_v2.json only",
-    ]);
+  it("refuses a bundle that still carries a superseded exclusions file (v1 or v2)", () => {
+    const old = read("volunteer_exclusions_v3.json");
+    for (const name of ["volunteer_exclusions_v1.json", "volunteer_exclusions_v2.json"]) {
+      expect(lineConsensusImporter.problems(items(), sidecars({ [name]: old }))).toEqual([
+        `${name} is superseded by volunteer_exclusions_v3.json: the bundle must carry volunteer_exclusions_v3.json only`,
+      ]);
+    }
   });
 
   it("queues boxed and no-box lines of volunteer pages only; excluded and maintainer-decided pages give gold or nothing", () => {
@@ -57,10 +59,10 @@ describe("line_consensus import", () => {
     const bad = { ...gold, lines: [{ ...gold.lines[0]!, page_key: A, image_sha256: (items().pages as { page_key: string; image_sha256: string }[])[0]!.image_sha256 }] };
     expect(lineConsensusImporter.problems(items(), sidecars({ "gold_v1.json": bad })).join("\n")).toMatch(/is a volunteer page/);
     // Gold only from the maintainer's interim pages: a page excluded for another reason is refused too.
-    const ex = read("volunteer_exclusions_v2.json") as { pages: { page_key: string; reason: string }[] };
+    const ex = read("volunteer_exclusions_v3.json") as { pages: { page_key: string; reason: string }[] };
     const reserve = { ...ex, pages: ex.pages.map((p) => ({ ...p, reason: "reserve" })) };
-    expect(lineConsensusImporter.problems(items(), sidecars({ "volunteer_exclusions_v2.json": reserve })).join("\n")).toMatch(/not one of the maintainer's interim pages/);
-    for (const name of ["volunteer_exclusions_v2.json", "maintainer_decided.json", "ai_flags.json"]) {
+    expect(lineConsensusImporter.problems(items(), sidecars({ "volunteer_exclusions_v3.json": reserve })).join("\n")).toMatch(/not one of the maintainer's interim pages/);
+    for (const name of ["volunteer_exclusions_v3.json", "maintainer_decided.json", "ai_flags.json"]) {
       const s = sidecars();
       delete (s as Record<string, unknown>)[name];
       expect(lineConsensusImporter.problems(items(), s).join("\n")).toMatch(new RegExp(`${name.replace(".", "\\.")} is required`));
