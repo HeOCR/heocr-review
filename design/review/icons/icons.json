@@ -1,0 +1,130 @@
+{
+  "exact": {
+    "mirrors_in_rtl": false,
+    "use": "Exact / correct / accept / saved"
+  },
+  "edit": {
+    "mirrors_in_rtl": false,
+    "use": "Correct it / edit"
+  },
+  "niqqud": {
+    "mirrors_in_rtl": false,
+    "use": "Print has niqqud"
+  },
+  "unreadable": {
+    "mirrors_in_rtl": false,
+    "use": "Unreadable"
+  },
+  "misaligned": {
+    "mirrors_in_rtl": false,
+    "use": "Misaligned: the candidate is another line"
+  },
+  "not-on-page": {
+    "mirrors_in_rtl": false,
+    "use": "Not on the page"
+  },
+  "skip": {
+    "mirrors_in_rtl": true,
+    "use": "Skip"
+  },
+  "previous": {
+    "mirrors_in_rtl": true,
+    "use": "Previous line (undo the last decision)"
+  },
+  "page": {
+    "mirrors_in_rtl": false,
+    "use": "Full page"
+  },
+  "more": {
+    "mirrors_in_rtl": false,
+    "use": "More answers"
+  },
+  "close": {
+    "mirrors_in_rtl": false,
+    "use": "Close / cancel / reject"
+  },
+  "reset": {
+    "mirrors_in_rtl": false,
+    "use": "Back to the candidate / try again"
+  },
+  "pieces": {
+    "mirrors_in_rtl": false,
+    "use": "Line in two pieces"
+  },
+  "fit": {
+    "mirrors_in_rtl": false,
+    "use": "Line fitted to the width"
+  },
+  "zoom-in": {
+    "mirrors_in_rtl": false,
+    "use": "Zoom in"
+  },
+  "zoom-out": {
+    "mirrors_in_rtl": false,
+    "use": "Zoom out"
+  },
+  "flag": {
+    "mirrors_in_rtl": false,
+    "use": "Pre-check flag / look here"
+  },
+  "conventions": {
+    "mirrors_in_rtl": false,
+    "use": "Typing conventions"
+  },
+  "settings": {
+    "mirrors_in_rtl": false,
+    "use": "Settings"
+  },
+  "tasks": {
+    "mirrors_in_rtl": false,
+    "use": "All tasks"
+  },
+  "desktop": {
+    "mirrors_in_rtl": false,
+    "use": "A desktop task"
+  },
+  "copy": {
+    "mirrors_in_rtl": false,
+    "use": "Copy the link"
+  },
+  "offline": {
+    "mirrors_in_rtl": false,
+    "use": "No connection"
+  },
+  "clock": {
+    "mirrors_in_rtl": false,
+    "use": "Wait: rate limit or daily quota"
+  },
+  "warning": {
+    "mirrors_in_rtl": false,
+    "use": "Something went wrong"
+  },
+  "sign-out": {
+    "mirrors_in_rtl": true,
+    "use": "Sign out"
+  },
+  "back": {
+    "mirrors_in_rtl": true,
+    "use": "Back"
+  },
+  "split": {
+    "mirrors_in_rtl": false,
+    "use": "Split the line at the cursor"
+  },
+  "merge": {
+    "mirrors_in_rtl": false,
+    "use": "Merge with the next line"
+  },
+  "move-up": {
+    "mirrors_in_rtl": false,
+    "use": "Move the line up"
+  },
+  "move-down": {
+    "mirrors_in_rtl": false,
+    "use": "Move the line down"
+  },
+  "add-line": {
+    "mirrors_in_rtl": false,
+    "use": "Add a line below"
+  }
+}

@@ -1,0 +1,19 @@
+/* Mockups only: stand-ins for the Worker's images. Invented text set in Frank Ruhl Libre (OFL).
+   Nothing in this file belongs in the app. */
+@font-face { font-family: "Mock Print"; font-weight: 500; src: url(mock-scan-font/frank-ruhl-libre-hebrew-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "Mock Print"; font-weight: 700; src: url(mock-scan-font/frank-ruhl-libre-hebrew-700-normal.woff2) format("woff2"); }
+.print { font-family: "Mock Print", serif; font-weight: 500; color: var(--scan-ink); direction: rtl; white-space: nowrap; filter: blur(0.3px); text-align: justify; text-align-last: justify; }
+.seg .print { position: absolute; inset-block: 0; display: flex; align-items: center; }
+.seg .print > span { flex: 1; }
+.print.one { inset-inline: 0; font-size: 27px; }
+.print.two { width: calc(200% - 20px); font-size: 23px; } .print.two.p0 { right: 0; } .print.two.p1 { right: calc(-100% + 20px); }
+.linestrip.wide { display: none; }
+@media (min-width: 1200px) { .linestrip.wide { display: flex; } .linestrip.narrow { display: none; } }
+@media (min-width: 900px) and (max-width: 1199px) { .print.two { font-size: 29px; } .prgrid .mockpage .print { font-size: 10.5px !important; } .prgrid .mockpage { padding: 28px 30px !important; } }
+.mrow { position: relative; padding: 2.2px 0; } .mrow .hl { inset: 0 -5px; } .mrow.ind .print { padding-inline-start: 14px; }
+.mockband { padding: 10px 16px 12px; } .mockband .mrow { padding: 3px 0; } .mockband .print { font-size: 11.5px; }
+.mockpage { padding: 7% 9%; } .mockpage .print { font-size: 9.6px; }
+.mockpage .mhead { display: flex; justify-content: space-between; margin-bottom: 12px; text-align-last: auto; }
+@media (max-width: 899px) { .side.open .mockpage .print { font-size: 10.4px; } .side.open .mockpage { padding: 28px 22px; } }
+@media (min-width: 900px) { .side.enlarged .mockpage .print { font-size: 18px; } .side.enlarged .mockpage { padding: 48px 64px; } .side.enlarged .mrow { padding: 4px 0; }
+  .prgrid .mockpage .print { font-size: 15px; } .prgrid .mockpage { padding: 40px 48px; } .prgrid .mrow { padding: 3.5px 0; } }
