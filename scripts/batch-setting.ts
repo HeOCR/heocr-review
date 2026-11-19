@@ -5,6 +5,7 @@
  *   npm run batch-setting -- --batch <id> --pass2-reviewer same|other --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --two-typings-groups <group,group|none> --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --resolution single|volunteer_v1|volunteer_v1_1 --by <who> [--target ...]
+ *   npm run batch-setting -- --batch <id> --pointed-books drop|keep --by <who> [--target ...]
  *
  * pass2_reviewer (line_verify only): who gets a line's blind second pass. 'same' (the default): the reviewer who
  * answered pass 1, 24 hours later (intra-rater). 'other': only a reviewer who never decided the line's pass 1, 24
@@ -27,7 +28,8 @@ import { d1Query } from "./lib/wrangler";
 
 export const READ_SQL = `SELECT b.id, b.task_type, json_extract(b.source_json, '$.schema_version') AS schema_version,
   COALESCE(s.pass2_reviewer, 'same') AS pass2_reviewer, s.updated_at, s.updated_by,
-  COALESCE(s.two_typings_groups, '[]') AS two_typings_groups, s.two_typings_set_at
+  COALESCE(s.two_typings_groups, '[]') AS two_typings_groups, s.two_typings_set_at,
+  COALESCE(s.pointed_books, 'drop') AS pointed_books
   FROM batches b LEFT JOIN batch_settings s ON s.batch_id = b.id WHERE b.id = ?1`;
 
 /** The batch's book groups (v1.2 pages). */
@@ -35,6 +37,22 @@ export const GROUPS_SQL = `SELECT DISTINCT json_extract(payload_json, '$.book_gr
   WHERE batch_id = ?1 AND json_extract(payload_json, '$.book_group') IS NOT NULL ORDER BY g`;
 
 export const RESOLUTIONS = ["single", "volunteer_v1", "volunteer_v1_1"] as const;
+
+/**
+ * pointed_books (line_verify only; migrations/0011_pointed_books.sql): 'drop' (the default), a "print has niqqud"
+ * mark by the admin or a counting reviewer takes the rest of the book out of the batch; 'keep' turns that off.
+ */
+export const POINTED_BOOKS = ["drop", "keep"] as const;
+export const UPSERT_POINTED_SQL = `INSERT INTO batch_settings (batch_id, updated_at, updated_by, pointed_books) VALUES (?1, ?2, ?3, ?4)
+  ON CONFLICT (batch_id) DO UPDATE SET pointed_books = excluded.pointed_books, updated_at = excluded.updated_at, updated_by = excluded.updated_by`;
+
+export function pointedBooksProblem(row: Row | undefined, value: string, by: string): string | null {
+  if (!row) return "no such batch";
+  if (row.task_type !== "line_verify") return `pointed_books applies to line_verify batches only (this one is ${row.task_type})`;
+  if (!(POINTED_BOOKS as readonly string[]).includes(value)) return `--pointed-books must be one of ${POINTED_BOOKS.join(", ")}`;
+  if (!by.trim()) return "--by must say who changes it";
+  return null;
+}
 
 /** Only the resolution column changes; a new row starts with the other defaults. */
 export const UPSERT_RESOLUTION_SQL = `INSERT INTO batch_settings (batch_id, updated_at, updated_by, resolution) VALUES (?1, ?2, ?3, ?4)
@@ -67,6 +85,7 @@ type Row = {
   updated_by: string | null;
   two_typings_groups?: string;
   two_typings_set_at?: string | null;
+  pointed_books?: string;
 };
 
 /** The groups a --two-typings-groups value names ("none": no group), or why it is refused. */
@@ -104,6 +123,13 @@ function main(): void {
     if (problem) throw new Error(problem);
     d1Query(t, inline(UPSERT_RESOLUTION_SQL, batchId, new Date().toISOString(), str(flags, "by"), flags.resolution));
     console.log(JSON.stringify({ target: t, batch: batchId, resolution: flags.resolution }));
+    return;
+  }
+  if (typeof flags["pointed-books"] === "string") {
+    const problem = pointedBooksProblem(before, flags["pointed-books"], str(flags, "by", ""));
+    if (problem) throw new Error(problem);
+    d1Query(t, inline(UPSERT_POINTED_SQL, batchId, new Date().toISOString(), str(flags, "by"), flags["pointed-books"]));
+    console.log(JSON.stringify({ target: t, batch: batchId, before: before!.pointed_books, after: read()?.pointed_books }));
     return;
   }
   if (typeof flags["two-typings-groups"] === "string") {

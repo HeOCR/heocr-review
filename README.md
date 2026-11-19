@@ -200,7 +200,15 @@ npm run batch-setting -- --batch <id> --two-typings-groups early --by <who> --ta
 npm run batch-setting -- --batch <id> --resolution volunteer_v1 --by <who> --target preview    # before the first decision
 npm run batch-setting -- --batch <id> --resolution volunteer_v1_1 --by <who> --target preview  # with P-hist gold
 npm run import-gold -- --batch <id> --gold <dir> --target preview                             # eval's registered gold file
+npm run batch-setting -- --batch <id> --pointed-books keep --by <who> --target preview        # a pointed batch: no book drops
 ```
+
+**Pointed books** (`migrations/0011_pointed_books.sql`). A Hebrew source is pointed or unpointed as a whole (the
+maintainer, 2026-11-19). When the admin, or a reviewer whose decisions count now, marks a line "print has niqqud" in a
+line_verify batch, every other undecided line of the same book (`page.book_id`) leaves the batch: `active = 0`, never
+deleted, never a gold line. Each line taken out is recorded in `pointed_book_drops` with the decision that caused it;
+setting it active again reverses it. It is on by default. A batch whose lines are all pointed sets
+`pointed_books = keep`; the migration does this for `line_verify_v1_pointed` and `newprinted_midcentury_goldlines_v0`.
 
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
 `npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan). `test/fixtures/line_verify_v11/` is
