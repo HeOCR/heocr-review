@@ -122,9 +122,12 @@ When more than one batch is open, the app starts with a task picker (`/app/#b/<b
 
 ## Abuse limits
 
-Writes need a session and a same-origin JSON request. Per-reviewer fixed-window limits apply: 60 decisions or skips
-a minute and 3,000 a day, 300 reads a minute, and 20 sign-ins a minute per client (its address is stored only as a
-keyed hash). Bodies are capped at 16 KB and edited text at 1,000 characters. Control characters and malformed
+Writes need a session and a same-origin JSON request. Per-reviewer limits apply: 60 decisions or skips a minute and
+3,000 a day, 300 reads a minute, and 20 sign-ins a minute per client (a keyed hash of its address, never the address).
+**No limit writes to D1** (`src/worker/ratelimit.ts`): per-minute limits are fixed-window counters in the Worker
+isolate's memory (best-effort), and the day and profile limits are counted from the decisions, skips and consent log
+themselves. On 2026-11-19 a counter row written on every request, reads included, used up the account's free daily
+D1 write budget (shared by preview and production) and took production down. Bodies are capped at 16 KB and edited text at 1,000 characters. Control characters and malformed
 display names are refused. Volunteer lines fall under the same per-reviewer limits. A line can be decided only by a
 reviewer it was served to, and only once. An admin can exclude a reviewer from agreement in a batch (their decisions are
 kept, never counted) or block the account.
