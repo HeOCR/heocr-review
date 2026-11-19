@@ -1,7 +1,8 @@
 # line_verify volunteer resolution v1.1: P-hist gold (addendum)
 
 Status: **agreed** (2026-11-19). heocr-eval answered the open questions, and heocr-lead confirmed the privacy text and
-the two design leans. The code follows in this PR. It extends
+the two design leans. Implemented in this PR: `src/tasks/line_verify/gold.ts` (the rules), `src/worker/phist_gold.ts`
+(D1), `scripts/import-gold.ts`, migration `0010_phist_gold.sql`. It extends
 [line_verify_volunteer_resolution_v1.md](line_verify_volunteer_resolution_v1.md) (v1). Everything v1 says still
 holds unless this file changes it.
 

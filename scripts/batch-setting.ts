@@ -4,7 +4,7 @@
  *   npm run batch-setting -- --batch <id> [--target local|preview|production [--yes-production]]
  *   npm run batch-setting -- --batch <id> --pass2-reviewer same|other --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --two-typings-groups <group,group|none> --by <who> [--target ...]
- *   npm run batch-setting -- --batch <id> --resolution single|volunteer_v1 --by <who> [--target ...]
+ *   npm run batch-setting -- --batch <id> --resolution single|volunteer_v1|volunteer_v1_1 --by <who> [--target ...]
  *
  * pass2_reviewer (line_verify only): who gets a line's blind second pass. 'same' (the default): the reviewer who
  * answered pass 1, 24 hours later (intra-rater). 'other': only a reviewer who never decided the line's pass 1, 24
@@ -15,7 +15,8 @@
  * need a second independent typing (heocr-eval's registered fallback: over 5% word disagreement in the blind sample).
  * "none" clears it. Each group must be a book_group of the batch's pages.
  *
- * resolution (line_verify only; migrations/0009_volunteer_resolution.sql): 'single' (the default) or 'volunteer_v1'
+ * resolution (line_verify only; migrations/0009_volunteer_resolution.sql, 0010_phist_gold.sql): 'single' (the default),
+ * 'volunteer_v1', or 'volunteer_v1_1' (volunteer_v1 plus the P-hist gold gate, docs/specs/line_verify_phist_gold_v1_1.md)
  * (docs/specs/line_verify_volunteer_resolution_v1.md: two counted decisions per line, routed in the app). Switch it
  * before the batch's first decision: lines decided under 'single' have no verify_votes rows.
  */
@@ -33,7 +34,7 @@ export const READ_SQL = `SELECT b.id, b.task_type, json_extract(b.source_json, '
 export const GROUPS_SQL = `SELECT DISTINCT json_extract(payload_json, '$.book_group') AS g FROM items
   WHERE batch_id = ?1 AND json_extract(payload_json, '$.book_group') IS NOT NULL ORDER BY g`;
 
-export const RESOLUTIONS = ["single", "volunteer_v1"] as const;
+export const RESOLUTIONS = ["single", "volunteer_v1", "volunteer_v1_1"] as const;
 
 /** Only the resolution column changes; a new row starts with the other defaults. */
 export const UPSERT_RESOLUTION_SQL = `INSERT INTO batch_settings (batch_id, updated_at, updated_by, resolution) VALUES (?1, ?2, ?3, ?4)

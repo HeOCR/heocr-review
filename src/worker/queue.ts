@@ -7,6 +7,7 @@ import { taskType } from "../tasks/registry";
 import type { BatchRecord, ProposalRecord } from "../tasks/types";
 import { assignReserves, type ReserveRow } from "./reserves";
 import { servedMembers, type CurrentDecisionRow, type SubsetMemberRow } from "./subsets";
+import { NOT_GOLD, dueGold, isVolunteerV11 } from "./phist_gold";
 import { VOLUNTEER_DONE, isVolunteerV1, volunteerOpen } from "./verify_resolution";
 
 /** How long a served proposal stays leased to its reviewer before others are offered it first. */
@@ -166,7 +167,7 @@ const inFilter = (n: number, volunteerPages: boolean) =>
  * a volunteer_v1 batch (`volunteer`: the reviewer is the admin or not), its routing step lets them decide it.
  */
 const wantsDecision = (volunteer: { admin: boolean } | null) =>
-  volunteer ? volunteerOpen(volunteer.admin) : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}`;
+  volunteer ? `${volunteerOpen(volunteer.admin)} AND ${NOT_GOLD}` : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) < ${needed(3)}`;
 
 const openSql = (volunteerPages: boolean, volunteer: { admin: boolean } | null) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
   WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8, volunteerPages)}
@@ -193,14 +194,16 @@ export async function progressFor(
   const f = inFilter(6, batch.taskType === PAGE_REVIEW);
   const volunteer = isVolunteerV1(batch) ? { admin } : null;
   // A volunteer_v1 line is covered once it is resolved or unresolved.
+  // Gold lines (volunteer_v1_1) are never counted in progress: they are not the batch's lines.
+  const g = volunteer ? ` AND ${NOT_GOLD}` : "";
   const covered = volunteer ? VOLUNTEER_DONE : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL) >= ${needed(3)}`;
   const row = await db
     .prepare(
       `SELECT
-        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}) AS total,
-        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f} AND ${covered}) AS covered,
+        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}${g}) AS total,
+        (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}${g} AND ${covered}) AS covered,
         (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id = d.proposal_id
-          WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
+          WHERE p.batch_id = ?1 AND p.active = 1 AND ${f}${g} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
           WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND s.reviewer_id = ?2) AS skipped,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
@@ -269,7 +272,11 @@ export async function nextFor(
     .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
-  const rows = results.map(toProposal);
+  const open = results.map(toProposal);
+  // volunteer_v1_1: a gold line in place of the next line when the reviewer's schedule says so, while the batch still
+  // has a line for them (docs/specs/line_verify_phist_gold_v1_1.md, "Placement").
+  const gold = open.length && isVolunteerV11(batch) ? await dueGold(db, batch, reviewerId) : null;
+  const rows = gold ? [gold, ...open] : open;
   const progress = await progressFor(db, batch, reviewerId, nowMs, filter, admin);
   const first = rows[0];
   if (!first) return { proposal: null, progress, prefetch: [] };

@@ -12,9 +12,12 @@ export { GATE_BATCH_ID };
 import { VERIFY_VOTES_SQL, toVerifyVote, type VerifyVoteRow } from "../tasks/rows";
 import type { BatchRecord, ProposalRecord, VerifyVote } from "../tasks/types";
 import { standings } from "./consensus";
+import { isVolunteerV11, phistReasonFor } from "./phist_gold";
 
 
-export const isVolunteerV1 = (batch: BatchRecord) => batch.taskType === "line_verify" && batch.settings?.resolution === "volunteer_v1";
+/** volunteer_v1 or volunteer_v1_1 (the same routing; v1.1 adds the P-hist gold gate, src/worker/phist_gold.ts). */
+export const isVolunteerV1 = (batch: BatchRecord) =>
+  batch.taskType === "line_verify" && (batch.settings?.resolution === "volunteer_v1" || batch.settings?.resolution === "volunteer_v1_1");
 
 /** SQL: volunteer_v1 line p's routing lets this reviewer (the admin or not) decide it next. */
 export const volunteerOpen = (admin: boolean) =>
@@ -60,7 +63,9 @@ export async function recordVolunteerDecision(
   nowIso: string,
 ): Promise<LineRouting> {
   const atMaintainer = before.next === "maintainer" && admin;
-  const reason = atMaintainer ? null : notCountedReason(standingOf(await standings(db, GATE_BATCH_ID, [reviewerId]), reviewerId).state);
+  // The mid-century gate first; on a volunteer_v1_1 batch also the P-hist gold gate (its reason when only it fails).
+  const mid = atMaintainer ? null : notCountedReason(standingOf(await standings(db, GATE_BATCH_ID, [reviewerId]), reviewerId).state);
+  const reason = atMaintainer || mid !== null || !isVolunteerV11(batch) ? mid : await phistReasonFor(db, reviewerId);
   const counted = reason === null;
   const step = counted ? before.next! : "uncounted";
   await db

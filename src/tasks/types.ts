@@ -31,7 +31,7 @@ export interface BatchRecord {
   source: Record<string, unknown>;
   minReviewers: number;
   /** The batch's settings (migrations/0006_batch_settings.sql); absent where a record is built without them. */
-  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null; resolution: "single" | "volunteer_v1" };
+  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null; resolution: "single" | "volunteer_v1" | "volunteer_v1_1" };
 }
 
 export interface ProposalRecord {
@@ -99,6 +99,14 @@ export interface ExportExtra {
   maintainerDecisions: string[];
   /** line_verify volunteer_v1: what each decision recorded when it was made (migrations/0009). */
   verifyVotes?: VerifyVote[];
+  /** line_verify volunteer_v1_1: each gold decision's grade, and the gold lines pulled now (migrations/0010). */
+  phistGold?: { grades: PhistGoldGrade[]; pulled: string[] };
+}
+
+export interface PhistGoldGrade {
+  decisionId: string;
+  goldId: string;
+  hit: boolean;
 }
 
 export interface VerifyVote {

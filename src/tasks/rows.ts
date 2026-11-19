@@ -58,7 +58,7 @@ export function toBatch(row: BatchRow): BatchRecord & { status: string } {
       pass2ReviewerSetAt: row.pass2_reviewer_set_at ?? null,
       twoTypingsGroups: row.two_typings_groups ? (JSON.parse(row.two_typings_groups) as string[]) : [],
       twoTypingsSetAt: row.two_typings_set_at ?? null,
-      resolution: row.resolution === "volunteer_v1" ? "volunteer_v1" : "single",
+      resolution: row.resolution === "volunteer_v1" || row.resolution === "volunteer_v1_1" ? row.resolution : "single",
     },
   };
 }
@@ -125,6 +125,12 @@ export const CONSENSUS_EXPORT_SQL = {
   exclusions: "SELECT reviewer_id, excluded_at FROM agreement_exclusions WHERE batch_id = ?1",
   maintainer: `SELECT m.decision_id FROM maintainer_decisions m JOIN decisions d ON d.id = m.decision_id
     JOIN proposals p ON p.id = d.proposal_id WHERE p.batch_id = ?1`,
+};
+
+/** line_verify volunteer_v1_1: the export's gold input for a batch (every gold decision's grade; the lines pulled now). */
+export const PHIST_GOLD_EXPORT_SQL = {
+  grades: `SELECT g.decision_id, g.gold_id, g.hit FROM phist_gold_grades g JOIN proposals p ON p.id = g.proposal_id WHERE p.batch_id = ?1`,
+  pulled: "SELECT gold_id FROM phist_gold_pulls WHERE pulled = 1 ORDER BY gold_id",
 };
 
 /** line_verify volunteer_v1: every decision's verify_votes row in a batch. */

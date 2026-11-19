@@ -26,6 +26,7 @@ const ROUTES: [string, RegExp, Handler][] = [
   ["GET", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/export$/, (c, b) => api.adminExport(c, b!)],
   ["GET", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/volunteers$/, (c, b) => api.adminVolunteers(c, b!)],
   ["PUT", /^\/api\/admin\/batches\/([A-Za-z0-9._-]{1,100})\/reviewers\/(rv_[0-9a-f]{8})\/exclusion$/, (c, b, r) => api.adminExclusion(c, b!, r!)],
+  ["PUT", /^\/api\/admin\/phist-gold\/([A-Za-z0-9._-]{1,100})$/, (c, g) => api.adminPhistGoldPull(c, g!)],
 ];
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
