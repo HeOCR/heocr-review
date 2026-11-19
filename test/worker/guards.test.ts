@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { handle } from "../../src/worker/index";
 import type { Env } from "../../src/worker/env";
+import { LIMITS, enforce } from "../../src/worker/ratelimit";
 import { BATCH, Client } from "./helpers";
 
 const exec = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
@@ -72,20 +73,30 @@ describe("request guards", () => {
     expect(((await res.json()) as { error: string }).error).toBe("server_misconfigured");
   });
 
+  // The limiter counts in fixed windows, so these tests never depend on where the wall clock falls in a window:
+  // the API test fills the reviewer's counter for the current and the next window, and the counting test passes
+  // a fixed time.
   it("rate-limits decisions per reviewer", async () => {
     const c = new Client();
-    await c.signIn("fast");
+    const reviewerId = await c.signIn("fast");
     await c.acceptTerms();
     const id = (await env.DB.prepare("SELECT id FROM proposals WHERE batch_id = ?1 ORDER BY rank LIMIT 1").bind(BATCH).first<{ id: number }>())!.id;
-    let limited = 0;
-    for (let i = 0; i < 65; i++) {
-      const res = await c.req("POST", `/api/proposals/${id}/decision`, { value: i % 2 ? "accepted" : "rejected" });
-      if (res.status === 429) {
-        limited++;
-        expect(res.headers.get("retry-after")).toMatch(/^\d+$/);
-      }
+    const { bucket, max, windowS } = LIMITS.writeMinute;
+    const now = Math.floor(Date.now() / 1000 / windowS) * windowS;
+    for (const start of [now, now + windowS]) {
+      await env.DB.prepare("INSERT OR REPLACE INTO rate_limits (key, window_start, count) VALUES (?1, ?2, ?3)").bind(`${bucket}:${reviewerId}`, start, max).run();
     }
-    expect(limited).toBeGreaterThan(0);
+    const res = await c.req("POST", `/api/proposals/${id}/decision`, { value: "accepted" });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toMatch(/^\d+$/);
+  });
+
+  it("counts a window up to its limit, then refuses until the next window", async () => {
+    const limit = LIMITS.writeMinute;
+    const t0 = 1_800_000_000_000; // a fixed instant, at the start of a window
+    for (let i = 0; i < limit.max; i++) await enforce(env.DB, limit, "rv_counting", t0 + i);
+    await expect(enforce(env.DB, limit, "rv_counting", t0 + 30_000)).rejects.toMatchObject({ status: 429 });
+    await expect(enforce(env.DB, limit, "rv_counting", t0 + limit.windowS * 1000)).resolves.toBeUndefined();
   });
 
   it("blocks a blocked reviewer", async () => {
