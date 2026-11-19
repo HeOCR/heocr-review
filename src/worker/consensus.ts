@@ -26,8 +26,8 @@ const MAINTAINER_STATES = "('to_maintainer', 'no_box')";
 export const isConsensus = (batch: BatchRecord) => batch.taskType === LINE_CONSENSUS;
 
 /**
- * Volunteer line review runs only where it is switched on (CONSENSUS_ENABLED=1: preview), until the maintainer has
- * approved the privacy text for gold lines and accuracy.
+ * Volunteer line review runs only where it is switched on (CONSENSUS_ENABLED=1): a local Worker, and production from
+ * the launch.
  */
 export function assertConsensusEnabled(env: Env): void {
   if (env.CONSENSUS_ENABLED !== "1") throw new HttpError(404, "not_found");

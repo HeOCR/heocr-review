@@ -50,7 +50,7 @@
   (`docs/decisions/`). Change their text only with the maintainer's approval, and then bump `TERMS_VERSION` or
   `PRIVACY_VERSION` in the code and the page and record the approval in `docs/decisions/`.
   The privacy policy must describe exactly what the code stores; update it with any change to the data model.
-- Deploy production only when the maintainer says so. Preview is `npm run deploy:preview`.
+- Deploy production only when the maintainer says so. There is no preview environment (removed 2026-11-19, the maintainer's decision): test on a local Worker with a local D1 (`npm run dev`; a copy of production via `wrangler d1 export` when real data is needed). See `docs/runbooks/testing-and-imports.md`.
 
 ## Coding rules
 - TypeScript strict. Keep the frontend dependency-free and small; it must stay fast on a phone.

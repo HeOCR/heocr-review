@@ -139,7 +139,8 @@ In one `--file` run, in this order:
 the foreign key. When deleting, they go with their decisions. Grades and `verify_votes` are never recomputed: a
 deletion changes no stored verdict.
 
-Before the production run, rehearse the same file on the preview database (`--env=preview`) with a test reviewer.
+Before the production run, rehearse the same file on a local Worker loaded with a private copy of production's D1
+(`docs/runbooks/testing-and-imports.md`), never on a remote test database.
 
 ## 7. Verify (read-only, counts only)
 

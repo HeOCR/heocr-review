@@ -21,8 +21,7 @@
     "check-public": "tsx scripts/check-public.ts",
     "maintainer-decided": "tsx scripts/maintainer-decided.ts",
     "batch-setting": "tsx scripts/batch-setting.ts",
-    "import-gold": "tsx scripts/import-gold.ts",
-    "deploy:preview": "tsx scripts/deploy.ts preview"
+    "import-gold": "tsx scripts/import-gold.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.5.1",

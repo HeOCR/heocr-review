@@ -1,12 +1,11 @@
 /**
  * Deploy HeOCR Review with the credentials in ~/.config/heocr/cloudflare.env.
  *
- *   npm run deploy:preview                       -> Worker heocr-review-preview, D1 heocr-review-preview
  *   tsx scripts/deploy.ts production --yes-production   (only when the maintainer says so)
  *
  * It creates the D1 database if needed (and records its id in wrangler.jsonc), applies migrations, builds the
  * frontend, and deploys with GOOGLE_CLIENT_ID as a var and the secrets from
- * ~/.config/heocr/<worker>.secrets.json (heocr-review-preview / heocr-review; generated on first deploy, mode 0600; keep it:
+ * ~/.config/heocr/<worker>.secrets.json (heocr-review; generated on first deploy, mode 0600; keep it:
  * REVIEWER_ID_SECRET must never change, or every reviewer gets a new pseudonym).
  * ADMIN_REVIEWER_IDS is read from that file too; add the maintainer's rv_... id there and redeploy.
  */
@@ -34,12 +33,14 @@ function setDatabaseId(configText: string, dbName: string, id: string): string {
 
 function main(): void {
   const { flags, positional } = parseArgs(process.argv.slice(2));
-  const envName = positional[0] ?? "preview";
-  if (envName !== "preview" && envName !== "production") throw new Error("deploy preview or production");
-  if (envName === "production" && flags["yes-production"] !== true) throw new Error("production needs --yes-production");
+  // Production is the only remote environment (the preview environment was removed on 2026-11-19, the maintainer's
+  // decision): test on a local Worker (docs/runbooks/testing-and-imports.md).
+  const envName = positional[0];
+  if (envName !== "production") throw new Error("deploy production (the only remote environment; test locally with npm run dev)");
+  if (flags["yes-production"] !== true) throw new Error("production needs --yes-production");
   // Production is wrangler.jsonc's top-level environment; --env= names it explicitly.
-  const envFlags = envName === "preview" ? ["--env", "preview"] : ["--env="];
-  const workerName = envName === "preview" ? "heocr-review-preview" : "heocr-review";
+  const envFlags = ["--env="];
+  const workerName = "heocr-review";
   const dbName = workerName;
 
   const creds = loadCredentials();
@@ -49,7 +50,7 @@ function main(): void {
   const clientId = creds.GOOGLE_OAUTH_CLIENT_ID ?? "";
   if (!clientId) {
     if (envName === "production") throw new Error("GOOGLE_OAUTH_CLIENT_ID is missing from the credentials file");
-    console.warn("GOOGLE_OAUTH_CLIENT_ID is not set yet: the preview deploys without sign-in (the page says so)");
+    console.warn("GOOGLE_OAUTH_CLIENT_ID is not set yet: the deploy has no sign-in (the page says so)");
   }
   let configText = readFileSync(CONFIG, "utf8");
   assertNoDevAuth(configText);
@@ -73,7 +74,7 @@ function main(): void {
   wrangler(["d1", "migrations", "apply", "DB", "--remote", ...envFlags], { remote: true, input: "y\n" });
 
   // Secrets: generated once, kept outside the repo.
-  // One file per Worker, never shared: heocr-review-preview.secrets.json, heocr-review.secrets.json (production).
+  // One file per Worker, never shared: heocr-review.secrets.json (production).
   const secretsPath = join(homedir(), ".config", "heocr", `${workerName}.secrets.json`);
   const secrets: Record<string, string> = existsSync(secretsPath) ? (JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, string>) : {};
   let changed = false;

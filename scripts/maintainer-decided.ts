@@ -3,7 +3,7 @@
  * (maintainer_decided.json, midcentury_maintainer_decided.v1). Those pages keep his references and are never
  * queued for volunteers (heocr-restricted-eval preregistration/midcentury_volunteers_2026-11-18, §1).
  *
- *   npm run maintainer-decided -- --out <dir> [--target local|preview|production]
+ *   npm run maintainer-decided -- --out <dir> [--target local|production]
  *
  * It runs one SELECT and writes page keys only: no decision content, no reviewer id.
  */

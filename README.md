@@ -144,7 +144,7 @@ npm run lint && npm run typecheck && npm test
 ```
 
 The dev sign-in works only when `ENVIRONMENT=development`, `DEV_AUTH_BYPASS=1` and the request host is loopback.
-`wrangler.jsonc` sets `production`/`preview` and never the flag; a test and the deploy script both enforce this, and
+`wrangler.jsonc` sets `production` and never the flag; a test and the deploy script both enforce this, and
 wrangler never uploads `.dev.vars`.
 
 Tests run the Worker in workerd with a local D1 (`@cloudflare/vitest-plugin`). They also run the exported decisions
@@ -167,19 +167,21 @@ Only openly licensed pages may be imported: Wikisource scans and text are fine. 
    (gitignored), and upserts into D1. It never touches decisions.
 
    ```sh
-   npm run import -- --task reference_audit --bundle <app_bundle> [--pages-dir <hires>] --target local|preview
+   npm run import -- --task reference_audit --bundle <app_bundle> [--pages-dir <hires>] --target local|production
    ```
 
    `--pages-dir` adds the full-page view. Without a bundle, `--proposals <file> --pages-dir <hires>` cuts the crops
    here.
 
-3. For a remote target, redeploy so the crops are served: `npm run deploy:preview`. A deploy uploads exactly what is
-   in `public/media/`, so copy in the media of every batch the target serves before deploying.
+3. For production, redeploy so the crops are served (on the maintainer's word). A deploy uploads exactly what is in
+   `public/media/`, so copy in the media of every batch production serves before deploying. Every production import
+   is first counted against the account's daily D1 write budget (`docs/runbooks/testing-and-imports.md`); test it on a
+   local Worker first.
 
 ### Line verification bundles
 
 ```sh
-npm run import -- --task line_verify --bundle <dir with items.json and pages/> --target local|preview
+npm run import -- --task line_verify --bundle <dir with items.json and pages/> --target local|production
 ```
 
 The script validates `items.json` (`line_verify_items.v1` or `.v1.1`: an open `text_license` (CC0, public domain,
@@ -197,13 +199,13 @@ any of them, earlier decisions on that line become stale (kept, never exported).
 Batch settings, which a re-import keeps (`migrations/0006_batch_settings.sql`):
 
 ```sh
-npm run batch-setting -- --batch <id> --target local|preview|production                       # read
-npm run batch-setting -- --batch <id> --pass2-reviewer other --by <who> --target preview       # change
-npm run batch-setting -- --batch <id> --two-typings-groups early --by <who> --target preview   # v1.2: two typings ("none" clears)
-npm run batch-setting -- --batch <id> --resolution volunteer_v1 --by <who> --target preview    # before the first decision
-npm run batch-setting -- --batch <id> --resolution volunteer_v1_1 --by <who> --target preview  # with P-hist gold
-npm run import-gold -- --batch <id> --gold <dir> --target preview                             # eval's registered gold file
-npm run batch-setting -- --batch <id> --pointed-books keep --by <who> --target preview        # a pointed batch: no book drops
+npm run batch-setting -- --batch <id> --target local|production                       # read
+npm run batch-setting -- --batch <id> --pass2-reviewer other --by <who> --target production --yes-production       # change
+npm run batch-setting -- --batch <id> --two-typings-groups early --by <who> --target production --yes-production   # v1.2: two typings ("none" clears)
+npm run batch-setting -- --batch <id> --resolution volunteer_v1 --by <who> --target production --yes-production    # before the first decision
+npm run batch-setting -- --batch <id> --resolution volunteer_v1_1 --by <who> --target production --yes-production  # with P-hist gold
+npm run import-gold -- --batch <id> --gold <dir> --target production --yes-production                             # eval's registered gold file
+npm run batch-setting -- --batch <id> --pointed-books keep --by <who> --target production --yes-production        # a pointed batch: no book drops
 ```
 
 **Pointed books** (`migrations/0011_pointed_books.sql`). A Hebrew source is pointed or unpointed as a whole (the
@@ -223,7 +225,7 @@ the same lines as a v1.1 file, for the Worker tests only (it ships no page image
 ### Page review batches
 
 ```sh
-npm run import -- --task page_review --bundle <dir with batch_manifest.json, pages/, blind_prefill.json and ai_flags.json> --target local|preview
+npm run import -- --task page_review --bundle <dir with batch_manifest.json, pages/, blind_prefill.json and ai_flags.json> --target local|production
 ```
 
 The script validates the manifest (pages, roles, flags on non-blank pre-fill lines, unique pages and image names)
@@ -250,7 +252,7 @@ lines); other writes stay at 16 KB.
 ### Subsets (a filter in the app)
 
 ```sh
-npm run import-subset -- --file <interim_v1.json> --batch newprinted_midcentury_v0 --target local|preview
+npm run import-subset -- --file <interim_v1.json> --batch newprinted_midcentury_v0 --target local|production
 ```
 
 A subset is a named set of a batch's pages that a reviewer can work through on its own: the batch header offers
@@ -264,11 +266,11 @@ queue serves those pages in rank order, and progress counts strata. Only the sub
 (`migrations/0003_subsets.sql`): proposals, content hashes, decisions and exports are untouched, and decisions made in
 the filter are ordinary decisions on the same proposals.
 
-### Volunteer line review (preview only)
+### Volunteer line review (off until the launch)
 
 ```sh
 npm run maintainer-decided -- --out <bundle dir> --target production --yes-production   # read-only: page keys only
-npm run import -- --task line_consensus --bundle <bundle dir> --target local|preview
+npm run import -- --task line_consensus --bundle <bundle dir> --target local|production
 ```
 
 Community volunteers review the mid-century pages one printed line at a time (task type `line_consensus`; maintainer's
@@ -295,13 +297,14 @@ maintainer had decided, which keep his references), the batch's `ai_flags.json`,
 - **The maintainer's own queue:** once a volunteer batch has a page, the maintainer's page review leaves it out of
   "all pages", so the two sets of references never overlap. A filter that names it (the blind audit) still serves it.
   The interim pages, which supply the gold lines, stay his.
-- **Off unless switched on:** the whole task is off unless `CONSENSUS_ENABLED=1` (set for preview in
-  `wrangler.jsonc`), until the maintainer approves the privacy text for gold lines and accuracy.
+- **Off unless switched on:** the whole task is off unless `CONSENSUS_ENABLED=1`. Production's
+  `wrangler.jsonc` does not set it; the launch PR does (docs/runbooks/volunteer-launch.md). A local Worker sets it in
+  `.dev.vars` to try the task.
 
 ## Decisions out
 
 ```sh
-npm run export -- --batch e2d4_reference_audit_v1 --target preview --out out/
+npm run export -- --batch e2d4_reference_audit_v1 --target production --yes-production --out out/
 ```
 
 This writes `out/reference_audit_decisions.json`: exactly `reference_audit_decisions.v1`, with every reviewer's
@@ -361,22 +364,25 @@ Credentials live in `~/.config/heocr/cloudflare.env`: `CLOUDFLARE_ACCOUNT_ID`, `
 `CLOUDFLARE_WORKERS_SUBDOMAIN` and `GOOGLE_OAUTH_CLIENT_ID`. They are never printed or committed.
 
 ```sh
-npm run deploy:preview      # Worker heocr-review-preview + D1 heocr-review-preview
+tsx scripts/deploy.ts production --yes-production   # only on the maintainer's word
 ```
+
+There is no preview environment: the maintainer removed it on 2026-11-19, after test imports used up the account's
+daily D1 write budget and took production down. Test on a local Worker (`npm run dev`, a local D1; a copy of
+production via `wrangler d1 export` when real data is needed), as `docs/runbooks/testing-and-imports.md` says.
 
 The deploy script:
 
 - creates the D1 database if needed and records its id in `wrangler.jsonc`;
 - applies migrations and builds the frontend;
 - deploys with `GOOGLE_CLIENT_ID` as a var;
-- reads the secrets from `~/.config/heocr/<worker>.secrets.json` (`heocr-review-preview.secrets.json`, `heocr-review.secrets.json`) (mode 0600, generated on the first
+- reads the secrets from `~/.config/heocr/<worker>.secrets.json` (`heocr-review.secrets.json`) (mode 0600, generated on the first
   deploy): `SESSION_SECRET`, `REVIEWER_ID_SECRET` and `ADMIN_REVIEWER_IDS`. Back the file up: if
   `REVIEWER_ID_SECRET` changes, every reviewer gets a new id.
 
 The admin is the maintainer's reviewer id, as `ADMIN_REVIEWER_IDS` in that file. It appears under *Settings* after
 signing in; add it there and redeploy. The Google OAuth client must list the Worker's origin as an authorised
-JavaScript origin. Its branding URLs are `<origin>/`, `<origin>/privacy` and `<origin>/terms`. Production (`heocr-review`) is deployed only on the maintainer's word:
-`tsx scripts/deploy.ts production --yes-production`.
+JavaScript origin. Its branding URLs are `<origin>/`, `<origin>/privacy` and `<origin>/terms`. Production (`heocr-review`) is deployed only on the maintainer's word.
 
 ## Licence
 

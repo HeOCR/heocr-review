@@ -1,7 +1,7 @@
 /**
  * Export a batch's decisions from D1 in the consumer's format, plus the full ledger.
  *
- *   npm run export -- --batch e2d4_reference_audit_v1 [--target local|preview|production] [--out out/] [--public]
+ *   npm run export -- --batch e2d4_reference_audit_v1 [--target local|production] [--out out/] [--public]
  *
  * Writes the task type's decisions file (reference_audit_decisions.json: exactly hocrgen's
  * reference_audit_decisions.v1; line_verify_decisions.json: line_verify_decisions.v1.1, or v1.2 for a v1.1 batch, with

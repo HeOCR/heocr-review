@@ -12,7 +12,7 @@ The launch puts the volunteer line review (`line_consensus`, the mid-century bat
 Each item is owned by the session named, and all of them must hold before step 0.
 
 1. **The maintainer's go**, relayed word for word by heocr-lead.
-2. **Gold** (heocr-eval): `gold_v1.json` registered, and the gate batch has gold lines on preview. Without it no
+2. **Gold** (heocr-eval): `gold_v1.json` registered, and imported to the gate batch. Without it no
    volunteer can reach standing, so no volunteer decision counts in either batch.
 3. **Privacy re-cut** (heocr-eval registers, contrib imports): the mid-century exclusions file with the pages the
    private-names screen dropped (reason `privacy`), registered. Then a heocr-review PR moves `REGISTERED_SHA256` in
@@ -22,7 +22,8 @@ Each item is owned by the session named, and all of them must hold before step 0
    `npm run check-public`.
 6. **Volunteer review switched on:** a heocr-review PR that sets `CONSENSUS_ENABLED` to `"1"` in the production
    `vars` of `wrangler.jsonc`, merged before step 2.
-7. **P-hist test batches:** the bundles whose sha256 eval pinned, already checked on preview.
+7. **P-hist test batches:** the bundles whose sha256 eval pinned, checked on a local Worker (there is no preview
+   environment since 2026-11-19).
 8. **The maintainer's line-level gold batch** (`newprinted_midcentury_goldlines_v0`, live since 2026-11-19): production
    has no per-batch access control, so it is "admin only" only while the maintainer is the only reviewer. Before the
    launch deploy, close it (status `closed`) once its lines are decided and exported to eval, or gate it in the launch
@@ -48,6 +49,9 @@ deploy, so there is no separate privacy-text deploy.
    - Record the live Worker version id (`wrangler deployments list`) for rollback.
    - Record a D1 Time Travel bookmark. Reading it changes nothing.
    - Record each production batch's current decision count.
+   - **Write budget:** add up the launch's imports (the volunteer batch, both P-hist batches and their gold) with
+     each script's `--dry-run` estimate. Together they must fit the day's budget
+     (`docs/runbooks/testing-and-imports.md`); the scripts refuse an import that does not.
    - **Full D1 export** (heocr-lead, 2026-11-19), because migration 0010 rebuilds two tables:
      `npx wrangler d1 export DB --remote --env= --output <private path>`. The output path is outside every repository
      and every synced folder, mode 0600: the export holds reviewer pseudonyms and every decision. Record its sha256,

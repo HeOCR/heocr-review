@@ -23,7 +23,6 @@ export function loadCredentials(): Record<string, string> {
 
 export function targetFlags(t: Target): string[] {
   if (t === "local") return ["--local"];
-  if (t === "preview") return ["--remote", "--env", "preview"];
   return ["--remote"];
 }
 

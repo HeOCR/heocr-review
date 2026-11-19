@@ -11,7 +11,7 @@ describe("wrangler.jsonc", () => {
   it("never enables the dev sign-in", () => {
     const text = readFileSync("wrangler.jsonc", "utf8");
     expect(() => assertNoDevAuth(text)).not.toThrow();
-    expect(() => assertNoDevAuth(text.replace('"ENVIRONMENT": "preview"', '"ENVIRONMENT": "development"'))).toThrow();
+    expect(() => assertNoDevAuth(text.replace('"ENVIRONMENT": "production"', '"ENVIRONMENT": "development"'))).toThrow();
     expect(() => assertNoDevAuth(text.replace('"vars": {', '"vars": { "DEV_AUTH_BYPASS": "1",'))).toThrow();
   });
 });

@@ -30,26 +30,5 @@
       "database_id": "81219ea7-28f8-4f49-952f-bb109645429f",
       "migrations_dir": "migrations"
     }
-  ],
-  "env": {
-    "preview": {
-      "name": "heocr-review-preview",
-      "workers_dev": true,
-      "preview_urls": false,
-      "vars": {
-        "ENVIRONMENT": "preview",
-        "GOOGLE_CLIENT_ID": "",
-        // Volunteer line review: preview only until the maintainer approves its privacy text.
-        "CONSENSUS_ENABLED": "1"
-      },
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "heocr-review-preview",
-          "database_id": "f942b3af-e259-40dc-9547-18c2c9e80110",
-          "migrations_dir": "migrations"
-        }
-      ]
-    }
-  }
+  ]
 }

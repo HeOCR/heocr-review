@@ -20,11 +20,11 @@ export function str(flags: Record<string, string | true>, key: string, fallback?
   throw new Error(`--${key} is required`);
 }
 
-export type Target = "local" | "preview" | "production";
+export type Target = "local" | "production";
 
 export function target(flags: Record<string, string | true>): Target {
   const t = str(flags, "target", "local");
-  if (t !== "local" && t !== "preview" && t !== "production") throw new Error("--target must be local, preview or production");
+  if (t !== "local" && t !== "production") throw new Error("--target must be local or production (there is no remote test environment: test on a local Worker, docs/runbooks/testing-and-imports.md)");
   if (t === "production" && flags["yes-production"] !== true) throw new Error("--target production also needs --yes-production");
   return t;
 }
