@@ -1,0 +1,145 @@
+/* HeOCR Review: stylesheet, direction draft (line verification only).
+   Plain CSS on plain HTML. Needs tokens.css and fonts.css. Class names follow src/web/views/line.ts where a
+   matching element exists (.review.lineverify, .linebox, .linestrip, .seg, .txt.cand, .ctxbox, .hl, .editbox,
+   .actions, .act, .subnav, .msg, .progress, kbd). Logical properties only: dir="rtl" mirrors the layout. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; background: var(--bg); }
+body.rv { margin: 0; min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); color: var(--text);
+  font: 400 16px/1.5 var(--font-body); -webkit-tap-highlight-color: transparent; }
+.rv button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit; }
+.rv p { margin: 0; }
+.rv :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.muted { color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* icons: 24 px grid, 2 px stroke, square ends (same drawing rules as the Android set) */
+.ico { width: 24px; height: 24px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: square; stroke-linejoin: miter; }
+.ico .f { fill: currentColor; stroke: none; }
+.ico.sm { width: 20px; height: 20px; }
+[dir="rtl"] .ico.flip { transform: scaleX(-1); }
+
+/* key caps: shown on desktop only, beside the action they trigger */
+kbd { display: inline-block; min-width: 22px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+  font: 500 11px/18px var(--font-mono); color: var(--muted); text-align: center; background: var(--bg); direction: ltr; }
+
+/* ---------- top bar ---------- */
+.top { display: flex; align-items: center; gap: 8px; min-height: 52px; padding-inline: 4px 12px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.top .home { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; color: var(--text); flex: none; }
+.top .home svg { width: 28px; height: 28px; }
+.lg-ink { fill: none; stroke: currentColor; stroke-width: 4.5; } .lg-box { fill: none; stroke: var(--accent); stroke-width: 2; } .lg-h { fill: var(--accent); }
+.top .where { flex: 1; min-width: 0; line-height: 1.25; }
+.top .where b { display: block; font-size: 14.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top .where span { display: block; font-size: 12.5px; color: var(--muted); }
+.top .left { font: 500 12px/1.3 var(--font-mono); color: var(--muted); text-align: end; white-space: nowrap; }
+.top .left strong { display: block; font: 700 15px/1.2 var(--font-mono); color: var(--text); }
+.top .wordmark { font: 700 18px/1 var(--font-mono); letter-spacing: -0.03em; direction: ltr; margin-inline-end: 16px; }
+.top .wordmark b { color: var(--accent); font-weight: inherit; } .top .wordmark i { font-style: normal; font-weight: 500; color: var(--muted); margin-inline-start: 8px; }
+.top .links { display: flex; gap: 4px; margin-inline-start: auto; }
+.top .links a, .iconbtn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; min-height: 44px; padding-inline: 10px;
+  border-radius: var(--radius); color: var(--text); text-decoration: none; font-size: 14.5px; }
+.top .links a:hover, .iconbtn:hover { background: var(--accent-soft); }
+/* progress: a hairline, in the accent, never green (green and red are for verdicts) */
+.progress { height: 3px; background: var(--line); } .progress > i { display: block; height: 100%; background: var(--accent); }
+
+/* ---------- the task ---------- */
+.review { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; min-width: 0; }
+.ask { font-size: 15px; font-weight: 700; }
+/* the line on the scan: always the same box, so the next line appears in the same place */
+.linebox { position: relative; background: var(--scan-bg); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 10px 8px;
+  min-height: 148px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+.linestrip { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+.linestrip .seg { position: relative; overflow: hidden; height: 60px; }
+.linestrip .seg + .seg { border-top: 1px dashed #b9ae98; }
+.cropbar { display: flex; gap: 4px; justify-content: flex-end; margin-top: 8px; }
+.cropbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 36px; padding-inline: 8px; gap: 6px;
+  background: color-mix(in srgb, var(--scan-bg) 86%, #000 0%); border: 1px solid #b9ae98; border-radius: var(--radius); color: var(--scan-ink); font: 500 12px/1 var(--font-mono); }
+.cropbar button[aria-pressed="true"] { background: var(--scan-ink); color: var(--scan-bg); border-color: var(--scan-ink); }
+/* the candidate: same inline edges as the crop, so the eye maps one onto the other */
+.txt.cand { direction: rtl; text-align: start; font: 400 22px/1.65 var(--font-body); padding: 4px 8px; min-height: 80px; overflow-wrap: anywhere; }
+mark.attn { background: var(--attn-bg); color: inherit; border-bottom: 2px dotted var(--attn-line); padding: 0 2px; }
+/* a fixed slot for the rare notices (pre-check flag, "your decision"), so nothing jumps when one appears */
+.slot { min-height: 0; }
+.precheck { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--tag); border-radius: var(--radius); font-size: 14px; line-height: 1.45; }
+.precheck .ico { color: var(--muted); }
+
+/* context: the line among its neighbours, marked with the brand box */
+.ctxbox { position: relative; background: var(--scan-bg); border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.hl { position: absolute; border: 1.5px solid var(--accent); pointer-events: none; }
+.hl::after { content: ""; position: absolute; inset: -4.75px; background:
+  linear-gradient(var(--accent) 0 0) 0 0 / 8px 8px no-repeat, linear-gradient(var(--accent) 0 0) 100% 0 / 8px 8px no-repeat,
+  linear-gradient(var(--accent) 0 0) 0 100% / 8px 8px no-repeat, linear-gradient(var(--accent) 0 0) 100% 100% / 8px 8px no-repeat; }
+.rv .ctxbox .open { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px;
+  border-top: 1px solid #b9ae98; color: var(--scan-ink); font-size: 14px; font-weight: 700; }
+
+/* ---------- answers ---------- */
+.rv .act { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 8px 14px;
+  border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--bg); color: var(--text); font-weight: 700; font-size: 16px; text-align: center; }
+.rv .act:hover { border-color: var(--accent); background: var(--accent-soft); }
+.rv .act:active { background: var(--accent-soft); border-color: var(--accent); }
+.rv .act.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.rv .act.primary:hover, .rv .act.primary:active { background: var(--accent-press); border-color: var(--accent-press); }
+.rv .act:disabled, .rv .act[aria-disabled="true"] { background: var(--tag); border-color: var(--line); color: var(--muted); cursor: default; }
+.rv .act.quiet { border-color: transparent; font-weight: 500; font-size: 14.5px; padding-inline: 10px; min-height: 44px; }
+.rv .act.quiet:hover { background: var(--accent-soft); }
+.act.primary kbd { background: transparent; border-color: color-mix(in srgb, var(--on-accent) 55%, transparent); color: var(--on-accent); }
+
+/* save state: one fixed place, words and an icon, never colour alone */
+.savestate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); min-height: 24px; }
+.savestate[data-state="failed"] { color: var(--no); font-weight: 700; }
+
+/* phone: the dock holds every answer within the thumb's reach */
+.dock { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line-strong); padding: 6px 12px calc(12px + env(safe-area-inset-bottom)); }
+.dock .aux { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.dock .aux .savestate { margin-inline: auto; }
+.dock .actions { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
+.dock .actions .act { min-height: 64px; font-size: 19px; }
+
+/* ---------- editing ---------- */
+.editbox { display: flex; flex-direction: column; gap: 8px; }
+.editbox textarea { width: 100%; resize: none; direction: rtl; font: 400 21px/1.6 var(--font-body); color: var(--text); background: var(--bg);
+  border: 1.5px solid var(--accent); border-radius: var(--radius); padding: 6px 8px; }
+.editbox textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.edittools { display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; }
+.check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14.5px; }
+.check i { width: 20px; height: 20px; border: 1.5px solid var(--control-line); border-radius: var(--radius); flex: none; }
+.changes { font-size: 14px; color: var(--muted); min-height: 24px; }
+.changes del { color: var(--no); text-decoration: line-through; } .changes ins { color: var(--ok); text-decoration: underline; text-underline-offset: 3px; font-weight: 700; }
+.savebar { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line-strong); background: var(--bg); }
+.editing .top { min-height: 44px; } .editing .review { padding-block: 8px; gap: 8px; }
+.editing .linebox { min-height: 0; padding-block: 6px; } .editing .linestrip .seg { height: 50px; }
+@media (max-height: 820px) { .kb { height: 290px !important; } }
+.kb { height: 318px; background: var(--tag); border-top: 1px solid var(--line-strong); display: grid; place-items: center; color: var(--muted); font: 500 12px var(--font-mono); }
+
+/* ---------- desktop: use the width ---------- */
+@media (min-width: 900px) {
+  .top { min-height: 56px; padding-inline: 24px; gap: 16px; }
+  .top .where { flex: none; } .top .where b { font-size: 15px; }
+  .deck { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 31vw, 460px); gap: 0; min-height: 0; }
+  .review { padding: 28px 40px; gap: 16px; max-width: 1000px; width: 100%; margin-inline: auto 0; }
+  .ask { font-size: 16px; }
+  .linebox { min-height: 132px; padding: 14px; } .linestrip .seg { height: 92px; }
+  .txt.cand { font-size: 27px; line-height: 1.7; padding: 8px 14px; min-height: 62px; }
+  .slot { min-height: 46px; }
+  .actions.six { display: grid; grid-template-columns: 1.5fr repeat(5, 1fr); gap: 10px; }
+  .actions.six .act { flex-direction: column; gap: 6px; min-height: 68px; font-size: 15.5px; padding: 8px 6px; }
+  .subnav { display: flex; align-items: center; gap: 6px; }
+  .subnav .savestate { margin-inline-start: auto; }
+  .side { border-inline-start: 1px solid var(--line); padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; min-height: 0; background: var(--bg); }
+  .side h2 { margin: 0; font: 500 12px/1.4 var(--font-mono); color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  body.rv { height: 100dvh; }
+  .deck { overflow: hidden; }
+  .side { overflow: hidden; }
+  .side .ctxbox { flex: 1; min-height: 0; }
+  .side .src { font-size: 12.5px; color: var(--muted); }
+}
+
+/* ---------- mock scans: invented text set in an open font, standing in for the Worker's images ---------- */
+@font-face { font-family: "Mock Print"; font-weight: 500; src: url(../mockups/mock-scan-font/frank-ruhl-libre-hebrew-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "Mock Print"; font-weight: 700; src: url(../mockups/mock-scan-font/frank-ruhl-libre-hebrew-700-normal.woff2) format("woff2"); }
+.print { font-family: "Mock Print", serif; font-weight: 500; color: var(--scan-ink); direction: rtl; white-space: nowrap; filter: blur(0.3px); text-align: justify; text-align-last: justify; }
+.seg .print { position: absolute; inset-block: 0; display: flex; align-items: center; }
+.seg .print > span { flex: 1; text-align: justify; text-align-last: justify; }
+.mockpage { padding: 7% 9%; display: flex; flex-direction: column; gap: 0; height: 100%; justify-content: flex-start; }
+.mockpage .print { white-space: nowrap; }

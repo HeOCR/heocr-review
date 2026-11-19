@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeOCR Review · line verification, phone, editing</title>
+<link rel="stylesheet" href="../../css/tokens.css">
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/review.css">
+</head>
+<body class="rv editing">
+<header class="top"><button type="button" class="iconbtn" aria-label="Cancel"><svg class="ico " viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button><div class="where"><b>Correct the line</b></div><div class="left">Line 14 · p. 37</div></header>
+<main class="review lineverify">
+<div class="linebox"><div class="linestrip" dir="ltr" role="img" aria-label="the line on the scan"><div class="seg"><div class="print" style="width:calc(200% - 20px);right:0;font-size:23px"><span>ובבוקר יצאו הדייגים אל המזח הישן, ואיש מהם לא הביט לאחור אל בתי העיירה.</span></div></div><div class="seg"><div class="print" style="width:calc(200% - 20px);right:calc(-100% + 20px);font-size:23px"><span>ובבוקר יצאו הדייגים אל המזח הישן, ואיש מהם לא הביט לאחור אל בתי העיירה.</span></div></div></div></div>
+<div class="editbox">
+<textarea rows="3" dir="rtl" lang="he" spellcheck="false" aria-label="Correct the line">ובבוקר יצאו הדייגים אל המזח הישן, ואיש מהם לא הביט לאחור אל בתי העיירה.</textarea>
+<p class="changes" role="status">You changed: <bdi><del>הדיגים</del> ← <ins>הדייגים</ins></bdi></p>
+<div class="edittools"><button type="button" class="act quiet"><svg class="ico sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4v5h-5"/></svg>Back to the candidate</button><label class="check"><i></i>Print has niqqud (type letters only)</label></div>
+</div>
+</main>
+<div class="savebar"><button type="button" class="act primary">Save correction</button><button type="button" class="act">Cancel</button></div>
+<div class="kb" aria-hidden="true">System keyboard</div>
+</body></html>
