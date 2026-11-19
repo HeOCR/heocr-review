@@ -1,0 +1,599 @@
+{
+ "_note": "Strings used in the mockups, as [Hebrew, English]. The answers keep the app's current Hebrew labels; everything else is new wording and needs the maintainer's review.",
+ "batch": [
+  "אל המזח · שורות",
+  "אל המזח · lines"
+ ],
+ "where": [
+  "שורה 14 · עמ׳ 37",
+  "Line 14 · p. 37"
+ ],
+ "left": [
+  "נשארו",
+  "left"
+ ],
+ "decided": [
+  "היום",
+  "today"
+ ],
+ "ask": [
+  "האם הטקסט זהה בדיוק לשורה, אות באות וסימן בסימן?",
+  "Is the text exactly the line, letter by letter and mark by mark?"
+ ],
+ "exact": [
+  "מדויק",
+  "Exact"
+ ],
+ "fix": [
+  "תיקון",
+  "Correct it"
+ ],
+ "niqqud": [
+  "בדפוס יש ניקוד",
+  "Print has niqqud"
+ ],
+ "unread": [
+  "לא קריא",
+  "Unreadable"
+ ],
+ "misal": [
+  "לא תואם",
+  "Misaligned"
+ ],
+ "skip": [
+  "דילוג",
+  "Skip"
+ ],
+ "prev": [
+  "הקודם",
+  "Previous"
+ ],
+ "page": [
+  "העמוד המלא",
+  "Full page"
+ ],
+ "more": [
+  "עוד",
+  "More"
+ ],
+ "niqqud_sub": [
+  "האותיות נכונות, והדפוס מנוקד",
+  "The letters match and the print is pointed"
+ ],
+ "unread_sub": [
+  "אי אפשר לקרוא את השורה בסריקה",
+  "The line can't be read on the scan"
+ ],
+ "misal_sub": [
+  "הטקסט המוצע הוא שורה אחרת",
+  "The candidate is a different line"
+ ],
+ "skip_sub": [
+  "בלי להחליט; השורה תחזור אחר כך",
+  "No decision; the line comes back later"
+ ],
+ "saved": [
+  "ההחלטה הקודמת נשמרה",
+  "Previous decision saved"
+ ],
+ "saving": [
+  "שומר…",
+  "Saving…"
+ ],
+ "failed": [
+  "לא נשמר",
+  "Not saved"
+ ],
+ "pieces": [
+  "2 חלקים",
+  "2 pieces"
+ ],
+ "fit": [
+  "לרוחב",
+  "Fit width"
+ ],
+ "zoom_in": [
+  "הגדלה",
+  "Zoom in"
+ ],
+ "zoom_out": [
+  "הקטנה",
+  "Zoom out"
+ ],
+ "edit_title": [
+  "תיקון השורה",
+  "Correct the line"
+ ],
+ "save": [
+  "שמירת התיקון",
+  "Save correction"
+ ],
+ "cancel": [
+  "ביטול",
+  "Cancel"
+ ],
+ "reset": [
+  "חזרה לטקסט המוצע",
+  "Back to the candidate"
+ ],
+ "nq": [
+  "בדפוס יש ניקוד (מקלידים אותיות בלבד)",
+  "Print has niqqud (type letters only)"
+ ],
+ "changed": [
+  "שינית:",
+  "You changed:"
+ ],
+ "kb": [
+  "מקלדת המערכת",
+  "System keyboard"
+ ],
+ "pg": [
+  "העמוד",
+  "Page"
+ ],
+ "src": [
+  "אל המזח, עמ׳ 37",
+  "אל המזח, p. 37"
+ ],
+ "conv": [
+  "כללי ההקלדה",
+  "Conventions"
+ ],
+ "settings": [
+  "הגדרות",
+  "Settings"
+ ],
+ "tasks": [
+  "משימות",
+  "Tasks"
+ ],
+ "enlarge": [
+  "הגדלה",
+  "Enlarge"
+ ],
+ "back_line": [
+  "חזרה לשורה",
+  "Back to the line"
+ ],
+ "close": [
+  "סגירה",
+  "Close"
+ ],
+ "flag": [
+  "<strong>בדיקה מוקדמת:</strong> ייתכן שהטקסט שגוי (אות חסרה או מיותרת). בדקו מול העמוד המלא לפני ״מדויק״.",
+  "<strong>Pre-check:</strong> the text may be wrong (a missing or extra letter). Check it against the full page before “Exact”."
+ ],
+ "flag_phone": [
+  "פתחו את העמוד המלא כדי לסמן ״מדויק״.",
+  "Open the full page to mark “Exact”."
+ ],
+ "mis_hint": [
+  "הטקסט המוצע אינו השורה הזאת. הקלידו את השורה כפי שהיא בסריקה, אותיות בלבד.",
+  "The candidate is not this line. Type the line as the scan shows it, letters only."
+ ],
+ "mis_save": [
+  "שמירה: לא תואם",
+  "Save as misaligned"
+ ],
+ "mis_title": [
+  "הקלדת השורה",
+  "Type the line"
+ ],
+ "type_ask": [
+  "הקלידו את השורה כפי שהיא בסריקה, אות באות.",
+  "Type the line as the scan shows it, letter by letter."
+ ],
+ "type_save": [
+  "שמירה",
+  "Save"
+ ],
+ "type_ph": [
+  "הקלידו כאן את השורה",
+  "Type the line here"
+ ],
+ "not_one": [
+  "יותר משורה אחת",
+  "More than one line"
+ ],
+ "no_text": [
+  "אין טקסט",
+  "No text"
+ ],
+ "fail_note": [
+  "<strong>ההחלטה לא נשמרה.</strong> אין חיבור כרגע. התשובה שלך שמורה במכשיר ולא תאבד.",
+  "<strong>The decision wasn't saved.</strong> No connection right now. Your answer is kept on this device and won't be lost."
+ ],
+ "retry": [
+  "ניסיון נוסף",
+  "Try again"
+ ],
+ "keep": [
+  "נשמר במכשיר",
+  "Kept on this device"
+ ],
+ "c_batch": [
+  "שורות למתנדבים",
+  "Volunteer lines"
+ ],
+ "c_where": [
+  "החלטת על 37 שורות",
+  "You decided 37 lines"
+ ],
+ "correct": [
+  "נכון",
+  "Correct"
+ ],
+ "not_on": [
+  "לא בעמוד",
+  "Not on the page"
+ ],
+ "not_on_sub": [
+  "השורה המסומנת לא נמצאת בעמוד",
+  "The marked line is not on the page"
+ ],
+ "look": [
+  "בדקו היטב",
+  "Look closely"
+ ],
+ "digits": [
+  "ספרות או סוגריים",
+  "Digits or brackets"
+ ],
+ "help": [
+  "הסבר",
+  "Help"
+ ],
+ "a_batch": [
+  "תיקוני ייחוס",
+  "Reference corrections"
+ ],
+ "a_where": [
+  "הצעה 9 · עמ׳ 37",
+  "Proposal 9 · p. 37"
+ ],
+ "a_ask": [
+  "האם התיקון המוצע נכון לפי הסריקה?",
+  "Is the proposed correction right, going by the scan?"
+ ],
+ "now": [
+  "כעת",
+  "Now"
+ ],
+ "proposed": [
+  "מוצע",
+  "Proposed"
+ ],
+ "accept": [
+  "אישור",
+  "Accept"
+ ],
+ "reject": [
+  "דחייה",
+  "Reject"
+ ],
+ "a_edit": [
+  "עריכה",
+  "Edit"
+ ],
+ "a_note": [
+  "הערת הסוכן: בסריקה נראית יו״ד כפולה.",
+  "Agent note: the scan appears to show a double yod."
+ ],
+ "spelling": [
+  "כתיב",
+  "Spelling"
+ ],
+ "p_batch": [
+  "אל המזח · עמודים",
+  "אל המזח · pages"
+ ],
+ "p_where": [
+  "עמוד 37",
+  "Page 37"
+ ],
+ "p_ask": [
+  "תקנו כל שורה למה שמודפס בדיוק, לפי סדר הקריאה.",
+  "Correct each line to exactly what is printed, in reading order."
+ ],
+ "p_pending": [
+  "נשארו 2 שורות מסומנות לבדיקה.",
+  "2 flagged lines still to look at."
+ ],
+ "p_confirm": [
+  "אישור העמוד",
+  "Confirm the page"
+ ],
+ "p_draft": [
+  "הטיוטה נשמרה",
+  "Draft saved"
+ ],
+ "p_reject": [
+  "פסילת העמוד (ריק, לא קריא, שגוי)",
+  "Reject the page (blank, unreadable, wrong)"
+ ],
+ "p_add": [
+  "הוספת שורה בסוף",
+  "Add a line at the end"
+ ],
+ "p_reset": [
+  "חזרה לטקסט המוכן",
+  "Back to the pre-fill"
+ ],
+ "p_check": [
+  "בדקו",
+  "Look"
+ ],
+ "p_looked": [
+  "נבדק",
+  "Looked"
+ ],
+ "p_skip": [
+  "דילוג על העמוד",
+  "Skip the page"
+ ],
+ "t_niq": [
+  "ניקוד בדפוס",
+  "Niqqud"
+ ],
+ "t_nop": [
+  "לא בעמוד",
+  "Not on page"
+ ],
+ "t_unr": [
+  "לא קריא",
+  "Unreadable"
+ ],
+ "t_split": [
+  "פיצול",
+  "Split"
+ ],
+ "t_merge": [
+  "איחוד",
+  "Merge"
+ ],
+ "t_add": [
+  "שורה",
+  "Line"
+ ],
+ "pp_title": [
+  "תיקון עמוד שלם נעשה במחשב",
+  "Whole-page correction is done on a computer"
+ ],
+ "pp_body": [
+  "בטלפון אפשר לראות את העמוד ואת הטקסט שלו, אבל לא לתקן: עשרות שורות עם פיצול, איחוד והזזה צריכות מסך רחב ומקלדת.",
+  "On a phone you can view the page and its text, but not correct it: dozens of lines with split, merge and move need a wide screen and a keyboard."
+ ],
+ "pp_copy": [
+  "העתקת קישור לעמוד",
+  "Copy a link to this page"
+ ],
+ "pp_lines": [
+  "מעבר למשימת השורות",
+  "Go to a line task"
+ ],
+ "pp_view": [
+  "הטקסט המוכן (לצפייה בלבד)",
+  "The pre-fill (view only)"
+ ],
+ "signin_h": [
+  "עוזרים לשפר זיהוי טקסט עברי",
+  "Help improve Hebrew text recognition"
+ ],
+ "signin_p": [
+  "בודקים ומתקנים טקסט עברי מול סריקות של דפים מודפסים. כל החלטה משמשת לאימון ולמדידה של HeOCR, פרויקט קוד פתוח.",
+  "Check and correct Hebrew text against scans of printed pages. Every decision is used to train and measure HeOCR, an open-source project."
+ ],
+ "signin_g": [
+  "הכפתור של Google מוצג כאן",
+  "Google's button is rendered here"
+ ],
+ "signin_why": [
+  "הכניסה בחשבון Google משמשת לזיהוי בלבד. באתר מופיע כינוי, לא השם שלך.",
+  "Google sign-in is used for identification only. The site shows a pseudonym, not your name."
+ ],
+ "privacy": [
+  "מדיניות הפרטיות",
+  "Privacy policy"
+ ],
+ "terms": [
+  "תנאי השימוש",
+  "Terms of service"
+ ],
+ "terms_h": [
+  "לפני שמתחילים",
+  "Before you start"
+ ],
+ "terms_p": [
+  "כאן מופיע נוסח התנאים המלא, כפי שהוא באתר. הנוסח לא משתנה בעיצוב הזה.",
+  "The full terms text appears here, as it is on the site. This design does not change the wording."
+ ],
+ "credit": [
+  "אני רוצה קרדיט בשם (רשות)",
+  "I'd like credit by name (optional)"
+ ],
+ "name": [
+  "שם לתצוגה",
+  "Display name"
+ ],
+ "accept_terms": [
+  "קראתי ואני מסכים/ה",
+  "I have read and I agree"
+ ],
+ "pseud": [
+  "הכינוי שלך",
+  "Your pseudonym"
+ ],
+ "pick_h": [
+  "בחרו משימה",
+  "Choose a task"
+ ],
+ "today_line": [
+  "היום החלטת על 64 שורות.",
+  "Today you decided 64 lines."
+ ],
+ "lines_task": [
+  "בדיקת שורות",
+  "Line verification"
+ ],
+ "pages_task": [
+  "תיקון עמודים",
+  "Page review"
+ ],
+ "cons_task": [
+  "שורות למתנדבים",
+  "Volunteer lines"
+ ],
+ "audit_task": [
+  "בדיקת תיקוני ייחוס",
+  "Reference audit"
+ ],
+ "remain": [
+  "נשארו",
+  "left"
+ ],
+ "on_desktop": [
+  "במחשב",
+  "On a computer"
+ ],
+ "done_h": [
+  "אין עוד שורות בשבילך כרגע",
+  "No lines left for you right now"
+ ],
+ "done_p": [
+  "תודה רבה. היום החלטת על 64 שורות.",
+  "Thank you. Today you decided 64 lines."
+ ],
+ "done_skips": [
+  "חזרה ל־3 השורות שדילגת עליהן",
+  "Go back to the 3 lines you skipped"
+ ],
+ "done_last": [
+  "חזרה להחלטה האחרונה",
+  "Back to the last decision"
+ ],
+ "all_tasks": [
+  "כל המשימות",
+  "All tasks"
+ ],
+ "empty_h": [
+  "אין כרגע משימות פתוחות",
+  "No open tasks right now"
+ ],
+ "empty_p": [
+  "כשתיפתח משימה חדשה היא תופיע כאן.",
+  "When a new task opens it will appear here."
+ ],
+ "e_rate_h": [
+  "רגע, לאט יותר",
+  "A moment, please"
+ ],
+ "e_rate_p": [
+  "נשלחו יותר מדי פעולות בדקה. ההחלטה האחרונה לא נשמרה עדיין.",
+  "Too many actions in a minute. Your last decision has not been saved yet."
+ ],
+ "e_rate_hint": [
+  "אפשר להמשיך בעוד כחצי דקה.",
+  "You can continue in about half a minute."
+ ],
+ "e_off_h": [
+  "אין חיבור לאינטרנט",
+  "No internet connection"
+ ],
+ "e_off_p": [
+  "התשובה האחרונה שלך שמורה במכשיר. היא תישלח כשהחיבור יחזור.",
+  "Your last answer is kept on this device. It will be sent when the connection is back."
+ ],
+ "e_off_hint": [
+  "אין צורך להקליד אותה שוב.",
+  "You don't need to type it again."
+ ],
+ "e_srv_h": [
+  "משהו השתבש אצלנו",
+  "Something went wrong on our side"
+ ],
+ "e_srv_p": [
+  "השרת לא הצליח לשמור את ההחלטה. התשובה שלך שמורה במכשיר.",
+  "The server couldn't save the decision. Your answer is kept on this device."
+ ],
+ "e_srv_hint": [
+  "אם זה חוזר, אפשר לכתוב לנו.",
+  "If it keeps happening, you can write to us."
+ ],
+ "e_quota_h": [
+  "הגענו למכסה היומית",
+  "Today's quota is used up"
+ ],
+ "e_quota_p": [
+  "האתר שומר מספר מוגבל של החלטות ביום, והיום הוא התמלא. ההחלטות שכבר נשמרו בטוחות.",
+  "The site can save a limited number of decisions a day, and today's are used up. Decisions already saved are safe."
+ ],
+ "e_quota_hint": [
+  "המכסה מתחדשת בחצות (UTC). התשובה האחרונה שלך שמורה במכשיר ותישלח אז.",
+  "The quota resets at midnight (UTC). Your last answer is kept on this device and will be sent then."
+ ],
+ "ok_btn": [
+  "הבנתי",
+  "OK"
+ ],
+ "set_h": [
+  "הגדרות",
+  "Settings"
+ ],
+ "set_theme": [
+  "מראה",
+  "Appearance"
+ ],
+ "th_sys": [
+  "לפי המכשיר",
+  "System"
+ ],
+ "th_light": [
+  "בהיר",
+  "Light"
+ ],
+ "th_night": [
+  "כהה",
+  "Night"
+ ],
+ "set_lang": [
+  "שפה",
+  "Language"
+ ],
+ "set_side": [
+  "הצד של ״מדויק״ בטלפון",
+  "Side of “Exact” on a phone"
+ ],
+ "side_r": [
+  "ימין",
+  "Right"
+ ],
+ "side_l": [
+  "שמאל",
+  "Left"
+ ],
+ "set_credit": [
+  "קרדיט בשם (רשות)",
+  "Named credit (optional)"
+ ],
+ "set_credit_p": [
+  "כרגע הקרדיט הוא בכינוי בלבד.",
+  "Right now your credit is the pseudonym only."
+ ],
+ "set_save": [
+  "שמירה",
+  "Save"
+ ],
+ "signout": [
+  "התנתקות",
+  "Sign out"
+ ],
+ "conv_h": [
+  "כללי ההקלדה",
+  "Typing conventions"
+ ],
+ "conv_p": [
+  "מקלידים את מה שמודפס. סימנים שאין להם מקש כותבים כך:",
+  "Type what is printed. Marks that have no key are written like this:"
+ ]
+}

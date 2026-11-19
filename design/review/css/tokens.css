@@ -1,0 +1,105 @@
+/* HeOCR Review: tokens. The colour, type and shape values are the brand's (design/brand-handover/tokens);
+   the lines marked "app extensions" are shared with the Android design (design/android in heocr-desktop).
+   The review app follows the system theme unless the user picks one in settings.
+   data-theme="light" or "dark" on <html> forces one (used by the mockups and for testing). */
+:root {
+  --bg: #ffffff;
+  --surface: #f6f7fc;
+  --text: #0c1222;
+  --muted: #56607a;
+  --line: #dfe3f2;
+  --line-strong: #b9c1de;
+  --accent: #2447f9;
+  --accent-soft: #eef1ff;
+  --tag: #eef0f7;
+  --on-accent: #ffffff;
+  --grid: #f1f3fb;
+  --ok: #166534;
+  --ok-soft: #e7f4ec;
+  --no: #a12a22;
+  --no-soft: #fbe9e7;
+  /* app extensions */
+  --control-line: #7f8ab0;
+  --accent-press: #1a36c4;
+  --scrim: rgba(12, 18, 34, 0.36);
+  --toast-bg: #0c1222;
+  --toast-text: #ffffff;
+  --toast-action: #b9c5ff;
+
+  /* review extensions */
+  --scan-bg: #f1ece0;
+  --scan-ink: #2a2622;
+  --attn-bg: #eef1ff;
+  --attn-line: #2447f9;
+
+  --font-display: "JetBrains Mono", "Noto Sans Hebrew", monospace;
+  --font-body: "Noto Sans Hebrew", sans-serif;
+  --font-mono: "JetBrains Mono", "Noto Sans Hebrew", monospace;
+
+  --radius: 2px;
+  /* app extensions: sizes in px, which are dp in an Android WebView */
+  --touch: 48px;
+  --bar: 56px;
+  --pad: 16px;
+  --gap: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414;
+    --surface: #1c1c1c;
+    --text: #ecebe8;
+    --muted: #a29d94;
+    --line: #2e2d2b;
+    --line-strong: #4a4844;
+    --accent: #8fa3ff;
+    --accent-soft: #1b2040;
+    --tag: #262523;
+    --on-accent: #0b1020;
+    --grid: #1a1a1a;
+    --ok: #7fcf9f;
+    --ok-soft: #18281f;
+    --no: #ee9a8b;
+    --no-soft: #31201c;
+    /* app extensions */
+    --control-line: #7a776f;
+    --accent-press: #a9b9ff;
+    --scrim: rgba(0, 0, 0, 0.55);
+    --toast-bg: #ecebe8;
+    --toast-text: #141414;
+    --toast-action: #1a36c4;
+    /* review extensions */
+    --scan-bg: #ddd7ca;
+    --scan-ink: #2a2622;
+    --attn-bg: #1b2040;
+    --attn-line: #8fa3ff;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414;
+  --surface: #1c1c1c;
+  --text: #ecebe8;
+  --muted: #a29d94;
+  --line: #2e2d2b;
+  --line-strong: #4a4844;
+  --accent: #8fa3ff;
+  --accent-soft: #1b2040;
+  --tag: #262523;
+  --on-accent: #0b1020;
+  --grid: #1a1a1a;
+  --ok: #7fcf9f;
+  --ok-soft: #18281f;
+  --no: #ee9a8b;
+  --no-soft: #31201c;
+  /* app extensions */
+  --control-line: #7a776f;
+  --accent-press: #a9b9ff;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --toast-bg: #ecebe8;
+  --toast-text: #141414;
+  --toast-action: #1a36c4;
+  /* review extensions */
+  --scan-bg: #ddd7ca;
+  --scan-ink: #2a2622;
+  --attn-bg: #1b2040;
+  --attn-line: #8fa3ff;
+}
