@@ -138,6 +138,10 @@ export default defineConfig(async () => {
         {
           test: { name: "node", include: ["test/node/**/*.test.ts"], environment: "node" },
         },
+        {
+          // Browser view code against a minimal fake document (no DOM library in the dependencies).
+          test: { name: "web", include: ["test/web/**/*.test.ts"], environment: "node" },
+        },
       ],
     },
   };

@@ -1,7 +1,7 @@
 /** Pieces shared by the review views of every task type. */
 import type { Progress } from "../../shared/api";
 import { ApiFailure } from "../api";
-import { h } from "../dom";
+import { h, mount } from "../dom";
 
 export interface ReviewHooks {
   /** The server wants the current terms accepted first; resolve once they are. */
@@ -42,7 +42,7 @@ export function progressBar(p: Progress): HTMLElement {
   );
 }
 
-/** Show an API failure in the view's status line (or sign out on 401). */
+/** Show an API failure in the view's status line, or in place of the loading placeholder (or sign out on 401). */
 export function failureHandler(root: HTMLElement, hooks: ReviewHooks): (err: unknown) => void {
   return (err: unknown) => {
     if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
@@ -55,7 +55,10 @@ export function failureHandler(root: HTMLElement, hooks: ReviewHooks): (err: unk
           : err instanceof ApiFailure && err.code === "invalid_decision" && err.message
           ? `ההחלטה לא נשמרה: ${err.message}`
           : "שגיאה. נסו שוב. / Error, please try again.";
+    // Before the first screen renders (the "Loading…" placeholder) there is no status line: replace the
+    // placeholder with the error, or the page would sit on "Loading…" forever.
     if (msg) msg.textContent = text;
+    else mount(root, h("p", { class: "msg", role: "alert" }, text));
     console.warn(err);
   };
 }
