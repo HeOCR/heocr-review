@@ -32,6 +32,7 @@ export const PUBLIC_FORBIDDEN_KEYS = [
   "pair",
   "accuracy",
   "hit",
+  "pointed_book_drops",
 ] as const;
 const FORBIDDEN = new Set<string>(PUBLIC_FORBIDDEN_KEYS);
 

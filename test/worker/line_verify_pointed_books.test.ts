@@ -81,6 +81,13 @@ describe("pointed-book rule", () => {
     const drops = (await env.DB.prepare("SELECT proposal_id, book_id FROM pointed_book_drops WHERE batch_id = ?1 ORDER BY proposal_id").bind(LV).all()).results;
     expect(drops.map((d) => d.proposal_id)).toEqual(book.slice(2).map((l) => l.id));
     expect(new Set(drops.map((d) => d.book_id))).toEqual(new Set(["fixture_lines"]));
+    // The export lists each drop by the mark that caused it, and how many lines are active again.
+    await env.DB.prepare("UPDATE proposals SET active = 1 WHERE id = ?1").bind(book[2]!.id).run();
+    const exp = await admin.req<{ files: Record<string, { pointed_book_drops: Record<string, unknown>[] }> }>("GET", `/api/admin/batches/${LV}/export`);
+    const trigger = (await env.DB.prepare("SELECT external_id FROM proposals WHERE id = ?1").bind(book[1]!.id).first<{ external_id: string }>())!.external_id;
+    expect(exp.body.files["line_verify_decisions.json"]!.pointed_book_drops).toEqual([
+      expect.objectContaining({ reviewer: admin.id, book_id: "fixture_lines", lines: 5, restored: 1, trigger_item: trigger }),
+    ]);
   });
 
   it("a reviewer whose decisions count takes the book out; one who does not count does not", async () => {

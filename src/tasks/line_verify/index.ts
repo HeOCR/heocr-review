@@ -444,6 +444,21 @@ export const lineVerify: TaskType = {
         ...(v15 ? { phist_gold: { file: PHIST_GOLD_FILE, sha256: PHIST_GOLD_SHA256, lines: goldLines.length, pulled: [...pulled].sort() } } : {}),
         decisions,
         ...(v15 ? { gold } : {}),
+        // Every pointed-book drop, by the mark that caused it, so a wrong mark is easy to find and undo (admin only:
+        // the public view drops it).
+        ...(extra?.pointedDrops?.length
+          ? {
+              pointed_book_drops: extra.pointedDrops.map((p) => ({
+                decision_id: p.decisionId,
+                reviewer: p.reviewerId,
+                trigger_item: p.triggerItem,
+                book_id: p.bookId,
+                lines: p.lines,
+                restored: p.restored,
+                dropped_at: p.droppedAt,
+              })),
+            }
+          : {}),
       },
     };
   },

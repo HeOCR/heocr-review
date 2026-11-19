@@ -208,7 +208,10 @@ maintainer, 2026-11-19). When the admin, or a reviewer whose decisions count now
 line_verify batch, every other undecided line of the same book (`page.book_id`) leaves the batch: `active = 0`, never
 deleted, never a gold line. Each line taken out is recorded in `pointed_book_drops` with the decision that caused it;
 setting it active again reverses it. It is on by default. A batch whose lines are all pointed sets
-`pointed_books = keep`; the migration does this for `line_verify_v1_pointed` and `newprinted_midcentury_goldlines_v0`.
+`pointed_books = keep`; the migration does this for `line_verify_v1_pointed` and `newprinted_midcentury_goldlines_v0`. Every line_verify export lists the drops as `pointed_book_drops`, one entry
+per triggering mark (its decision, reviewer, line, book, lines taken out and lines active again; admin only, the
+public view drops it), so a wrong mark is easy to spot. To undo one, set its lines active again:
+`UPDATE proposals SET active = 1 WHERE id IN (SELECT proposal_id FROM pointed_book_drops WHERE decision_id = '<id>')`.
 
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by
 `npx tsx scripts/dev/make-line-verify-fixture.ts`; made-up text, no real scan). `test/fixtures/line_verify_v11/` is

@@ -6,7 +6,8 @@
 import { notCountedReason } from "../tasks/line_consensus/consensus";
 import { standingOf } from "../tasks/line_consensus/index";
 import { GATE_BATCH_ID } from "../tasks/line_verify/resolution";
-import type { BatchRecord, ProposalRecord } from "../tasks/types";
+import { POINTED_DROPS_SQL, toPointedDrop, type PointedDropRow } from "../tasks/rows";
+import type { BatchRecord, PointedDrop, ProposalRecord } from "../tasks/types";
 import { standings } from "./consensus";
 import { isVolunteerV11, phistReasonFor } from "./phist_gold";
 
@@ -53,4 +54,10 @@ export async function dropPointedBook(
     );
   }
   return results.length;
+}
+
+/** The export's pointed-drop input for a batch: one row per triggering mark. */
+export async function pointedDropsExtra(db: D1Database, batchId: string): Promise<{ pointedDrops: PointedDrop[] }> {
+  const { results } = await db.prepare(POINTED_DROPS_SQL).bind(batchId).all<PointedDropRow>();
+  return { pointedDrops: results.map(toPointedDrop) };
 }
