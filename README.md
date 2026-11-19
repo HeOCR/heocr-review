@@ -268,6 +268,10 @@ signing in; add it there and redeploy. The Google OAuth client must list the Wor
 JavaScript origin. Its branding URLs are `<origin>/`, `<origin>/privacy` and `<origin>/terms`. Production (`heocr-review`) is deployed only on the maintainer's word:
 `tsx scripts/deploy.ts production --yes-production`.
 
+Production's address is `https://review.heocr.org` (a Workers custom domain in `wrangler.jsonc` `routes`). The old
+`https://heocr-review.heocr.workers.dev` keeps working, so the OAuth client lists both origins. Each host has its
+own session cookie (no `Domain`), so a reviewer signs in once per host.
+
 ## Licence
 
 Code: MIT. Contributed decisions and edited text: CC0 1.0 (since terms `2026-11-12-v1`; decisions under
