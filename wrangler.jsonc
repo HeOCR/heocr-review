@@ -7,8 +7,11 @@
   "name": "heocr-review",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-01",
+  // Production answers on both hosts: the custom domain (review.heocr.org, zone heocr.org, 2026-11-19) and
+  // heocr-review.heocr.workers.dev, so links made before the domain keep working. Sessions are host-only cookies.
   "workers_dev": true,
   "preview_urls": false,
+  "routes": [{ "pattern": "review.heocr.org", "custom_domain": true }],
   "observability": { "enabled": false },
   "assets": {
     "directory": "./public",

@@ -156,3 +156,24 @@ describe("request guards", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
   });
 });
+
+describe("the app works on each of its hosts", () => {
+  const hosts = ["https://review.heocr.org", "https://heocr-review.heocr.workers.dev"];
+  const logout = (origin: string): RequestInit => ({ method: "POST", headers: { origin, "content-type": "application/json" }, body: "{}" });
+
+  it("accepts a same-origin write on either host, with a host-only cookie", async () => {
+    for (const host of hosts) {
+      const res = await call(env, `${host}/api/auth/logout`, logout(host));
+      expect(res.status).toBe(200);
+      const cookie = res.headers.get("set-cookie") ?? "";
+      expect(cookie).toContain("Secure");
+      expect(cookie).toContain("SameSite=Lax");
+      expect(cookie.toLowerCase()).not.toContain("domain=");
+    }
+  });
+
+  it("rejects a write whose Origin is the other host", async () => {
+    const res = await call(env, `${hosts[0]}/api/auth/logout`, logout(hosts[1]!));
+    expect(res.status).toBe(403);
+  });
+});
