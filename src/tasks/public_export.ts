@@ -8,7 +8,8 @@
  * - decisions on gold lines (their answers grade the reviewer), in the decisions file and in the ledger;
  * - per reviewer: the line_consensus `reviewers` list (gold seen and hit, standing, decisions counted);
  * - `admin_exclusions` (who an admin excluded from agreement);
- * - line_verify v1.4's `pair` (which decisions counted).
+ * - line_verify v1.4's `pair` (which decisions counted);
+ * - line_verify v1.5's `gold` section (every P-hist gold decision and its `hit`).
  *
  * The private export (scripts/export.ts without --public) keeps all of it for eval's restricted ingest.
  */
@@ -30,6 +31,7 @@ export const PUBLIC_FORBIDDEN_KEYS = [
   "admin_exclusions",
   "pair",
   "accuracy",
+  "hit",
 ] as const;
 const FORBIDDEN = new Set<string>(PUBLIC_FORBIDDEN_KEYS);
 
@@ -54,6 +56,7 @@ export function publicDecisions(content: unknown): unknown {
   const c: Record<string, unknown> = { ...content };
   if (Array.isArray(c.decisions)) c.decisions = c.decisions.filter((d) => !(isObj(d) && d.role === "gold"));
   if (Array.isArray(c.reviewers)) delete c.reviewers;
+  if (Array.isArray(c.gold)) delete c.gold;
   return strip(c);
 }
 
@@ -86,6 +89,7 @@ export function publicProblems(content: unknown, gold: Set<string> = new Set()):
   };
   walk(content, "$");
   if (isObj(content) && Array.isArray(content.reviewers)) out.push("$.reviewers: per-reviewer records are not allowed in a public file");
+  if (isObj(content) && Array.isArray(content.gold)) out.push("$.gold: gold decisions are not allowed in a public file");
   return out;
 }
 

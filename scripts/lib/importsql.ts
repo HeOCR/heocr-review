@@ -18,11 +18,13 @@ export const LARGE_BATCH = 2000;
 export function buildImportStatements(
   bundle: ImportBundle,
   media: Map<string, ProposalMedia>,
-  opts: { minReviewers: number; importedAt: string; after?: string[] },
+  opts: { minReviewers: number; importedAt: string; after?: string[]; addOnly?: boolean },
 ): string[] {
   const { batch } = bundle;
   const b = lit(batch.id);
-  const out: string[] = [
+  // addOnly (P-hist gold, scripts/import-gold.ts): upsert these items and proposals into an existing batch, and touch
+  // nothing else: no batch row, and no other proposal deactivated.
+  const out: string[] = opts.addOnly ? [] : [
     `INSERT INTO batches (id, task_type, title, source_json, min_reviewers, status, imported_at) VALUES (${b}, ${lit(batch.taskType)}, ${lit(batch.title)}, ${lit(JSON.stringify(batch.source))}, ${opts.minReviewers}, 'open', ${lit(opts.importedAt)})
   ON CONFLICT (id) DO UPDATE SET title = excluded.title, source_json = excluded.source_json, min_reviewers = excluded.min_reviewers, imported_at = excluded.imported_at;`,
   ];
@@ -42,7 +44,9 @@ export function buildImportStatements(
   // Proposals the bundle no longer has are deactivated. A list of every id would pass D1's statement size limit for a
   // large batch (line_consensus has 18,000 lines), so there the batch is deactivated first and each upsert above
   // (active = 1) brings its proposal back, in the same file.
-  if (bundle.proposals.length > LARGE_BATCH) {
+  if (opts.addOnly) {
+    // nothing else changes
+  } else if (bundle.proposals.length > LARGE_BATCH) {
     out.splice(1 + bundle.items.length, 0, `UPDATE proposals SET active = 0 WHERE batch_id = ${b};`);
   } else {
     const keep = bundle.proposals.map((p) => lit(p.externalId)).join(", ");

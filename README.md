@@ -41,7 +41,11 @@ Three task types:
   `resolution: volunteer_v1` (the P-hist test batches) follows `docs/specs/line_verify_volunteer_resolution_v1.md`:
   decisions count only from reviewers with mid-century standing, every line needs two counted decisions that agree
   under line_fold_v1, disagreements go to a third reviewer, then the maintainer (or a fourth volunteer if he decided
-  the line), decisions are final, and the export is `line_verify_decisions.v1.4`. On a v1.2 verify
+  the line), decisions are final, and the export is `line_verify_decisions.v1.4`. `resolution: volunteer_v1_1` adds
+  P-hist gold (`docs/specs/line_verify_phist_gold_v1_1.md`): eval's registered gold lines (`npm run import-gold`) are
+  served unlabelled on a seeded schedule per reviewer (1 in 5 for their first 75 lines, then 1 in 15, never repeated),
+  graded under line_fold_v1, and a decision counts only if its reviewer also has at least 90% on at least 15 of them;
+  an admin can pull a wrong gold line (forward-only), and the export is `line_verify_decisions.v1.5`. On a v1.2 verify
   line, misaligned (the candidate is not this line) opens a blank box: the decision carries the line as typed, so
   every line still gets a text, and the misaligned count measures the aligner (heocr-eval).
 - **Page review.** A human reads one whole printed page next to a pre-filled transcription of it (the PDF's own OCR
@@ -194,6 +198,8 @@ npm run batch-setting -- --batch <id> --target local|preview|production         
 npm run batch-setting -- --batch <id> --pass2-reviewer other --by <who> --target preview       # change
 npm run batch-setting -- --batch <id> --two-typings-groups early --by <who> --target preview   # v1.2: two typings ("none" clears)
 npm run batch-setting -- --batch <id> --resolution volunteer_v1 --by <who> --target preview    # before the first decision
+npm run batch-setting -- --batch <id> --resolution volunteer_v1_1 --by <who> --target preview  # with P-hist gold
+npm run import-gold -- --batch <id> --gold <dir> --target preview                             # eval's registered gold file
 ```
 
 A synthetic bundle for trying it out is `test/fixtures/line_verify/` (drawn by

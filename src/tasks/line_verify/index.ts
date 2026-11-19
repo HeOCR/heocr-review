@@ -16,6 +16,7 @@ import type { Box } from "../../shared/media";
 import { imageUrl } from "../../shared/media";
 import { sha256Hex } from "../../shared/sha256";
 import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType, VerifyVote } from "../types";
+import { PHIST_GOLD_FILE, PHIST_GOLD_SHA256, type GoldMark } from "./gold";
 import { GATE_BATCH_ID, LINE_FOLD_V1_SHA256, referenceOf, routeLine, type CountedVote } from "./resolution";
 import {
   DECISIONS_SCHEMA,
@@ -24,6 +25,7 @@ import {
   DECISIONS_SCHEMA_V12,
   DECISIONS_SCHEMA_V13,
   DECISIONS_SCHEMA_V14,
+  DECISIONS_SCHEMA_V15,
   itemsLevel,
   decisionId,
   decisionsFileProblems,
@@ -332,12 +334,17 @@ export const lineVerify: TaskType = {
    * also each decision's `kind`, `box_reason` on a typed line's not_on_page, the two-typings switch, and `pages`: per
    * page, how many of its segmenter lines are resolved (enough current pass-1 decisions) and whether it is done.
    */
-  exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[], extra?: ExportExtra): ExportFile {
+  exportDecisions(batch: BatchRecord, all: ResolvedProposal[], extra?: ExportExtra): ExportFile {
     const level = levelOf(batch);
     const v12 = level >= 1;
     const v13 = level >= 2;
-    // A volunteer_v1 batch (docs/specs/line_verify_volunteer_resolution_v1.md) exports v1.4.
-    const v14 = v13 && batch.settings?.resolution === "volunteer_v1";
+    // A volunteer_v1 batch (docs/specs/line_verify_volunteer_resolution_v1.md) exports v1.4, and a volunteer_v1_1
+    // batch v1.5: v1.4 plus its P-hist gold section (docs/specs/line_verify_phist_gold_v1_1.md). Gold lines are not the
+    // batch's lines: they are left out of decisions, lines and pages.
+    const v15 = v13 && batch.settings?.resolution === "volunteer_v1_1";
+    const v14 = (v13 && batch.settings?.resolution === "volunteer_v1") || v15;
+    const goldMark = (r: ResolvedProposal) => (r.proposal.payload as { gold?: GoldMark }).gold ?? null;
+    const resolved = v15 ? all.filter((r) => !goldMark(r)) : all;
     const votes = new Map((extra?.verifyVotes ?? []).map((v) => [v.decisionId, v]));
     // Who decided each line's pass 1 (any decision, current or not), and when each reviewer first decided its pass 2.
     const pass1By = new Set<string>();
@@ -388,10 +395,32 @@ export const lineVerify: TaskType = {
             };
           });
       });
+    const grades = new Map((extra?.phistGold?.grades ?? []).map((g) => [g.decisionId, g.hit]));
+    const pulled = new Set(extra?.phistGold?.pulled ?? []);
+    const goldLines = v15 ? all.filter((r) => goldMark(r)) : [];
+    const gold = goldLines
+      .slice()
+      .sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order)
+      .flatMap((r) =>
+        r.current
+          .slice()
+          .sort((a, b) => a.reviewerId.localeCompare(b.reviewerId))
+          .map((d) => ({
+            decision_id: decisionId(r.proposal.externalId, d.reviewerId),
+            reviewer: d.reviewerId,
+            gold_id: goldMark(r)!.gold_id,
+            kind: kindOf(r.proposal),
+            value: d.value,
+            text: d.text,
+            hit: grades.get(d.id) ?? null,
+            pulled: pulled.has(goldMark(r)!.gold_id),
+            decided_at: d.decidedOn,
+          })),
+      );
     return {
       fileName: "line_verify_decisions.json",
       content: {
-        schema_version: v14 ? DECISIONS_SCHEMA_V14 : v13 ? DECISIONS_SCHEMA_V13 : v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
+        schema_version: v15 ? DECISIONS_SCHEMA_V15 : v14 ? DECISIONS_SCHEMA_V14 : v13 ? DECISIONS_SCHEMA_V13 : v12 ? DECISIONS_SCHEMA_V12 : DECISIONS_SCHEMA,
         batch_id: sourceOf(batch).batch_id,
         // v1.2: which mode the blind pass ran in, and which list it ran on (heocr-eval, so a later reader can tell).
         ...(v12
@@ -406,15 +435,20 @@ export const lineVerify: TaskType = {
               pages: pagesOf(batch, resolved),
             }
           : {}),
-        ...(v14 ? { resolution: "volunteer_v1", gate_batch_id: GATE_BATCH_ID, line_fold_v1_sha256: LINE_FOLD_V1_SHA256, lines: linesOf(resolved, votes) } : {}),
+        ...(v14
+          ? { resolution: v15 ? "volunteer_v1_1" : "volunteer_v1", gate_batch_id: GATE_BATCH_ID, line_fold_v1_sha256: LINE_FOLD_V1_SHA256, lines: linesOf(resolved, votes) }
+          : {}),
+        ...(v15 ? { phist_gold: { file: PHIST_GOLD_FILE, sha256: PHIST_GOLD_SHA256, lines: goldLines.length, pulled: [...pulled].sort() } } : {}),
         decisions,
+        ...(v15 ? { gold } : {}),
       },
     };
   },
 
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[] {
+    // Gold lines (volunteer_v1_1) are not the batch's items: they are checked in the gold section only.
     const items = proposals
-      .filter((p) => p.active && passOf(p) === 1)
+      .filter((p) => p.active && passOf(p) === 1 && !(p.payload as { gold?: unknown }).gold)
       .map((p) => ({
         item_id: itemIdOf(p),
         candidate_text: payloadOf(p).candidate_text,

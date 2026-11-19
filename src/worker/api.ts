@@ -16,6 +16,7 @@ import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
 import type { LineRouting } from "../tasks/line_verify/resolution";
+import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
 import { isVolunteerV1, openFor, recordVolunteerDecision, routingOf, volunteerExtras } from "./verify_resolution";
 import {
   afterLineDecision,
@@ -271,7 +272,11 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   // reviewers may decide it (the admin alone at the maintainer step; anyone else at the fourth).
   const admin = isAdmin(ctx.env, reviewer.id);
   let volunteerBefore: LineRouting | null = null;
-  if (isVolunteerV1(batch)) {
+  // A P-hist gold line (volunteer_v1_1): final, once per reviewer across the batches, graded, never routed.
+  const gold = isVolunteerV11(batch) ? goldOf(proposal) : null;
+  if (gold) {
+    if (existing || (await goldDecided(db, reviewer.id, gold.gold_id))) throw new HttpError(409, "decided", "this line is decided");
+  } else if (isVolunteerV1(batch)) {
     if (existing) throw new HttpError(409, "decided", "this line is decided");
     volunteerBefore = await routingOf(db, proposal);
     if (!openFor(volunteerBefore, admin)) throw new HttpError(409, "not_open", "this line is not open to you");
@@ -301,6 +306,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     ]);
   }
   if (volunteerBefore) await recordVolunteerDecision(db, batch, proposal, decisionId, reviewer.id, admin, volunteerBefore, iso(ctx.now));
+  if (gold) await recordGoldDecision(db, proposal, decisionId, reviewer.id, normalized, iso(ctx.now));
   // The page is decided: its draft is done with (page_review).
   await db.prepare("DELETE FROM drafts WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id).run();
   if (isConsensus(batch)) {
@@ -394,7 +400,7 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
   for (const batch of await listBatches(ctx.env.DB, false)) {
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
-    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? await volunteerExtras(ctx.env.DB, batch.id) : {};
+    const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
     const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
     const perReviewer = new Map<string, number>();
     for (const d of rows.decisions) if (d.supersededAt === null) perReviewer.set(d.reviewerId, (perReviewer.get(d.reviewerId) ?? 0) + 1);
@@ -417,7 +423,7 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   if (!batch) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
-  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? await volunteerExtras(ctx.env.DB, batch.id) : {};
+  const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
   const result = buildExport({ batch, ...rows, ...extras, exportedAt: iso(ctx.now) });
   return json({
     counts: result.counts,
@@ -451,4 +457,22 @@ export async function adminExclusion(ctx: Ctx, batchId: string, reviewerId: stri
   if (!(await getReviewer(ctx.env.DB, reviewerId))) throw new HttpError(404, "not_found");
   await setExclusion(ctx.env.DB, batch, reviewerId, body.excluded, ctx.now);
   return json(await volunteerReport(ctx.env.DB, batch));
+}
+
+/**
+ * Admin: pull a P-hist gold line ({pulled: true, reason}) or put it back ({pulled: false}). Forward-only
+ * (docs/specs/line_verify_phist_gold_v1_1.md, "Pulling a gold line").
+ */
+export async function adminPhistGoldPull(ctx: Ctx, goldId: string): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const admin = await requireAdmin(ctx);
+  await enforce(ctx.env.DB, LIMITS.writeMinute, admin.id, ctx.now);
+  const body = await readJson(ctx.request);
+  if (typeof body.pulled !== "boolean") throw new HttpError(400, "invalid_request", "pulled must be true or false");
+  if (!(body.reason === undefined || body.reason === null || (typeof body.reason === "string" && body.reason.length <= 500))) {
+    throw new HttpError(400, "invalid_request", "reason must be a short text");
+  }
+  if (!(await goldKnown(ctx.env.DB, goldId))) throw new HttpError(404, "not_found");
+  await setPull(ctx.env.DB, goldId, body.pulled, typeof body.reason === "string" ? body.reason : null, admin.id, iso(ctx.now));
+  return json({ goldId, pulled: body.pulled });
 }

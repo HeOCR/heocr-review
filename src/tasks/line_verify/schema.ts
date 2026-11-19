@@ -40,11 +40,13 @@ export const DECISIONS_SCHEMA_V12 = "line_verify_decisions.v1.2";
 export const DECISIONS_SCHEMA_V13 = "line_verify_decisions.v1.3";
 /** Decisions on a volunteer_v1 batch (docs/specs/line_verify_volunteer_resolution_v1.md): v1.3 plus counted, step, lines. */
 export const DECISIONS_SCHEMA_V14 = "line_verify_decisions.v1.4";
+/** Decisions on a volunteer_v1_1 batch (docs/specs/line_verify_phist_gold_v1_1.md): v1.4 plus the P-hist gold section. */
+export const DECISIONS_SCHEMA_V15 = "line_verify_decisions.v1.5";
 export const VOTE_STEPS = ["pass1", "pass2", "third", "maintainer", "fourth", "uncounted"] as const;
-export const NOT_COUNTED_REASONS = ["fewer_than_20_gold", "below_floor", "excluded_by_admin", "not_recorded"] as const;
+export const NOT_COUNTED_REASONS = ["fewer_than_20_gold", "below_floor", "excluded_by_admin", "fewer_than_15_phist_gold", "below_phist_floor", "not_recorded"] as const;
 export const LINE_RESOLUTIONS = ["agreed", "majority", "to_maintainer", "unresolved", "pending"] as const;
 /** Every version validates; a v1 file may not use `pointed_print`, only v1.2+ carries `pass`, only v1.3 `kind`. */
-export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA, DECISIONS_SCHEMA_V12, DECISIONS_SCHEMA_V13, DECISIONS_SCHEMA_V14] as const;
+export const DECISIONS_SCHEMAS = ["line_verify_decisions.v1", DECISIONS_SCHEMA, DECISIONS_SCHEMA_V12, DECISIONS_SCHEMA_V13, DECISIONS_SCHEMA_V14, DECISIONS_SCHEMA_V15] as const;
 export const KINDS = ["verify", "type"] as const;
 /** A typed line's box problems (as in H): exported as decision not_on_page with this box_reason. */
 export const BOX_REASONS = ["not_one_line", "no_text", "continued"] as const;
@@ -397,7 +399,8 @@ export interface ItemRef {
 export function decisionsFileProblems(payload: unknown, batchId: string, items: ItemRef[]): string[] {
   if (!isObj(payload) || !oneOf(DECISIONS_SCHEMAS, payload.schema_version)) return [`schema_version must be one of ${join(DECISIONS_SCHEMAS)}`];
   const allowed: readonly string[] = payload.schema_version === "line_verify_decisions.v1" ? DECISION_VALUES_V1 : DECISION_VALUES;
-  const v14 = payload.schema_version === DECISIONS_SCHEMA_V14;
+  const v15 = payload.schema_version === DECISIONS_SCHEMA_V15;
+  const v14 = payload.schema_version === DECISIONS_SCHEMA_V14 || v15;
   const v13 = payload.schema_version === DECISIONS_SCHEMA_V13 || v14;
   const v12 = payload.schema_version === DECISIONS_SCHEMA_V12 || v13;
   const problems: string[] = [];
@@ -433,7 +436,7 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
     } else if (list.count !== items.filter((i) => i.blind).length) problems.push("blind_second_pass.count is not the number of blind lines");
   }
   if (v14) {
-    if (payload.resolution !== "volunteer_v1") problems.push("resolution must be volunteer_v1");
+    if (payload.resolution !== (v15 ? "volunteer_v1_1" : "volunteer_v1")) problems.push(`resolution must be ${v15 ? "volunteer_v1_1" : "volunteer_v1"}`);
     if (!nonEmpty(payload.gate_batch_id)) problems.push("gate_batch_id must name the standing batch");
     if (!(typeof payload.line_fold_v1_sha256 === "string" && SHA256.test(payload.line_fold_v1_sha256))) problems.push("line_fold_v1_sha256 must be a SHA-256");
     const exported = new Set(Array.isArray(payload.decisions) ? (payload.decisions as Obj[]).map((d) => d.decision_id) : []);
@@ -448,6 +451,25 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
         const resolved = line.resolution === "agreed" || line.resolution === "majority";
         if (resolved !== (isObj(line.reference) && Array.isArray(line.pair))) problems.push(`${at}: a reference and its pair come exactly with agreed or majority`);
         if (Array.isArray(line.pair) && !(line.pair.length === 2 && line.pair.every((id) => exported.has(id)))) problems.push(`${at}: pair must name two exported decisions`);
+      }
+    }
+  }
+  if (v15) {
+    const pg = isObj(payload.phist_gold) ? payload.phist_gold : {};
+    if (!(nonEmpty(pg.file) && typeof pg.sha256 === "string" && SHA256.test(pg.sha256) && isInt(pg.lines) && Array.isArray(pg.pulled))) {
+      problems.push("phist_gold must give the gold file, its sha256, its line count and the pulled gold_ids");
+    }
+    if (!Array.isArray(payload.gold)) problems.push("gold must list every gold decision");
+    else {
+      const seen = new Set<unknown>();
+      for (const g of payload.gold as unknown[]) {
+        const r: Obj = isObj(g) ? g : {};
+        const at = `gold decision ${JSON.stringify(r.decision_id ?? null)}`;
+        if (!nonEmpty(r.decision_id) || seen.has(r.decision_id)) problems.push(`${at}: decision_id must be unique`);
+        seen.add(r.decision_id);
+        if (!nonEmpty(r.gold_id) || !nonEmpty(r.reviewer)) problems.push(`${at}: gold_id and reviewer are required`);
+        if (!(r.hit === true || r.hit === false || r.hit === null)) problems.push(`${at}: hit must be true, false or null (not graded)`);
+        if (typeof r.pulled !== "boolean") problems.push(`${at}: pulled must be a boolean`);
       }
     }
   }

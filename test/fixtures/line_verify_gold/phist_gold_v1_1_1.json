@@ -1,0 +1,492 @@
+{
+ "schema": "phist_volunteer_gold.v1.1.1",
+ "pages": {
+  "fixture_extra__p0001": {
+   "page_id": "wikisource:fixture_extra__p0001",
+   "source": "wikisource_proofread",
+   "book_id": "fixture_extra",
+   "book_title": "ספר נוסף לדוגמה (סינתטי)",
+   "page_label": "1",
+   "text_license": "CC BY-SA 4.0 (synthetic test text)",
+   "attribution": "Synthetic test page for HeOCR Review; not a real scan or text. / עמוד סינתטי לבדיקות.",
+   "image": "fixture_extra__p0001.jpg",
+   "sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "width": 1000,
+   "height": 1400,
+   "release_split": null,
+   "script": "square",
+   "book_group": "later"
+  },
+  "fixture_extra__p0002": {
+   "page_id": "wikisource:fixture_extra__p0002",
+   "source": "wikisource_proofread",
+   "book_id": "fixture_extra",
+   "book_title": "ספר נוסף לדוגמה (סינתטי)",
+   "page_label": "2",
+   "text_license": "CC BY-SA 4.0 (synthetic test text)",
+   "attribution": "Synthetic test page for HeOCR Review; not a real scan or text. / עמוד סינתטי לבדיקות.",
+   "image": "fixture_extra__p0002.jpg",
+   "sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "width": 1000,
+   "height": 1400,
+   "release_split": null,
+   "script": "square",
+   "book_group": "later"
+  }
+ },
+ "source": "synthetic fixture",
+ "answer_basis": "made-up text",
+ "lines": 20,
+ "gold": [
+  {
+   "gold_id": "fixture-x-001",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 0,
+   "box": [
+    100,
+    100,
+    900,
+    150
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": "שורה בדיקה מלאכותית",
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "שורה בדיקה מלאכותית"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-002",
+   "kind": "type",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 1,
+   "box": [
+    100,
+    220,
+    900,
+    270
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "בדיקה מלאכותית לדוגמה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-003",
+   "kind": "type",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 2,
+   "box": [
+    100,
+    340,
+    900,
+    390
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "מלאכותית לדוגמה טקסט"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-004",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 3,
+   "box": [
+    100,
+    460,
+    900,
+    510
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": "לדוגמח טקסט עמוד",
+   "planted_error": {
+    "kind": "letter_swap",
+    "at": 5,
+    "from": "ה",
+    "to": "ח"
+   },
+   "answer": {
+    "action": "text",
+    "text": "לדוגמה טקסט עמוד"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-005",
+   "kind": "type",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 4,
+   "box": [
+    100,
+    580,
+    900,
+    630
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "טקסט עמוד ספר"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-006",
+   "kind": "type",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 5,
+   "box": [
+    100,
+    700,
+    900,
+    750
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "עמוד ספר מילה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-007",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 6,
+   "box": [
+    100,
+    820,
+    900,
+    870
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": "ספר מילה נוספת",
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "ספר מילה נוספת"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-008",
+   "kind": "type",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 7,
+   "box": [
+    100,
+    940,
+    900,
+    990
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "מילה נוספת קצרה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-009",
+   "kind": "type",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 8,
+   "box": [
+    100,
+    1060,
+    900,
+    1110
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "נוספת קצרה שורה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-010",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0001",
+   "book": "fixture_extra",
+   "i": 9,
+   "box": [
+    100,
+    1180,
+    900,
+    1230
+   ],
+   "image": "fixture_extra__p0001.jpg",
+   "image_sha256": "9d5052f60a6a2a03fb85b16ab5fb09e285e23e328d5decf8cb1e2ca0849becd9",
+   "prefill_shown": "קצרח שורה בדיקה",
+   "planted_error": {
+    "kind": "letter_swap",
+    "at": 3,
+    "from": "ה",
+    "to": "ח"
+   },
+   "answer": {
+    "action": "text",
+    "text": "קצרה שורה בדיקה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-011",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 0,
+   "box": [
+    100,
+    100,
+    900,
+    150
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "שורה בדיקה מלאכותית"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-012",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 1,
+   "box": [
+    100,
+    220,
+    900,
+    270
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "בדיקה מלאכותית לדוגמה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-013",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 2,
+   "box": [
+    100,
+    340,
+    900,
+    390
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": "מלאכותית לדוגמה טקסט",
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "מלאכותית לדוגמה טקסט"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-014",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 3,
+   "box": [
+    100,
+    460,
+    900,
+    510
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "לדוגמה טקסט עמוד"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-015",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 4,
+   "box": [
+    100,
+    580,
+    900,
+    630
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "טקסט עמוד ספר"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-016",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 5,
+   "box": [
+    100,
+    700,
+    900,
+    750
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": "עמוד ספר מילה",
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "עמוד ספר מילה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-017",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 6,
+   "box": [
+    100,
+    820,
+    900,
+    870
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "ספר מילה נוספת"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-018",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 7,
+   "box": [
+    100,
+    940,
+    900,
+    990
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "מילה נוספת קצרה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-019",
+   "kind": "verify",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 8,
+   "box": [
+    100,
+    1060,
+    900,
+    1110
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": "נוספת קצרה שורה",
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "נוספת קצרה שורה"
+   },
+   "align_score": 100.0
+  },
+  {
+   "gold_id": "fixture-x-020",
+   "kind": "type",
+   "page_key": "fixture_extra__p0002",
+   "book": "fixture_extra",
+   "i": 9,
+   "box": [
+    100,
+    1180,
+    900,
+    1230
+   ],
+   "image": "fixture_extra__p0002.jpg",
+   "image_sha256": "c0a857110d5c4d548ef49f25c0e7bbe7e427a8be5af72a3a233fa07eedb99cc2",
+   "prefill_shown": null,
+   "planted_error": null,
+   "answer": {
+    "action": "text",
+    "text": "קצרה שורה בדיקה"
+   },
+   "align_score": 100.0
+  }
+ ]
+}

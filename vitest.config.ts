@@ -5,6 +5,7 @@ import { buildImportStatements } from "./scripts/lib/importsql";
 import { buildSubsetStatements, interimMembers } from "./scripts/lib/subset";
 import type { TaskImporter } from "./src/tasks/import";
 import { lineConsensusImporter } from "./src/tasks/line_consensus/importer";
+import { goldImport, type GoldFile } from "./src/tasks/line_verify/gold";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
 import { pageReviewImporter } from "./src/tasks/page_review/importer";
 import { referenceAuditImporter } from "./src/tasks/reference_audit/importer";
@@ -25,6 +26,22 @@ function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number
     ]),
   );
   return buildImportStatements(bundle, media, { minReviewers, importedAt, after: importer.afterImportSql?.(bundle.batch.id, importedAt) });
+}
+
+/** The synthetic P-hist gold fixture added to the volunteer fixture batch, as scripts/import-gold.ts adds it. */
+function lineVerifyGoldSql(batchId: string): string[] {
+  const file = JSON.parse(readFileSync("test/fixtures/line_verify_gold/phist_gold_v1_1_1.json", "utf8")) as GoldFile;
+  const { items, proposals } = goldImport(file);
+  const media = new Map<string, ProposalMedia>(
+    proposals.map((p) => [
+      p.externalId,
+      {
+        crop: { ref: { source: "static", path: `media/fixture/${p.externalId.replace(/[^A-Za-z0-9._-]/g, "_")}.jpg` }, width: 400, height: 120, box: [0.2, 0.3, 0.6, 0.7] },
+        page: { ref: { source: "static", path: "media/fixture/page.jpg" }, width: 1000, height: 1400, box: p.pageBox },
+      },
+    ]),
+  );
+  return buildImportStatements({ batch: { id: batchId, taskType: "line_verify", title: "", source: {} }, items, proposals }, media, { minReviewers: 1, importedAt: "2026-11-19T00:00:00.000Z", addOnly: true });
 }
 
 const LINE_CONSENSUS = "test/fixtures/line_consensus";
@@ -107,6 +124,7 @@ export default defineConfig(async () => {
                   TEST_LINE_VERIFY_V11_SQL: lineVerifyV11Batch(),
                   TEST_LINE_VERIFY_V12_SQL: lineVerifyV12Batch(),
                   TEST_LINE_VERIFY_VOL_SQL: lineVerifyVolBatch(),
+                  TEST_LINE_VERIFY_GOLD_SQL: lineVerifyGoldSql("fixture_line_verify_vol"),
                 },
               },
             }),
