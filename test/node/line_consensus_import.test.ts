@@ -47,6 +47,16 @@ describe("line_consensus import", () => {
     expect(b.batch.source).toMatchObject({ maintainer_decided_excluded: { exported_at: "2026-11-18T10:00:00.000Z", pages: [D] } });
   });
 
+  it("stores every pre-fill as NFC (U+037E, the OCR layer's ';', becomes ';')", () => {
+    const raw = items() as { pages: { page_key: string; lines: { i: number; prefill: string }[] }[] };
+    const line = raw.pages.find((p) => p.page_key === A)!.lines[0]!;
+    line.prefill = `${line.prefill}\u037e`;
+    const b = lineConsensusImporter.bundle(raw, sidecars(), { "line_items_v1.json": "x".repeat(64) });
+    const stored = (b.proposals.find((p) => p.externalId === `${A}#l0`)!.payload as { prefill: string }).prefill;
+    expect(stored.endsWith(";")).toBe(true);
+    expect(stored).toBe(stored.normalize("NFC"));
+  });
+
   it("shows a gold line's planted pre-fill, and keeps the answer out of the content hash", () => {
     const b = lineConsensusImporter.bundle(items(), sidecars());
     const planted = b.proposals.find((p) => p.externalId === `${C}#l2`)!;

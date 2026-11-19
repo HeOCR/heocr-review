@@ -140,7 +140,12 @@ export const lineConsensusImporter: TaskImporter = {
       });
     };
     const proposals: ImportProposal[] = [];
-    const add = (p: LinePage, line: LineItem, shown: { prefill: string; box: PixelBox | null }, g: LineConsensusPayload["gold"]): void => {
+    const add = (p: LinePage, line: LineItem, raw: { prefill: string; box: PixelBox | null }, g: LineConsensusPayload["gold"]): void => {
+      // NFC: the publisher's OCR layer writes some ';' as U+037E GREEK QUESTION MARK, canonically the same. Every
+      // stored pre-fill (and gold answer) is NFC, so a line here and the same line elsewhere (the maintainer's
+      // line-level gold batch, NFC by its importer) never differ by an encoding (heocr-eval, 2026-11-19).
+      const shown = { prefill: raw.prefill.normalize("NFC"), box: raw.box };
+      if (g?.answer.text) g = { ...g, answer: { ...g.answer, text: g.answer.text.normalize("NFC") } };
       item(p);
       const hints = ai.get(p.page_key);
       const payload: LineConsensusPayload = {
