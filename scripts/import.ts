@@ -9,7 +9,7 @@
  *   npm run import -- --task line_verify --bundle <B> [--target ...]
  *   # page_review, from eval's mid-century batch (batch_manifest.json, pages/, optional blind_prefill.json):
  *   npm run import -- --task page_review --bundle <B> [--target ...]
- *   # line_consensus, the volunteer line batch (line_items_v1.json, volunteer_exclusions_v1.json,
+ *   # line_consensus, the volunteer line batch (line_items_v1.json, volunteer_exclusions_v2.json,
  *   # maintainer_decided.json, ai_flags.json, optional gold_v1.json, and pages/; this script cuts the line crops):
  *   npm run import -- --task line_consensus --bundle <B> [--target local|preview]
  *   options: [--min-reviewers 1] [--title <batch title shown in the app>] [--dry-run]
