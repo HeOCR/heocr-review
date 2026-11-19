@@ -8,16 +8,21 @@
     <title>HeOCR Review · סקירת תיקונים</title>
     <meta name="description" content="HeOCR Review: volunteers check proposed corrections of Hebrew text against page scans." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/css/tokens.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/review.css" />
+    <link rel="stylesheet" href="/css/bridge.css" />
     <script src="/app.js" defer></script>
   </head>
-  <body>
+  <body class="rv">
     <header class="top">
-      <a class="brand" href="/" dir="ltr">HeOCR Review</a>
+      <a class="home" href="#" aria-label="HeOCR Review"></a>
+      <a class="brand" href="#">He<b>OCR</b><i>Review</i></a>
+      <div class="where"></div>
       <nav id="nav"></nav>
     </header>
-    <main id="app"><p class="muted">טוען… / Loading…</p></main>
-    <footer class="foot muted small">
+    <main id="app" class="doc"><p class="muted">טוען… / Loading…</p></main>
+    <footer id="foot" class="foot">
       <a href="/">אודות / About</a> ·
       <a href="/privacy">פרטיות / Privacy</a> ·
       <a href="/terms">תנאים / Terms</a> ·
