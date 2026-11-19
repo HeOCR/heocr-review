@@ -33,7 +33,7 @@ const LINE_CONSENSUS = "test/fixtures/line_consensus";
 function lineConsensusBatch(): string[] {
   const side = (n: string) => `${LINE_CONSENSUS}/${n}`;
   return fixtureBatch(lineConsensusImporter, side("line_items_v1.json"), 1, "2026-11-18T12:00:00.000Z", {
-    "volunteer_exclusions_v2.json": side("volunteer_exclusions_v2.json"),
+    "volunteer_exclusions_v3.json": side("volunteer_exclusions_v3.json"),
     "maintainer_decided.json": side("maintainer_decided.json"),
     "ai_flags.json": side("ai_flags.json"),
     "gold_v1.json": side("gold_v1.json"),
