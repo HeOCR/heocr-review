@@ -1,10 +1,13 @@
 import type { BatchSummary, ConfigResponse, MeResponse, ProposalView } from "../shared/api";
 import { ApiFailure, get } from "./api";
 import { h, mount } from "./dom";
+import { lang, t } from "./i18n";
 import { icon, mark, type IconName } from "./icons";
+import { applyPrefs, loadPrefs, savePrefs, type Prefs } from "./prefs";
 import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
 import { lineConsensusView } from "./views/consensus";
+import { CONVENTIONS } from "./views/conventions";
 import { lineVerifyView } from "./views/line";
 import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
@@ -18,25 +21,26 @@ const where = document.querySelector<HTMLElement>(".top .where")!;
 let config: ConfigResponse;
 let me: MeResponse | null = null;
 let dispose: (() => void) | null = null;
+let prefs: Prefs = loadPrefs();
 
 /**
- * The task list and the state screens render in the design's main.doc. Everything else (the task views, sign-in,
- * terms, settings, admin) renders in main.legacy, right to left, styled by css/bridge.css, until its
- * design-adoption step (HeOCR/heocr-review#54-#58; settings and one language with #53's second part).
+ * Screens adopted to the design render in main.doc. The rest (the task views, sign-in, terms, admin) render in
+ * main.legacy, styled by css/bridge.css, until their design-adoption step (HeOCR/heocr-review#54-#58).
  */
 type Look = "doc" | "legacy";
 function show(look: Look, ...nodes: Node[]): void {
   dispose?.();
   dispose = null;
   app.className = look;
+  // The legacy views are Hebrew-first and laid out right to left; they keep that until they are adopted.
   if (look === "legacy") {
     app.lang = "he";
     app.dir = "rtl";
   } else {
     app.removeAttribute("lang");
     app.removeAttribute("dir");
+    setWhere(null);
   }
-  setWhere(null);
   mount(app, ...nodes);
   window.scrollTo(0, 0);
 }
@@ -47,19 +51,52 @@ function setWhere(title: string | null): void {
 }
 
 function renderNav(): void {
-  if (!me) return nav.replaceChildren();
   const current = location.hash.replace(/^#/, "");
-  const link = (href: string, ic: IconName | null, label: string | Node, title?: string) =>
-    h(
-      "a",
-      { href: `#${href}`, ...(title ? { title } : {}), ...(current === href ? { "aria-current": "page" } : {}) },
-      ic ? icon(ic, { sm: true }) : null,
-      h("span", {}, label),
-    );
-  const links = [link("tasks", "tasks", "סקירה")];
-  if (me.isAdmin) links.push(link("admin", null, "ניהול"));
-  links.push(link("settings", "settings", me.displayName ?? h("bdi", { dir: "ltr" }, me.reviewerId), me.reviewerId));
+  const link = (href: string, ic: IconName | null, label: string) =>
+    h("a", { href: `#${href}`, "aria-label": label, ...(current === href ? { "aria-current": "page" } : {}) }, ic ? icon(ic, { sm: true }) : null, h("span", {}, label));
+  if (!me) return nav.replaceChildren(link("conventions", "conventions", t("conv")));
+  const links = [link("tasks", "tasks", t("tasks")), link("conventions", "conventions", t("conv"))];
+  if (me.isAdmin) links.push(link("admin", null, t("admin")));
+  links.push(link("settings", "settings", t("settings")));
   nav.replaceChildren(...links);
+}
+
+/** The footer in the interface language (the static page carries both until the app starts). */
+function renderFoot(): void {
+  const foot = document.getElementById("foot");
+  if (!foot) return;
+  const sep = () => " · ";
+  foot.replaceChildren(
+    h("a", { href: "/" }, t("about")),
+    sep(),
+    h("a", { href: "/privacy" }, t("privacy")),
+    sep(),
+    h("a", { href: "/terms" }, t("terms")),
+    sep(),
+    h("a", { href: "https://github.com/HeOCR/heocr-review", rel: "noopener" }, "GitHub"),
+    sep(),
+    h("span", {}, t("no_analytics")),
+  );
+}
+
+/** A preference changed in settings: apply it, keep it, and redraw what depends on the language. */
+function setPrefs(next: Prefs): void {
+  prefs = next;
+  savePrefs(prefs);
+  applyPrefs(prefs);
+  renderNav();
+  renderFoot();
+}
+
+/** The typing conventions (eval's registered Hebrew sheet: what to type for marks that have no key). */
+function conventionsView(): HTMLElement {
+  return h(
+    "section",
+    { class: "card" },
+    h("h1", {}, t("conv_h")),
+    h("p", {}, t("conv_p")),
+    h("dl", { class: "conventions", lang: "he", dir: "rtl" }, ...CONVENTIONS.flatMap(([what, type]) => [h("dt", {}, what), h("dd", {}, type)])),
+  );
 }
 
 function signedIn(next: MeResponse): void {
@@ -92,9 +129,10 @@ function needTerms(): Promise<void> {
 
 async function route(): Promise<void> {
   renderNav();
-  if (!me) return signedOut();
   const hash = location.hash.replace(/^#/, "");
-  if (hash === "settings") return show("legacy", settingsView(me, (next) => ((me = next), renderNav()), signedOut));
+  if (hash === "conventions") return show("doc", conventionsView());
+  if (!me) return signedOut();
+  if (hash === "settings") return show("doc", settingsView(me, prefs, { changed: (next) => ((me = next), renderNav()), prefsChanged: setPrefs, signedOut }));
   if (hash === "admin" && me.isAdmin) return show("legacy", adminView());
   if (!me.termsCurrent) {
     return show("legacy", termsView(me, (next) => signedIn(next)));
@@ -111,7 +149,7 @@ async function route(): Promise<void> {
     } else if (chosen) batch = batches.find((b) => b.id === chosen[1]);
     else if (batches.length === 1 && hash !== "tasks") batch = batches[0];
     if (!batch) {
-      if (!batches.length) return show("doc", stateScreen("tasks", "אין כרגע משימות פתוחות. / No open tasks right now."));
+      if (!batches.length) return show("doc", stateScreen("tasks", t("empty_h"), t("empty_p")));
       return show("doc", picker(batches));
     }
     const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
@@ -128,18 +166,19 @@ async function route(): Promise<void> {
     dispose = view.dispose;
   } catch (err) {
     if (err instanceof ApiFailure && err.status === 401) return signedOut();
-    show("doc", stateScreen("warning", "שגיאה בטעינה. / Failed to load.", true));
+    show("doc", stateScreen("warning", t("load_failed"), t("e_srv_hint"), true));
   }
 }
 
-/** The design's whole-screen state: a framed icon, a title, and (on failure) a way to try again. */
-function stateScreen(ic: IconName, title: string, retry = false): HTMLElement {
+/** The design's whole-screen state: a framed icon, a title, one sentence, and (on failure) a way to try again. */
+function stateScreen(ic: IconName, title: string, text: string, retry = false): HTMLElement {
   return h(
     "section",
     { class: "state" },
     h("span", { class: "mark" }, icon(ic)),
     h("h1", {}, title),
-    retry ? h("div", { class: "stack" }, h("button", { type: "button", class: "act primary", onclick: () => void route() }, "שוב / Try again")) : null,
+    h("p", { class: "muted" }, text),
+    retry ? h("div", { class: "stack" }, h("button", { type: "button", class: "act primary", onclick: () => void route() }, t("retry"))) : null,
   );
 }
 
@@ -149,8 +188,8 @@ function subsetNav(batch: BatchSummary, current: string | undefined): HTMLElemen
     h("a", { href: id ? `#b/${encodeURIComponent(batch.id)}/s/${encodeURIComponent(id)}` : `#b/${encodeURIComponent(batch.id)}`, ...(current === id ? { "aria-current": "page", class: "on" } : {}) }, label);
   return h(
     "nav",
-    { class: "subsetnav small", "aria-label": "סינון / Filter" },
-    link("", "כל העמודים"),
+    { class: "subsetnav small", "aria-label": t("filter") },
+    link("", t("all_pages")),
     ...batch.subsets.map((s) => link(s.id, `${s.title} (${s.size})`)),
   );
 }
@@ -161,7 +200,7 @@ function picker(batches: BatchSummary[]): HTMLElement {
   return h(
     "div",
     { class: "picker" },
-    h("h1", {}, "בחרו משימה ", h("span", { class: "muted small", lang: "en", dir: "ltr" }, "Choose a task")),
+    h("h1", {}, t("pick_h")),
     ...sorted.map((b) => {
       const p = b.progress;
       // A volunteer batch shows the volunteer's own count only (nothing about other volunteers' work).
@@ -170,15 +209,15 @@ function picker(batches: BatchSummary[]): HTMLElement {
       return h(
         "a",
         { class: "card pick", href: `#b/${encodeURIComponent(b.id)}` },
-        h("strong", {}, b.taskLabel.he, h("span", { class: "muted small", lang: "en", dir: "ltr" }, ` ${b.taskLabel.en}`)),
+        h("strong", {}, b.taskLabel[lang()]),
         own
-          ? h("span", { class: "count" }, h("strong", { class: "num" }, String(p.decidedByMe)), " החלטת / decided")
-          : h("span", { class: "count" }, h("strong", { class: "num" }, String(p.remainingForMe)), " נשארו / left"),
+          ? h("span", { class: "count" }, h("strong", { class: "num" }, String(p.decidedByMe)), ` ${t("decided")}`)
+          : h("span", { class: "count" }, h("strong", { class: "num" }, String(p.remainingForMe)), ` ${t("remain")}`),
         h(
           "span",
           { class: "meta" },
           h("bdi", {}, b.title),
-          b.taskType === "page_review" ? h("span", { class: "tag" }, icon("desktop", { sm: true }), "במחשב / On a computer") : null,
+          b.taskType === "page_review" ? h("span", { class: "tag" }, icon("desktop", { sm: true }), t("on_desktop")) : null,
         ),
         own ? null : h("span", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("i", { style: `width:${pct}%` })),
       );
@@ -187,7 +226,9 @@ function picker(batches: BatchSummary[]): HTMLElement {
 }
 
 async function start(): Promise<void> {
+  applyPrefs(prefs);
   document.querySelector(".top .home")?.append(mark());
+  renderFoot();
   config = await get<ConfigResponse>("/api/config");
   if (config.environment !== "production") {
     document.body.dataset.env = config.environment;
@@ -203,4 +244,4 @@ async function start(): Promise<void> {
   await route();
 }
 
-start().catch(() => show("doc", stateScreen("warning", "שגיאה בטעינה. / Failed to load.", true)));
+start().catch(() => show("doc", stateScreen("warning", t("load_failed"), t("e_srv_hint"), true)));

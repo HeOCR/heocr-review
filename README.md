@@ -159,6 +159,11 @@ The app follows the designer's set in `design/review/` (HeOCR/heocr-review#51), 
 `public/fonts/`. Views not adopted yet render in `main.legacy`, styled by `public/css/bridge.css` (the old styles,
 scoped); each step removes its part. The public pages keep `public/styles.css` until step 5.
 
+- Interface strings are `[Hebrew, English]` in `src/web/strings.json`, with the design's keys; one language at a
+  time (`t()` in `src/web/i18n.ts`). The maintainer approved the Hebrew on 2026-11-19; new wording goes through
+  his review.
+- Appearance, language and the side of Exact are per device, in localStorage (`src/web/prefs.ts`), with defaults
+  when storage is blocked. Nothing of it reaches the server.
 - Icons are generated from `design/review/icons/` by `node scripts/gen-icons.mjs` into `src/web/icons.gen.ts`.
 - `npm run dev` passes `--infer-origin-from-routes=false`, so the local Worker sees `localhost` (and the dev
   sign-in works) despite the `review.heocr.org` route.
