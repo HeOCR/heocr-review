@@ -28,6 +28,15 @@ Each item is owned by the session named, and all of them must hold before step 0
    has no per-batch access control, so it is "admin only" only while the maintainer is the only reviewer. Before the
    launch deploy, close it (status `closed`) once its lines are decided and exported to eval, or gate it in the launch
    code. Volunteers must never be served it.
+9. **Local inputs present:** `~/.config/heocr/heocr-review.secrets.json` exists. If it's missing, the maintainer
+   restores it from his 1Password (Private vault, "HeOCR review Worker secrets"); a newly generated
+   `REVIEWER_ID_SECRET` would give every reviewer a new id. If `.import/` is gone, restore its launch inputs from the
+   private copies:
+   - the privacy re-cut's `v0_deactivate_dropped.sql`, `media_removal.sh` and `media_pages.txt` from
+     `HeOCR/heocr-ops` `heocr-review/records-2026-11-19/privacy-recut/` to `.import/privacy/recut/`;
+   - the volunteer media hold from `HeOCR/heocr-restricted-eval`
+     `preregistration/midcentury_volunteers_2026-11-18/held_media/` to `.import/held-media/` (check
+     `SHA256SUMS_held_media`).
 
 ## The privacy text
 
