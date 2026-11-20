@@ -1,3 +1,5 @@
+import { SYNTH_REALISM } from "../src/shared/synth_realism";
+import { importSynthRealism } from "./lib/synth-realism-import";
 /**
  * Import a task's source file and its page images into HeOCR Review.
  *
@@ -65,6 +67,7 @@ function mediaBudget(publicDir: string, media: Map<string, ProposalMedia>, itemI
 async function main(): Promise<void> {
   const { flags } = parseArgs(process.argv.slice(2));
   const taskId = str(flags, "task");
+  if (taskId === SYNTH_REALISM) return importSynthRealism(ROOT, flags, target(flags));
   const task = importer(taskId);
   if (!task) throw new Error(`unknown task type ${taskId}`);
   const bundleDir = typeof flags.bundle === "string" ? flags.bundle : null;

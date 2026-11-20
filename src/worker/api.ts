@@ -1,3 +1,5 @@
+import { SYNTH_REALISM, type Side } from "../shared/synth_realism";
+import { nextRealism, realismAdmin, realismAsset, realismChoice, realismFeedback, realismProgress } from "./synth_realism";
 import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
 import { cleanDisplayName, displayNameProblem } from "../shared/displayName";
 import { TERMS_STATUS, TERMS_VERSION } from "../shared/terms";
@@ -173,6 +175,17 @@ export async function batches(ctx: Ctx): Promise<Response> {
   const list = await listBatches(ctx.env.DB, true);
   const out: BatchSummary[] = [];
   for (const b of list) {
+    if (b.taskType === SYNTH_REALISM) {
+      if (realismEnabled(ctx.env) && isAdmin(ctx.env, reviewer.id)) {
+        const { total, completed } = await realismProgress(ctx.env.DB, b.id, reviewer.id);
+        out.push({
+          id: b.id, taskType: SYNTH_REALISM, taskLabel: { he: "סקירת מראה סינתטי", en: "Synthetic realism review" },
+          title: b.title, subsets: [],
+          progress: { total, covered: completed, minReviewers: 1, decidedByMe: completed, skippedByMe: 0, remainingForMe: total - completed },
+        });
+      }
+      continue;
+    }
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
@@ -426,10 +439,53 @@ async function requireAdmin(ctx: Ctx): Promise<ReviewerRow> {
   return reviewer;
 }
 
+/** Deployment and local mode both use the explicit flag. Every realism endpoint still requires an admin. */
+function realismEnabled(env: Env): boolean {
+  return env.SYNTH_REALISM_ENABLED === "1";
+}
+
+async function realismAccess(ctx: Ctx, id: string, write: boolean) {
+  if (!realismEnabled(ctx.env)) throw new HttpError(404, "not_found");
+  const reviewer = await requireAdmin(ctx);
+  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  if (write) assertSameOrigin(ctx.request);
+  enforce(write ? LIMITS.realismMinute : LIMITS.readMinute, reviewer.id, ctx.now);
+  const batch = await getBatch(ctx.env.DB, id);
+  if (batch?.taskType !== SYNTH_REALISM || batch.status !== "open") throw new HttpError(404, "not_found");
+  return reviewer.id;
+}
+
+export async function synthNext(ctx: Ctx, batch: string): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, true);
+  return json(await nextRealism(ctx.env.DB, batch, reviewer, ctx.now));
+}
+
+export async function synthChoice(ctx: Ctx, batch: string, trial: string): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, true);
+  return json(await realismChoice(ctx.env.DB, batch, reviewer, trial, await readJson(ctx.request), ctx.now));
+}
+
+export async function synthFeedback(ctx: Ctx, batch: string, trial: string): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, true);
+  return json(await realismFeedback(ctx.env.DB, batch, reviewer, trial, await readJson(ctx.request), ctx.now));
+}
+
+export async function synthAsset(ctx: Ctx, batch: string, trial: string, side: Side, kind: "page" | "line"): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, false);
+  return realismAsset(ctx.env.DB, batch, reviewer, trial, side, kind);
+}
+
 export async function adminProgress(ctx: Ctx): Promise<Response> {
   await requireAdmin(ctx);
   const out = [];
   for (const batch of await listBatches(ctx.env.DB, false)) {
+    if (batch.taskType === SYNTH_REALISM) {
+      if (realismEnabled(ctx.env)) {
+        const { counts, reviewers } = await realismAdmin(ctx.env.DB, batch, ctx.now);
+        out.push({ id: batch.id, taskType: batch.taskType, title: batch.title, status: batch.status, minReviewers: 1, counts, reviewers });
+      }
+      continue;
+    }
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
     const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
@@ -454,6 +510,10 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   await requireAdmin(ctx);
   const batch = await getBatch(ctx.env.DB, batchId);
   if (!batch) throw new HttpError(404, "not_found");
+  if (batch.taskType === SYNTH_REALISM) {
+    if (!realismEnabled(ctx.env)) throw new HttpError(404, "not_found");
+    return (await realismAdmin(ctx.env.DB, batch, ctx.now)).export();
+  }
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
   const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};

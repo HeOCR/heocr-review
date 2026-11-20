@@ -1,5 +1,5 @@
 {
- "_note": "The app's interface strings, [Hebrew, English], from design/review/strings.json (HeOCR/heocr-review#51). Keys match the design's. {name} is filled in by t(). The maintainer approved all of them on 2026-11-19 (\"all approved\"); new wording goes through his review. He approved draft_note and draft_reset as written on 2026-11-20 (via heocr-lead). He approved the triage strings (tri_correct, tri_different, tri_no_niqqud, q_triage, q_fix, fix_phone_h, fix_phone_p, to_triage) on 2026-11-20 (via heocr-lead). He approved the page completeness strings (pc_*, pa_*) and the admin's exemption from the daily cap on 2026-11-20 (\"כן, כולל על התקרה\", via heocr-lead).",
+ "_note": "The app's interface strings, [Hebrew, English], from design/review/strings.json (HeOCR/heocr-review#51). Keys match the design's. {name} is filled in by t(). The maintainer approved all of them on 2026-11-19 (\"all approved\"); new wording goes through his review. He approved draft_note and draft_reset as written on 2026-11-20 (via heocr-lead). He approved the triage strings (tri_correct, tri_different, tri_no_niqqud, q_triage, q_fix, fix_phone_h, fix_phone_p, to_triage) on 2026-11-20 (via heocr-lead). He approved the page completeness strings (pc_*, pa_*) and the admin's exemption from the daily cap on 2026-11-20 (\"כן, כולל על התקרה\", via heocr-lead). The maintainer approved all synthetic realism interface strings and the HE/EN privacy notice in HeOCR/heocr-review#75 on 2026-11-20 (via heocr-lead): \"strings approved; get this up, especially for mobile, ASAP\".",
  "batch": [
   "אל המזח · שורות",
   "אל המזח · lines"
@@ -1007,5 +1007,129 @@
  "pa_done": [
   "סיימתי — אין עוד שורות חסרות",
   "Done — no more missing lines"
+ ],
+ "sr_counter": [
+  "זוג {current} מתוך {total}",
+  "Pair {current} of {total}"
+ ],
+ "sr_counter_done": [
+  "{current} מתוך {total} זוגות הושלמו",
+  "{current} of {total} pairs completed"
+ ],
+ "sr_question": [
+  "איזו מהשתיים היא הסריקה האמיתית?",
+  "Which one is the real scan?"
+ ],
+ "sr_compare": [
+  "השוואת הסריקות",
+  "Compare the scans"
+ ],
+ "sr_left": [
+  "שמאל",
+  "Left"
+ ],
+ "sr_right": [
+  "ימין",
+  "Right"
+ ],
+ "sr_real": [
+  "סריקה אמיתית",
+  "Real scan"
+ ],
+ "sr_synthetic": [
+  "תמונה סינתטית",
+  "Synthetic image"
+ ],
+ "sr_zoom": [
+  "הגדלת שורה",
+  "Line zoom"
+ ],
+ "sr_left_line": [
+  "שורה מהתמונה משמאל",
+  "Line from the left image"
+ ],
+ "sr_right_line": [
+  "שורה מהתמונה מימין",
+  "Line from the right image"
+ ],
+ "sr_rating": [
+  "האם זה אותו סוג מסמך וסריקה כמו בתמונה האמיתית?",
+  "Same kind of document and scan as the real one?"
+ ],
+ "sr_tags": [
+  "מה בולט לעין? אפשר לבחור כמה תגיות.",
+  "What stands out? Select any tags that apply."
+ ],
+ "sr_too_clean": [
+  "נקי מדי",
+  "Too clean"
+ ],
+ "sr_soft_texture": [
+  "מרקם רך",
+  "Soft texture"
+ ],
+ "sr_surface_ink": [
+  "הדיו נראה מונח על פני הנייר",
+  "Ink sits on top of the paper"
+ ],
+ "sr_uniform_noise": [
+  "רעש אחיד",
+  "Uniform noise"
+ ],
+ "sr_wrong_era_font": [
+  "גופן שלא מתאים לתקופה",
+  "Wrong-era font"
+ ],
+ "sr_wrong_layout": [
+  "פריסה לא מתאימה",
+  "Wrong layout"
+ ],
+ "sr_wrong_paper_colour": [
+  "גוון נייר לא מתאים",
+  "Wrong paper colour"
+ ],
+ "sr_too_sharp": [
+  "חד מדי",
+  "Too sharp"
+ ],
+ "sr_too_blurry": [
+  "מטושטש מדי",
+  "Too blurry"
+ ],
+ "sr_artefacts": [
+  "פגמים בתמונה",
+  "Artefacts"
+ ],
+ "sr_comment": [
+  "הערה (רשות)",
+  "Comment (optional)"
+ ],
+ "sr_next": [
+  "שמירה והמשך",
+  "Save and next"
+ ],
+ "sr_finish": [
+  "שמירה וסיום",
+  "Save and finish"
+ ],
+ "sr_done": [
+  "הסקירה הושלמה",
+  "Session complete"
+ ],
+ "sr_retry": [
+  "משהו השתבש. אפשר לנסות שוב.",
+  "Something went wrong. Try again."
+ ],
+ "sr_slow": [
+  "יותר מדי פעולות. אפשר לנסות שוב בעוד רגע.",
+  "Too many actions. Try again shortly."
+ ],
+ "sr_export": [
+  "ייצוא סקירה לצורכי פיתוח",
+  "Export development review"
+ ],
+ "sr_rating_pair": [
+  "עד כמה סוגי המסמך והסריקה דומים בשתי התמונות?",
+  "How similar are these two documents and scans?"
  ]
 }

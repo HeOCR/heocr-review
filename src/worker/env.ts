@@ -15,6 +15,8 @@ export interface Env {
    * (docs/runbooks/volunteer-launch.md); a local Worker sets it in .dev.vars.
    */
   CONSENSUS_ENABLED?: string;
+  /** Enables the admin-only synthetic realism queue. */
+  SYNTH_REALISM_ENABLED?: string;
   /** .dev.vars only. */
   DEV_AUTH_BYPASS?: string;
 }

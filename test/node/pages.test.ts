@@ -6,9 +6,9 @@ import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved ones: terms 2026-11-18-v1, privacy 2026-11-18-v3", () => {
+  it("versions are the approved ones: terms 2026-11-18-v1, privacy 2026-11-20-v1", () => {
     expect(TERMS_VERSION).toBe("2026-11-18-v1");
-    expect(PRIVACY_VERSION).toBe("2026-11-18-v3");
+    expect(PRIVACY_VERSION).toBe("2026-11-20-v1");
   });
 
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
@@ -86,6 +86,11 @@ describe("public pages (Google branding URLs)", () => {
     // After "Contributions are public", in each language.
     expect(html.indexOf("Check lines")).toBeGreaterThan(html.indexOf("Contributions are public"));
     expect(html.indexOf("שורות בדיקה")).toBeGreaterThan(html.indexOf("התרומות ציבוריות"));
+  });
+
+  it("publishes the approved synthetic realism notice in both languages", () => {
+    expect(page("privacy.html")).toContain("בסקירת המראה הסינתטי נשמרים הכינוי שלך, התמונה שבחרת, הזמן עד הבחירה, הדירוג, התגיות והערה אם כתבת אותה. מנהלי הפרויקט בלבד יכולים לראות ולייצא את הרשומות לצורכי פיתוח מחוללי התמונות.");
+    expect(page("privacy.html")).toContain("Synthetic realism review stores your pseudonym, the image you chose, time to choice, rating, tags, and any optional comment. Only project admins can view and export these records for generator development.");
   });
 
   it("the terms carry the contribution terms", () => {

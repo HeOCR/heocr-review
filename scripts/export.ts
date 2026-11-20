@@ -13,6 +13,8 @@
  * Then copy the decisions file over hocrgen's docs/reference_audit_decisions.json in a PR, and check it there:
  *   python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json
  */
+import { SYNTH_REALISM } from "../src/shared/synth_realism";
+import { EXPORT_FILE, REALISM_EXPORT_SQL, realismExport, type RealismRow } from "../src/tasks/synth_realism/export";
 import { TRIAGE_PLANTS_SQL, toTriagePlant } from "../src/tasks/line_verify/triage";
 import { ADDED_LINES_SQL, PAGE_CHECKS_SQL, TRIAGE_PAGES_SQL, toTriagePages, type AddedLineRow, type PageCheckRow, type TriagePageRow } from "../src/tasks/line_verify/pagerecords";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -32,6 +34,15 @@ function main(): void {
   const one = <T>(sql: string) => d1Query<T>(t, inline(sql, batchId))[0] ?? [];
   const batchRow = one<BatchRow>(EXPORT_SQL.batch)[0];
   if (!batchRow) throw new Error(`no batch ${batchId} in ${t}`);
+  if (batchRow.task_type === SYNTH_REALISM) {
+    if (flags.public === true || t !== "local") throw new Error("synth_realism exports are private and local only");
+    const batch = toBatch(batchRow);
+    const file = realismExport(batchId, one<RealismRow>(REALISM_EXPORT_SQL), new Date().toISOString(), batch.source.fixture === true);
+    mkdirSync(out, { recursive: true, mode: 0o700 });
+    writeFileSync(join(out, EXPORT_FILE), formatJson(file), { mode: 0o600, flag: "wx" });
+    console.log(JSON.stringify({ batch: batchId, files: [EXPORT_FILE], decisions: file.decisions.length }));
+    return;
+  }
   const proposals = one<ProposalRow>(EXPORT_SQL.proposals).map(toProposal);
   const result = buildExport({
     batch: toBatch(batchRow),
