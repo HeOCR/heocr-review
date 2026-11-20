@@ -15,7 +15,11 @@ import type { BatchSummary, NextResponse, PageDraftRow, PageReviewLine, PageRevi
 import { hasNiqqud } from "../../shared/niqqud";
 import { ApiFailure, del, get, post, put } from "../api";
 import { h, mount } from "../dom";
-import { failureHandler, prefetch, progressBar, type ReviewHooks, type ReviewScreen } from "./common";
+import { lang, t } from "../i18n";
+import { icon, type IconName } from "../icons";
+import { DESKTOP_QUERY, canDecidePage } from "../linerules";
+import { failureHandler, prefetch, type ReviewHooks, type ReviewScreen } from "./common";
+import { boxedImage, progressLine, stateScreen } from "./taskparts";
 import { viewer } from "./viewer";
 import { CONVENTIONS } from "./conventions";
 
@@ -50,25 +54,12 @@ const TEXTLESS: Action[] = ["not_on_page", "unreadable"];
 /** How long typing pauses before the draft is saved (leaving a line saves at once). */
 const SAVE_DELAY_MS = 1200;
 type SaveState = "idle" | "saving" | "saved" | "failed" | "stale";
-const SAVE_LABEL: Record<SaveState, string> = {
-  idle: "",
-  saving: "שומר…",
-  saved: "✓ נשמר",
-  failed: "שמירה נכשלה, מנסה שוב",
-  stale: "העמוד השתנה: טענו את הדף מחדש",
-};
+const SAVE_LABEL = (state: SaveState): string =>
+  ({ idle: "", saving: t("saving"), saved: t("p_draft"), failed: t("p_draft_failed"), stale: t("p_stale") })[state];
 const HIDDEN = /[\u200e\u200f\u202a-\u202e\u2066-\u2069\u00ad\u200b-\u200d\ufeff]/;
 
-const ACTION_LABEL: Record<Action, string> = {
-  correct: "",
-  edit: "תוקן",
-  print_has_niqqud: "ניקוד בדפוס",
-  not_on_page: "לא בעמוד",
-  unreadable: "לא קריא",
-  merge: "אוחד",
-  split: "פוצל",
-  added: "נוסף",
-};
+const ACTION_LABEL = (a: Action): string =>
+  a === "correct" ? "" : t(({ edit: "st_edit", print_has_niqqud: "t_niq", not_on_page: "t_nop", unreadable: "t_unr", merge: "st_merge", split: "st_split", added: "st_added" } as const)[a]);
 
 /** The typing conventions (eval, 2026-11-12): what to type for marks that have no key of their own. */
 
@@ -77,13 +68,11 @@ const drafts = new Map<string, Draft>();
 let conventionsOpen = true;
 
 function flagText(r: Row): string {
-  if (r.mismatch && r.bidiRisk) return "קריאה שונה · ספרות/סוגריים";
-  if (r.mismatch) return "קריאה שונה";
-  return "ספרות/סוגריים";
+  return [r.mismatch ? t("p_mismatch") : null, r.bidiRisk || !r.mismatch ? t("digits") : null].filter(Boolean).join(" · ");
 }
 
 function aiText(r: Row): string {
-  return [r.ai ? "קריאה אחרת (Claude)" : null, r.aiMissing ? "חסר טקסט לידה? (Claude)" : null].filter(Boolean).join(" · ");
+  return [r.ai ? t("ai_differs") : null, r.aiMissing ? t("ai_missing") : null].filter(Boolean).join(" · ");
 }
 
 /** `startAt` opens one page first (link #p/<id>); then the queue continues. `subset`: serve only that subset's pages. */
@@ -198,7 +187,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     saveState = state;
     const el = root.querySelector(".savestate") as HTMLElement | null;
     if (!el) return;
-    el.textContent = SAVE_LABEL[state];
+    el.textContent = SAVE_LABEL(state);
     el.dataset.state = state;
   }
 
@@ -280,6 +269,8 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   async function send(value: "confirm" | "reject", body: Record<string, unknown>): Promise<void> {
+    // A phone never decides a page (SPEC §9, §14.6): the hand-off has no decision, and this holds for keys too.
+    if (!canDecidePage(matchMedia(DESKTOP_QUERY).matches)) return status(t("pp_title"));
     if (!current || busy) return;
     busy = true;
     const id = current.id;
@@ -539,7 +530,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     li.classList.toggle("looked", r.looked);
     li.classList.toggle("excluded", TEXTLESS.includes(r.action));
     const chip = li.querySelector(".state") as HTMLElement;
-    chip.textContent = ACTION_LABEL[r.action];
+    chip.textContent = ACTION_LABEL(r.action);
     chip.hidden = r.action === "correct";
     chip.dataset.action = r.action;
     const hidden = li.querySelector(".hidden") as HTMLElement;
@@ -550,13 +541,12 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const left = pendingA().length;
     const el = root.querySelector(".pending");
     if (el) {
-      el.textContent = left
-        ? `נשארו ${left} שורות מסומנות לבדיקה (Enter על שורה = נבדקה)`
-        : "כל השורות המסומנות נבדקו. עברו על השאר ואשרו את העמוד.";
+      el.replaceChildren(icon(left ? "flag" : "exact", { sm: true }), " ", left ? t("p_pending", { n: left }) : t("p_all_looked"));
       el.classList.toggle("ok", left === 0);
     }
+    // Confirm waits while flagged lines remain, with the count stated above the list (SPEC §4.5).
     const btn = root.querySelector(".confirmbtn") as HTMLButtonElement | null;
-    if (btn) btn.classList.toggle("notyet", left > 0);
+    if (btn) btn.disabled = left > 0;
   }
 
   function lineEl(r: Row, n: number): HTMLElement {
@@ -570,7 +560,7 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       autocapitalize: "off",
       maxlength: 1000,
       "data-key": r.key,
-      "aria-label": `שורה ${n}`,
+      "aria-label": t("p_line", { n }),
     }) as HTMLInputElement;
     input.value = r.text;
     input.addEventListener("input", () => {
@@ -588,8 +578,15 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         fn();
       }
     });
-    const tool = (label: string, title: string, fn: () => void) =>
-      h("button", { type: "button", class: "small", title, tabindex: "-1", onmousedown: (e: Event) => e.preventDefault(), onclick: fn }, label);
+    // A line's tools, with their key caps (SPEC §4.5); mousedown keeps the focus in the line.
+    const tool = (label: string | Node, key: string, fn: () => void, ic?: IconName, title?: string) =>
+      h(
+        "button",
+        { type: "button", class: "act quiet", tabindex: "-1", ...(title ? { title, "aria-label": title } : {}), onmousedown: (e: Event) => e.preventDefault(), onclick: fn },
+        ic ? icon(ic, { sm: true }) : null,
+        label,
+        key ? h("kbd", {}, key) : null,
+      );
     const li = h(
       "li",
       { class: "prline", "data-key": r.key },
@@ -600,35 +597,26 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         h(
           "div",
           { class: "lhead" },
-          r.tierA ? h("span", { class: "flag", title: "בדקו את השורה הזאת היטב / look closely at this line" }, `בדקו: ${flagText(r)}`) : null,
-          r.ai || r.aiMissing
-            ? h(
-                "span",
-                {
-                  class: "flag ai",
-                  title: "רמז בלבד: הקריאה של Claude בסריקה שונה כאן, או שליד השורה יש טקסט שחסר. הקלידו את מה שמודפס. / A hint only: Claude reads this differently, or sees text next to it that is missing. Type what is printed.",
-                },
-                `בדקו: ${aiText(r)}`,
-              )
-            : null,
+          r.tierA ? h("span", { class: "flag" }, icon("flag", { sm: true }), `${t("p_check")}: ${flagText(r)}`) : null,
+          r.ai || r.aiMissing ? h("span", { class: "flag ai", title: t("p_ai_title") }, icon("flag", { sm: true }), `${t("p_check")}: ${aiText(r)}`) : null,
           h("span", { class: "state" }),
-          h("span", { class: "hidden", title: "בשורה יש תו נסתר (סימן כיווניות). אם הוא לא בדפוס, מחקו אותו. / The line holds an invisible character." }, "תו נסתר"),
+          h("span", { class: "hidden", title: t("p_hidden_title") }, t("p_hidden")),
         ),
         input,
         h(
           "div",
           { class: "tools" },
-          tool("✓ נבדקה", "Enter", () => lookedAndNext(r.key)),
-          tool("ניקוד בדפוס", "Alt+N", () => toggle(r.key, "print_has_niqqud")),
-          tool("לא בעמוד", "Alt+X", () => toggle(r.key, "not_on_page")),
-          tool("לא קריא", "Alt+U", () => toggle(r.key, "unreadable")),
-          tool("פיצול בסמן", "Alt+Enter", () => splitAt(r.key, input.selectionStart ?? Math.floor(input.value.length / 2))),
-          tool("איחוד עם הבאה", "Alt+J", () => mergeNext(r.key)),
-          tool("↑", "Alt+↑ הזזה למעלה", () => move(r.key, -1)),
-          tool("↓", "Alt+↓ הזזה למטה", () => move(r.key, 1)),
-          tool("+ שורה", "Alt+A הוספת שורה מתחת", () => addBelow(r.key)),
-          tool("–", "Alt+- קו מפריד", () => insertAtCaret(input, "–")),
-          r.action === "added" ? tool("מחיקה", "מחיקת השורה שנוספה", () => removeAdded(r.key)) : null,
+          tool(t("p_looked"), "Enter", () => lookedAndNext(r.key), "exact"),
+          tool(t("t_niq"), "Alt+N", () => toggle(r.key, "print_has_niqqud"), "niqqud"),
+          tool(t("t_nop"), "Alt+X", () => toggle(r.key, "not_on_page"), "not-on-page"),
+          tool(t("t_unr"), "Alt+U", () => toggle(r.key, "unreadable"), "unreadable"),
+          tool(t("t_split"), "Alt+Enter", () => splitAt(r.key, input.selectionStart ?? Math.floor(input.value.length / 2)), "split"),
+          tool(t("t_merge"), "Alt+J", () => mergeNext(r.key), "merge"),
+          tool("", "Alt+↑", () => move(r.key, -1), "move-up", t("p_up")),
+          tool("", "Alt+↓", () => move(r.key, 1), "move-down", t("p_down")),
+          tool(t("t_add"), "Alt+A", () => addBelow(r.key), "add-line"),
+          tool("–", "Alt+-", () => insertAtCaret(input, "–"), undefined, t("p_dash")),
+          r.action === "added" ? tool(t("p_delete"), "", () => removeAdded(r.key), "close") : null,
         ),
       ),
     );
@@ -691,139 +679,88 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const conventions = h(
       "details",
       { class: "conventions", open: conventionsOpen },
-      h("summary", {}, "כללי הקלדה ", h("span", { class: "muted small", lang: "en", dir: "ltr" }, "Typing conventions")),
-      h("p", { class: "small" }, "הקלידו את מה שמודפס. סימנים שאין להם מקש — כתבו בצורת המקלדת:"),
-      h("dl", { class: "small" }, ...CONVENTIONS.flatMap(([what, type]) => [h("dt", {}, what), h("dd", { dir: "auto" }, type)])),
+      h("summary", {}, t("conv_h_short")),
+      h("p", { class: "small" }, t("conv_p")),
+      h("dl", { class: "small", lang: "he", dir: "rtl" }, ...CONVENTIONS.flatMap(([what, type]) => [h("dt", {}, what), h("dd", { dir: "auto" }, type)])),
     );
     conventions.addEventListener("toggle", () => (conventionsOpen = conventions.open));
     const mine = p.mine;
+    hooks.where?.(p.itemTitle); // the page's own title (document text), under the batch title
     mount(
       root,
-      progressBar(progress),
+      progressLine(progress),
+      handoff(p, v),
       h(
-        "article",
-        { class: "card proposal" },
+        "div",
+        { class: "prgrid" },
+        h("section", { class: "scan" }, scan ? scan.el : h("p", { class: "muted" }, t("p_no_image"))),
         h(
-          "header",
-          { class: "meta" },
-          h("span", { class: "tag", title: v.series.label.en }, v.series.label.he),
-          v.period ? h("span", { class: "tag", dir: "ltr" }, v.period) : null,
-          v.pass === 2 ? h("span", { class: "tag", title: "Second pass: the page again, from a different pre-fill" }, "מעבר שני") : null,
-          v.prefillFromStock ? h("span", { class: "tag conf-medium", title: v.prefillSource }, "טקסט מוכן: Tesseract") : h("span", { class: "tag", title: v.prefillSource }, "טקסט מוכן: שכבת ה-OCR של ה-PDF"),
-          v.aiFlagsSha256
-            ? h("span", { class: "tag", title: "בעמוד הזה יש גם סימוני \"בדקו\" של Claude: רק איפה להסתכל, אף פעם לא טקסט. / Claude's look-here hints: where to look, never text." }, "רמזים: Claude")
-            : null,
-          h("span", { class: "muted small title", dir: "auto" }, p.itemTitle),
-        ),
-        conventions,
-        h(
-          "div",
-          { class: "prgrid" },
-          h("section", { class: "scan" }, scan ? scan.el : h("p", { class: "muted" }, "אין תמונה לעמוד הזה. / No image for this page.")),
+          "section",
+          { class: "lines" },
           h(
-            "section",
-            { class: "lines" },
-            h(
-              "p",
-              { class: "ask" },
-              "תקנו כל שורה כך שתהיה בדיוק מה שמודפס, בסדר הקריאה.",
-              h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Correct each line to exactly what is printed, in reading order."),
-            ),
-            h("p", { class: "pending small", role: "status" }),
-            revisiting && mine ? h("p", { class: "mine" }, `ההחלטה שלך: ${mine.value === "confirm" ? "אושר" : "נפסל"} · החלטה חדשה תחליף אותה.`) : null,
-            v.lines.length === 0 && rows.length === 0
-              ? h("p", { class: "muted" }, "אין לעמוד הזה טקסט מוכן: הקלידו את שורותיו. / No pre-fill for this page: type its lines.")
-              : null,
-            h("ol", {
-              class: "prlines",
-              onfocusout: () => {
-                if (pending) void flushSave(); // a line was left: save now
-              },
-            }),
+            "div",
+            { class: "row" },
+            h("span", { class: "tag" }, v.series.label[lang()]),
+            v.period ? h("span", { class: "tag", dir: "ltr" }, v.period) : null,
+            v.pass === 2 ? h("span", { class: "tag" }, t("p_pass2")) : null,
+            v.aiFlagsSha256 ? h("span", { class: "tag", title: t("p_ai_title") }, t("p_ai_tag")) : null,
+          ),
+          conventions,
+          h("p", { class: "ask" }, t("p_ask")),
+          h("p", { class: "pending", role: "status" }),
+          revisiting && mine ? h("p", { class: "mine" }, t("p_mine", { v: mine.value === "confirm" ? t("p_confirmed") : t("p_rejected") })) : null,
+          v.lines.length === 0 && rows.length === 0 ? h("p", { class: "muted" }, t("p_no_prefill")) : null,
+          h("ol", {
+            class: "prlines",
+            onfocusout: () => {
+              if (pending) void flushSave(); // a line was left: save now
+            },
+          }),
+          h(
+            "div",
+            { class: "row" },
+            h("button", { type: "button", class: "act quiet", onclick: () => addBelow(null) }, icon("add-line", { sm: true }), t("p_add")),
+            h("button", { type: "button", class: "act quiet", onclick: resetPage }, icon("reset", { sm: true }), t("p_reset")),
+            h("button", { type: "button", class: "act quiet", onclick: () => void doSkip() }, icon("skip", { sm: true }), t("p_skip")),
+            h("button", { type: "button", class: "act quiet", onclick: back, disabled: history.length === 0 }, icon("previous", { sm: true }), t("p_prev")),
+            revisiting ? h("button", { type: "button", class: "act quiet", onclick: () => void loadNext().catch(fail) }, t("to_queue")) : null,
+          ),
+          v.readingOrderCheck
+            ? h(
+                "label",
+                { class: "check roc" },
+                (() => {
+                  const cb = h("input", { type: "checkbox" }) as HTMLInputElement;
+                  cb.checked = readingOrder;
+                  cb.addEventListener("change", () => {
+                    readingOrder = cb.checked;
+                    saveDraft();
+                  });
+                  return cb;
+                })(),
+                t("p_reading_order"),
+              )
+            : null,
+          h(
+            "div",
+            { class: "decide" },
+            h("button", { type: "button", class: "act primary confirmbtn", onclick: confirmPage }, t("p_confirm"), " ", h("kbd", {}, "Ctrl+Enter")),
+            h("span", { class: "savestate", role: "status", "aria-live": "polite" }),
+          ),
+          h(
+            "details",
+            { class: "reject" },
+            h("summary", {}, t("p_reject")),
             h(
               "div",
               { class: "row" },
-              h("button", { type: "button", class: "small", onclick: () => addBelow(null) }, "+ הוספת שורה בסוף"),
-              h("button", { type: "button", class: "small", onclick: resetPage }, "חזרה לטקסט המוכן"),
+              h("select", { class: "rejreason", "aria-label": t("p_reason") }, h("option", { value: "" }, t("p_reason")), ...v.rejectReasons.map((r) => h("option", { value: r.value }, r.label[lang()]))),
+              h("input", { type: "text", class: "rejnote", maxlength: 500, placeholder: t("p_note_ph"), dir: "auto" }),
+              h("button", { type: "button", class: "act", onclick: rejectPage }, t("p_reject_btn")),
             ),
-            v.readingOrderCheck
-              ? h(
-                  "label",
-                  { class: "row check roc" },
-                  (() => {
-                    const cb = h("input", { type: "checkbox" }) as HTMLInputElement;
-                    cb.checked = readingOrder;
-                    cb.addEventListener("change", () => {
-                      readingOrder = cb.checked;
-                      saveDraft();
-                    });
-                    return cb;
-                  })(),
-                  " סדר הקריאה נבדק: הטור הימני קודם, וההערות שבשוליים במקומן (הזיזו שורות עם ↑/↓). / Reading order checked: right column first, margin notes in place.",
-                )
-              : null,
-            h(
-              "div",
-              { class: "row decide" },
-              h(
-                "button",
-                { type: "button", class: "primary confirmbtn", onclick: confirmPage },
-                "אישור: השורות, כפי שתוקנו, הן טקסט העמוד בסדר הקריאה ",
-                h("kbd", { dir: "ltr" }, "Ctrl+Enter"),
-              ),
-              h("span", {
-                class: "savestate small",
-                role: "status",
-                "aria-live": "polite",
-                title: "התיקונים נשמרים כטיוטה עד שתאשרו או תפסלו את העמוד. / Corrections are saved as a draft until you confirm or reject the page.",
-              }),
-            ),
-            h(
-              "details",
-              { class: "reject" },
-              h("summary", { class: "small" }, "פסילת העמוד (ריק, לא קריא, שגוי) / Reject the page"),
-              h(
-                "div",
-                { class: "row" },
-                h("select", { class: "rejreason" }, h("option", { value: "" }, "סיבה…"), ...v.rejectReasons.map((r) => h("option", { value: r.value }, `${r.label.he} / ${r.label.en}`))),
-                h("input", { type: "text", class: "rejnote", maxlength: 500, placeholder: "הערה (חובה ב\"אחר\")", dir: "auto" }),
-                h("button", { type: "button", onclick: rejectPage }, "פסילה"),
-              ),
-            ),
-            h("p", { class: "msg", role: "status" }),
           ),
-        ),
-        h(
-          "p",
-          { class: "attrib muted small" },
-          h("bdi", { class: "block", dir: "auto" }, v.attribution),
-          h("span", { class: "block" }, "רישיון / Licence: ", h("bdi", { dir: "auto" }, v.textLicense)),
-        ),
-      ),
-      h(
-        "div",
-        { class: "subnav" },
-        h("button", { type: "button", class: "small", onclick: back, disabled: history.length === 0 }, "→ העמוד הקודם (לשינוי ההחלטה)"),
-        h("button", { type: "button", class: "small", onclick: () => void doSkip() }, "דילוג על העמוד"),
-        revisiting ? h("button", { type: "button", class: "small", onclick: () => void loadNext().catch(fail) }, "לתור ←") : null,
-        h(
-          "p",
-          { class: "keys muted small" },
-          "בשורה: ",
-          ...(
-            [
-              ["Enter", "נבדקה, לשורה המסומנת הבאה"],
-              ["↑/↓", "שורה קודמת/הבאה"],
-              ["Alt+Enter", "פיצול בסמן"],
-              ["Alt+J", "איחוד עם הבאה"],
-              ["Alt+N", "ניקוד"],
-              ["Alt+X", "לא בעמוד"],
-              ["Alt+U", "לא קריא"],
-              ["Alt+↑/↓", "הזזה"],
-              ["Alt+A", "הוספה"],
-              ["Ctrl+Enter", "אישור העמוד"],
-            ] as const
-          ).flatMap(([k, t]) => [h("kbd", { dir: "ltr" }, k), ` ${t} · `]),
+          h("p", { class: "msg", role: "status" }),
+          h("p", { class: "attrib" }, h("bdi", { dir: "auto" }, v.attribution), " · ", `${t("licence")}: `, h("bdi", { dir: "auto" }, v.textLicense)),
         ),
       ),
     );
@@ -835,27 +772,57 @@ export function pageReviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   function renderDone(): void {
+    hooks.where?.(null);
     mount(
       root,
-      progressBar(progress),
-      h(
-        "section",
-        { class: "card done" },
-        h("h2", {}, subset ? "סיימת את הסט הזה. תודה רבה!" : "אין עוד עמודים בשבילך כרגע. תודה רבה!"),
-        h("p", { lang: "en", dir: "ltr", class: "muted" }, subset ? "You have finished this set. Thank you!" : "No pages left for you right now. Thank you!"),
-        h("p", { class: "muted small" }, "עמודי המעבר השני נפתחים יממה אחרי שאישרת את העמוד במעבר הראשון. / Second-pass pages open a day after your first-pass confirm."),
-        progress.skippedByMe
-          ? h(
-              "button",
-              { type: "button", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(fail) },
-              `חזרה ל-${progress.skippedByMe} העמודים שדילגת עליהם`,
-            )
-          : null,
-        history.length ? h("button", { type: "button", onclick: back }, "→ חזרה להחלטה האחרונה") : null,
-        h("p", { class: "msg", role: "status" }),
+      stateScreen(
+        "exact",
+        subset ? t("p_done_set") : t("p_done"),
+        t("p_done_pass2"),
+        progress.skippedByMe ? h("button", { type: "button", class: "act primary", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(fail) }, t("p_done_skips", { n: progress.skippedByMe })) : null,
+        history.length ? h("button", { type: "button", class: "act", onclick: back }, icon("previous", { sm: true }), t("done_last")) : null,
+        h("a", { class: "act quiet", href: "#tasks" }, t("all_tasks")),
       ),
     );
   }
+
+  /**
+   * The phone's hand-off (SPEC §9, §14.6): page review is done on a computer. The phone shows why, a link to copy, a
+   * way to a line task, and the page with its pre-fill to read. Nothing here can decide or change the page.
+   */
+  function handoff(p: ProposalView, v: PageReviewView): HTMLElement {
+    const link = `${location.origin}${location.pathname}#p/${p.id}`;
+    const copy = h("button", { type: "button", class: "act primary" }, icon("copy", { sm: true }), t("pp_copy"));
+    copy.addEventListener("click", () => {
+      void navigator.clipboard?.writeText(link).then(
+        () => toast(t("pp_copied")),
+        () => toast(link),
+      );
+    });
+    return h(
+      "div",
+      { class: "phone-only state handoff" },
+      h("span", { class: "mark" }, icon("desktop")),
+      h("h2", {}, t("pp_title")),
+      h("p", {}, t("pp_body")),
+      h("div", { class: "stack" }, copy, h("a", { class: "btn act", href: "#tasks" }, t("pp_lines"))),
+      h(
+        "details",
+        {},
+        h("summary", {}, t("pp_view")),
+        v.page ? h("div", { class: "ctxbox" }, boxedImage(v.page, p.itemTitle)) : null,
+        ...v.lines.map((l) => h("p", { class: "txt", lang: "he", dir: "rtl" }, l.text)),
+      ),
+    );
+  }
+
+  function toast(text: string): void {
+    root.querySelector(".toast")?.remove();
+    const el = h("div", { class: "toast", role: "status" }, text);
+    root.append(el);
+    setTimeout(() => el.remove(), 2500);
+  }
+
 
   mount(root, h("p", { class: "muted" }, "טוען… / Loading…"));
   (startAt === undefined ? loadNext() : open(startAt)).catch(fail);

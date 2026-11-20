@@ -30,3 +30,18 @@ form.dev input { width: 10em; min-height: 44px; } form.dev button { min-height: 
 /* The terms card: the approved Hebrew and English texts, one under the other. */
 .card.terms > div + div { border-top: 1px solid var(--line); padding-top: 10px; }
 .card.terms p { margin-block: 6px; }
+/* Page review's scan (viewer.ts): the zoom bar under the scroller. */
+.prgrid .scan .viewer { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.zoombar { display: flex; gap: 8px; align-items: center; justify-content: center; padding-top: 6px; }
+.rv .zoombar button { min-width: 44px; min-height: 44px; border: 1px solid var(--control-line); border-radius: var(--radius); }
+.zoomlevel { min-width: 3.5em; text-align: center; font: 500 12px var(--font-mono); color: var(--muted); }
+.frame img { display: block; width: 100%; height: auto; }
+.prline .tools kbd { margin-inline-start: 4px; }
+.pending { display: flex; align-items: center; gap: 6px; }
+.handoff details { width: 100%; text-align: start; }
+.handoff .ctxbox { margin-bottom: 10px; }
+.handoff .txt { font-size: 17px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+/* The subset filter above a task (page review's interim sets). */
+.subsetnav { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 14px; }
+.subsetnav a { display: inline-flex; align-items: center; min-height: 44px; }
+.subsetnav a.on { font-weight: 700; color: var(--text); text-decoration: none; }
