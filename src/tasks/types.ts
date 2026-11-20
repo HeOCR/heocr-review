@@ -103,6 +103,8 @@ export interface ExportExtra {
   phistGold?: { grades: PhistGoldGrade[]; pulled: string[] };
   /** line_verify: the pointed-book rule's drops, per triggering mark (migrations/0011). */
   pointedDrops?: PointedDrop[];
+  /** line_verify triage: the batch's planted errors (migrations/0012_triage.sql). */
+  triagePlants?: { proposalId: number; plantType: string; plantedSha256: string; candidateSha256: string }[];
 }
 
 export interface PointedDrop {
@@ -144,7 +146,7 @@ export interface TaskType {
   /** The consumer's decisions file, built from the resolved proposals. */
   exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[], extra?: ExportExtra): ExportFile;
   /** Further admin export files, beside the decisions and the ledger (line_verify triage: reference_triage.json). */
-  exportExtraFiles?(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string): ExportFile[];
+  exportExtraFiles?(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, extra?: ExportExtra): ExportFile[];
   /** Problems with an exported decisions file (empty when valid), checked against the batch's proposals. */
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[];
 }
