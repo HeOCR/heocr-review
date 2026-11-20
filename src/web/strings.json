@@ -217,8 +217,8 @@
   "Volunteer lines"
  ],
  "c_where": [
-  "החלטת על 37 שורות",
-  "You decided 37 lines"
+  "החלטת על {n} שורות",
+  "You decided {n} lines"
  ],
  "correct": [
   "נכון",
@@ -277,8 +277,8 @@
   "Edit"
  ],
  "a_note": [
-  "הערת הסוכן: בסריקה נראית יו״ד כפולה.",
-  "Agent note: the scan appears to show a double yod."
+  "הערת הסוכן: {note}",
+  "Agent note: {note}"
  ],
  "spelling": [
   "כתיב",
@@ -751,5 +751,33 @@
  "licence": [
   "רישיון הטקסט",
   "Text licence"
+ ],
+ "a_note_lab": [
+  "הערת הסוכן:",
+  "Agent note:"
+ ],
+ "mine_final_note": [
+  "החלטה סופית.",
+  "The decision is final."
+ ],
+ "no_box": [
+  "לשורה הזאת אין מיקום בסריקה: חפשו אותה בעמוד המלא.",
+  "No box for this line: find it on the full page."
+ ],
+ "ai_differs": [
+  "קריאה אחרת (Claude)",
+  "Read differently (Claude)"
+ ],
+ "ai_missing": [
+  "חסר טקסט לידה? (Claude)",
+  "Text missing nearby? (Claude)"
+ ],
+ "done_a": [
+  "אין עוד הצעות בשבילך כרגע",
+  "No proposals left for you right now"
+ ],
+ "done_a_skips": [
+  "חזרה ל־{n} ההצעות שדילגת עליהן",
+  "Go back to the {n} proposals you skipped"
  ]
 }

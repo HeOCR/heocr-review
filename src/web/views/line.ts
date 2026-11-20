@@ -30,10 +30,24 @@ import {
   pendingFor,
   readDraft,
   writeDraft,
-  type FailureKind,
 } from "../linerules";
 import { compare } from "../text";
 import { prefetch, type ReviewHooks, type ReviewScreen } from "./common";
+import {
+  boxedImage,
+  contextBand as ctxBand,
+  failedNotice,
+  markSaving,
+  moreButton,
+  moreIsOpen,
+  pageColumn,
+  progressLine,
+  renderSaveState as paintSaveState,
+  setMoreOpen,
+  type Failure,
+  type PageColumn,
+  type SaveState,
+} from "./taskparts";
 
 /** Displayed height of the line's ink, in CSS pixels, per zoom step. */
 const LINE_HEIGHTS = [40, 52, 66, 84, 108, 140];
@@ -146,8 +160,6 @@ const MORE: [string, StringKey, StringKey, IconName, string][] = [
   ["misaligned", "misal", "misal_sub", "misaligned", "M"],
 ];
 
-const PAGE_ZOOMS = [1, 1.5, 2, 3, 4];
-
 /** `startAt` opens one line first (link #p/<id>); then the queue continues. */
 export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
   const root = h("div", { class: "taskroot" });
@@ -162,9 +174,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   let zoom = 2;
   let fitWidth = false; // phone: the whole line across the width ("Fit width") instead of two pieces
   let pageOpened = false; // phone: the full page was opened on this line
-  let pageZoom = 0;
-  let failure: { kind: FailureKind; kept: boolean; value: string; text?: string; reason?: string } | null = null;
-  let saveState: "saved" | "saving" | "failed" | null = null;
+  let failure: Failure | null = null;
+  let saveState: SaveState = null;
+  let page: PageColumn | null = null;
   let keysOpen = false;
 
   const view = (): LineVerifyView | null => (current && current.view.kind === "line_verify" ? current.view : null);
@@ -312,106 +324,21 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (id !== undefined) open(id).catch(failScreen);
   }
 
-  /** The pressed answer says "Saving…"; every answer is disabled, so a second tap can't send a second decision. */
   function setSaving(value: string): void {
+    markSaving(root, value);
     saveState = "saving";
-    for (const b of root.querySelectorAll<HTMLButtonElement>(".dock .act, .savebar .act")) {
-      b.disabled = true;
-      if (b.dataset.value === value) {
-        b.dataset.busy = "";
-        const span = b.querySelector("span");
-        if (span) span.firstChild!.textContent = t("saving");
-      }
-    }
     renderSaveState();
   }
-
-  function renderSaveState(): void {
-    const el = q(".savestate");
-    if (!el) return;
-    el.dataset.state = saveState ?? "";
-    el.replaceChildren(
-      ...(saveState === "saved" ? [icon("exact", { sm: true }), t("saved")] : saveState === "saving" ? [t("saving")] : saveState === "failed" ? [icon("warning", { sm: true }), t("failed")] : []),
-    );
-  }
-
-  // ---------- the more sheet (phone) ----------
-  function setMore(open: boolean): void {
-    q(".moregroup")?.classList.toggle("open", open);
-    q(".scrim")?.classList.toggle("open", open);
-    q(".more-btn")?.setAttribute("aria-expanded", String(open));
-    if (open) q<HTMLButtonElement>(".moregroup .act")?.focus();
-  }
-  const moreOpen = () => Boolean(q(".moregroup.open"));
-
-  // ---------- the page ----------
-  function pageAside(v: LineVerifyView): HTMLElement {
-    const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle;
-    const scroller = h("div", { class: "scroller", tabindex: "0", "aria-label": t("pg") });
-    if (v.page) {
-      const box = v.page.box;
-      scroller.append(
-        h(
-          "div",
-          { class: "frame" },
-          h("img", { src: v.page.url, width: v.page.width, height: v.page.height, alt: `${t("pg")} · ${where}`, decoding: "async", draggable: "false" }),
-          box ? h("div", { class: "hl", style: `left:${box[0] * 100}%;top:${box[1] * 100}%;width:${(box[2] - box[0]) * 100}%;height:${(box[3] - box[1]) * 100}%` }) : null,
-        ),
-      );
-    } else scroller.append(h("p", { class: "muted src" }, t("no_image")));
-    return h(
-      "aside",
-      { class: "side", "aria-label": t("pg") },
-      h(
-        "h2",
-        {},
-        h("span", {}, `${t("pg")} · `, h("bdi", {}, where)),
-        h("button", { type: "button", class: "act quiet desktop-only", onclick: toggleEnlarged, disabled: !v.page }, t("enlarge"), " ", h("kbd", {}, "P")),
-      ),
-      scroller,
-      h("p", { class: "src" }, h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)),
-      h(
-        "div",
-        { class: "backbar" },
-        h("button", { type: "button", class: "act primary", onclick: () => setPageOpen(false) }, icon("back"), t("back_line")),
-        h("button", { type: "button", class: "act", "aria-label": t("zoom_out"), onclick: () => zoomPage(-1) }, icon("zoom-out")),
-        h("button", { type: "button", class: "act", "aria-label": t("zoom_in"), onclick: () => zoomPage(1) }, icon("zoom-in")),
-      ),
-    );
-  }
-
-  function layoutPage(): void {
-    const frame = q(".side .frame");
-    if (frame) frame.style.width = `${100 * PAGE_ZOOMS[pageZoom]!}%`;
-    // Bring the line's box into view on the page.
-    requestAnimationFrame(() => q(".side .hl")?.scrollIntoView({ block: "center", inline: "center" }));
-  }
-
-  function zoomPage(step: number): void {
-    pageZoom = Math.max(0, Math.min(PAGE_ZOOMS.length - 1, pageZoom + step));
-    layoutPage();
-  }
+  const renderSaveState = () => paintSaveState(q(".savestate"), saveState);
+  const setMore = (open: boolean) => setMoreOpen(root, open);
+  const moreOpen = () => moreIsOpen(root);
 
   /** Phone: the page full screen; opening it is what a flagged line asks for before "Exact". */
   function setPageOpen(open: boolean): void {
-    if (!view()?.page) return;
-    q(".side")?.classList.toggle("open", open);
-    if (open) {
-      pageOpened = true;
-      pageZoom = 0;
-      layoutPage();
-      updateFlag();
-      q<HTMLButtonElement>(".side .backbar .act")?.focus();
-    } else q<HTMLButtonElement>(".ctxbox .open")?.focus();
+    if (open) page?.open();
+    else page?.close();
   }
-
-  /** Desktop: P enlarges the page over the task, and P or Esc puts it back. */
-  function toggleEnlarged(): void {
-    if (!view()?.page) return;
-    const side = q(".side");
-    side?.classList.toggle("enlarged");
-    layoutPage();
-  }
+  const toggleEnlarged = () => page?.toggleEnlarged();
 
   /** A flagged line: on a phone, "Exact" waits until the page has been opened (SPEC §4.1, §14.3). */
   function updateFlag(): void {
@@ -613,16 +540,6 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   // ---------- the screen ----------
-  function moreButton(value: string, text: string, sub: string | null, ic: IconName | null, key: string, onclick: () => void): HTMLElement {
-    return h(
-      "button",
-      { type: "button", class: "act", "data-value": value, onclick },
-      ic ? icon(ic) : null,
-      h("span", {}, text, sub ? h("span", { class: "sub" }, sub) : null),
-      key ? h("kbd", {}, key) : null,
-    );
-  }
-
   function slotNodes(p: ProposalView, v: LineVerifyView, mine: DecisionOption | undefined): Node[] {
     const out: Node[] = [];
     if (v.precheck) {
@@ -636,30 +553,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         ),
       );
     }
-    if (failure) {
-      const rich = failure.kind === "offline" ? tRich("fail_note") : failure.kind === "rate_limited" ? tRich("fail_rate") : failure.kind === "daily_limit" ? tRich("fail_quota") : failure.kind === "server" ? tRich("fail_srv") : tRich("fail_rejected", { reason: failure.reason ?? t("e_srv_h") });
-      out.push(
-        h(
-          "div",
-          { class: "notice failed", role: "alert" },
-          icon(failure.kind === "offline" ? "offline" : "warning"),
-          h(
-            "div",
-            {},
-            ...rich,
-            !failure.kept && keepable(failure.kind) ? ` ${t("fail_unkept")}` : "",
-            keepable(failure.kind)
-              ? h(
-                  "div",
-                  { class: "row" },
-                  h("button", { type: "button", class: "act", onclick: () => (failure!.kept ? void resendKept() : void act(failure!.value, failure!.text)) }, icon("reset", { sm: true }), t("retry")),
-                  failure.kept ? h("span", { class: "tag" }, t("keep")) : null,
-                )
-              : null,
-          ),
-        ),
-      );
-    }
+    if (failure) out.push(failedNotice(failure, () => (failure!.kept ? void resendKept() : void act(failure!.value, failure!.text))));
     if (revisiting && mine) {
       const final = v.mode === "type" && v.pass === 2;
       out.push(h("p", { class: "mine" }, t(final ? "mine_final" : "mine", { v: mine.label[lang()] }), p.mine?.text ? ` («${p.mine.text}»)` : "", final ? "" : ` · ${t("mine_replace")}`));
@@ -685,14 +579,14 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     closeEditor();
     ready = false;
     pageOpened = false;
-    pageZoom = 0;
     keysOpen = false;
     const typing = v.mode === "type";
     body.toggle("typing", typing);
     const option = (value: string) => p.options.find((o) => o.value === value);
     const mine = p.mine ? option(p.mine.value) : undefined;
     hooks.where?.(t("where", { line: v.lineIndex, page: v.pageLabel || "–" }));
-    const pct = progress.ownOnly || !progress.total ? 0 : Math.round((progress.covered / progress.total) * 100);
+    const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle;
+    page = pageColumn(v.page, where, [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)], () => ((pageOpened = true), updateFlag()), () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
 
     const answers = typing
       ? []
@@ -730,7 +624,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes(v.runs, v.precheck ? "precheck" : "ocr")),
       h("div", { class: "slot" }, ...slotNodes(p, v, mine)),
       h("div", { class: "editbox", hidden: true }),
-      contextBand(v),
+      contextBandFor(v),
       h(
         "footer",
         { class: "dock" },
@@ -750,34 +644,19 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     );
     mount(
       root,
-      h("div", { class: "progress", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("div", { class: "bar", style: `width:${pct}%` })),
-      h("div", { class: "deck" }, work, pageAside(v)),
+      progressLine(progress),
+      h("div", { class: "deck" }, work, page.el),
     );
     renderSaveState();
     updateFlag();
     renderStrip();
-    layoutPage();
     if (typing && (!mine || v.pass !== 2)) startEdit();
     else (q<HTMLButtonElement>(".dock .act.primary") ?? q<HTMLButtonElement>(".dock .act"))?.focus({ preventScroll: true });
   }
 
   /** The line among its neighbours, with the line in the brand box; on a phone the band opens the page. */
-  function contextBand(v: LineVerifyView): HTMLElement {
-    const c = v.crop;
-    const band = c
-      ? h(
-          "div",
-          { class: "frame" },
-          h("img", { src: c.url, width: c.width, height: c.height, alt: t("line_ctx"), decoding: "async", draggable: "false" }),
-          c.box ? h("div", { class: "hl", style: `left:${c.box[0] * 100}%;top:${c.box[1] * 100}%;width:${(c.box[2] - c.box[0]) * 100}%;height:${(c.box[3] - c.box[1]) * 100}%` }) : null,
-        )
-      : null;
-    return h(
-      "div",
-      { class: "ctxbox band", dir: "ltr", ...(v.page ? { onclick: (e: Event) => (e.target as HTMLElement).closest(".open") || setPageOpen(true) } : {}) },
-      band,
-      h("button", { type: "button", class: "open", disabled: !v.page, onclick: () => setPageOpen(true) }, icon("page", { sm: true }), t("page")),
-    );
+  function contextBandFor(v: LineVerifyView): HTMLElement {
+    return ctxBand(v.crop ? boxedImage(v.crop, t("line_ctx")) : null, Boolean(v.page), () => setPageOpen(true));
   }
 
   function renderDone(): void {
@@ -813,15 +692,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       setMore(false);
       return true;
     }
-    const side = q(".side");
-    if (side?.classList.contains("open")) {
-      setPageOpen(false);
-      return true;
-    }
-    if (side?.classList.contains("enlarged")) {
-      toggleEnlarged();
-      return true;
-    }
+    if (page?.escape()) return true;
     return false;
   }
 
