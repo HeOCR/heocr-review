@@ -21,12 +21,15 @@
     "check-public": "tsx scripts/check-public.ts",
     "maintainer-decided": "tsx scripts/maintainer-decided.ts",
     "batch-setting": "tsx scripts/batch-setting.ts",
-    "import-gold": "tsx scripts/import-gold.ts"
+    "import-gold": "tsx scripts/import-gold.ts",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@cloudflare/vitest-plugin": "^1.5.1",
     "@cloudflare/workers-types": "^5.20261104.1",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",

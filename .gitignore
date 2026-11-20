@@ -12,3 +12,9 @@ node_modules/
 coverage/
 *.log
 .DS_Store
+
+# Local browser suite artifacts
+.e2e-browsers/
+.e2e-state-*/
+test-results/
+playwright-report/
