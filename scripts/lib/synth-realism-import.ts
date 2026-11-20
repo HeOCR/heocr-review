@@ -7,7 +7,8 @@ import { IMAGE_FIELDS, MANIFEST_SCHEMA, isSha, parseManifest, restrictedPath, ve
 import { str, type Target } from "./args";
 import { assertOpenSource } from "./guard";
 import { lit } from "./sql";
-import { d1File, d1Migrate, d1Query } from "./wrangler";
+import { checkWriteBudget } from "./d1budget";
+import { d1File, d1Migrate, d1Query, loadCredentials } from "./wrangler";
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -43,8 +44,57 @@ async function jpeg(bundle: string, image: ImageFile, line: boolean): Promise<Bu
     .jpeg({ quality: 82, mozjpeg: true }).toBuffer();
 }
 
+interface BatchState {
+  task_type: string;
+  status: string;
+  source_json: string;
+  items: number;
+}
+
+function stateOf(target: Target, batch: string): BatchState | undefined {
+  return d1Query<BatchState>(target, `SELECT task_type, status, source_json,
+    (SELECT COUNT(*) FROM synth_realism_items WHERE batch_id = b.id) AS items FROM batches b WHERE id = ${batch}`)[0]?.[0];
+}
+
+function awaitingBundle(state: BatchState): boolean {
+  return state.task_type === SYNTH_REALISM && state.status === "closed" && state.items === 0 &&
+    JSON.parse(state.source_json).awaiting_bundle === true;
+}
+
+async function budget(target: Target, writes: number) {
+  if (target === "production") {
+    const credentials = loadCredentials();
+    for (const key of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "D1_DAILY_WRITE_BUDGET"]) {
+      if (credentials[key]) process.env[key] = credentials[key];
+    }
+  }
+  await checkWriteBudget(target, writes, {});
+}
+
+async function reserveBatch(target: Target, batchId: string, dry: boolean) {
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(batchId)) throw new Error("invalid reserved batch id");
+  const batch = lit(batchId);
+  if (!dry) {
+    if (target === "local") d1Migrate(target);
+    const before = stateOf(target, batch);
+    if (before && !awaitingBundle(before)) throw new Error("batch id already exists and is not an empty reservation");
+    if (!before) {
+      await budget(target, 3);
+      d1Query(target, `INSERT INTO batches (id, task_type, title, source_json, status, imported_at)
+        VALUES (${batch}, ${lit(SYNTH_REALISM)}, ${batch}, '{"awaiting_bundle":true}', 'closed', ${lit(new Date().toISOString())})
+        ON CONFLICT (id) DO NOTHING`);
+    }
+    const after = stateOf(target, batch);
+    if (!after || !awaitingBundle(after)) throw new Error("could not verify the closed empty reservation");
+  }
+  console.log(JSON.stringify({ batch: batchId, items: 0, status: "closed", awaiting_bundle: true, applied: !dry }));
+}
+
 export async function importSynthRealism(root: string, flags: Record<string, string | true>, target: Target): Promise<void> {
-  if (target !== "local") throw new Error("synth_realism imports are local only");
+  const dry = flags["dry-run"] === true;
+  const fixture = flags.fixture === true;
+  if (target === "production" && fixture) throw new Error("fixture imports are local only");
+  if (flags["init-empty"] === true) return reserveBatch(target, str(flags, "batch", SYNTH_REALISM), dry);
   const bundle = openPath(str(flags, "bundle"));
   assertOpenSource(bundle);
   const rawManifest = readJson(join(bundle, "manifest.json"));
@@ -54,16 +104,27 @@ export async function importSynthRealism(root: string, flags: Record<string, str
   const manifestJson = JSON.parse(rawManifest.bytes.toString("utf8"));
   const clearanceJson = JSON.parse(rawClearance.bytes.toString("utf8"));
   const manifest = parseManifest(manifestJson);
-  const fixture = flags.fixture === true;
   if ((manifestJson.fixture === true) !== fixture || (clearanceJson.fixture === true) !== fixture) {
     throw new Error("both JSON inputs and --fixture must agree on fixture status");
   }
   verifyClearance(clearanceJson, manifest);
-  const batch = lit(manifest.batch_id);
-  if (flags["dry-run"] !== true) {
-    d1Migrate("local");
-    if (d1Query("local", `SELECT 1 FROM batches WHERE id = ${batch}`)[0]?.length) throw new Error("batch already exists; use a new session id");
+  const destination = flags["into-empty-batch"];
+  if (destination !== undefined && (typeof destination !== "string" || !/^[A-Za-z0-9._-]{1,100}$/.test(destination))) {
+    throw new Error("--into-empty-batch requires an empty reservation id");
   }
+  const batchId = destination ?? manifest.batch_id;
+  const batch = lit(batchId);
+  let reserved = false;
+  if (!dry) {
+    if (target === "local") d1Migrate(target);
+    const existing = stateOf(target, batch);
+    if (existing && !awaitingBundle(existing)) throw new Error("batch already contains a session; use a new id");
+    if (destination && !existing) throw new Error("the requested empty batch has not been reserved");
+    reserved = existing !== undefined;
+  }
+  const manifestHash = lit(rawManifest.hash);
+  const loading = `id = ${batch} AND status = 'closed' AND task_type = ${lit(SYNTH_REALISM)}
+    AND json_extract(source_json, '$.manifest_sha256') = ${manifestHash}`;
 
   const assets = new Map<string, string>();
   const normalized = new Map<string, string>();
@@ -87,17 +148,18 @@ export async function importSynthRealism(root: string, flags: Record<string, str
     items.push(`INSERT INTO synth_realism_items
       (batch_id, external_id, synthetic_image, synthetic_line_crop, real_ref_image, real_ref_line_crop,
        generator_id, generator_version, params_hash, control_kind)
-      VALUES (${batch}, ${[item.item_id, ...hashes, item.generator_id, item.generator_version, item.params_hash, item.control_kind].map(lit).join(", ")});`);
+      VALUES ((SELECT id FROM batches WHERE ${loading}), ${[item.item_id, ...hashes, item.generator_id, item.generator_version, item.params_hash, item.control_kind].map(lit).join(", ")});`);
   }
   const counts = {
-    batch: manifest.batch_id, items: items.length, assets: assets.size, fixture,
+    batch: batchId, manifest_batch_id: manifest.batch_id, items: items.length, assets: assets.size, fixture,
     real_real: manifest.items.filter((item) => item.control_kind === "real_real").length,
     attention: manifest.items.filter((item) => item.control_kind === "attention").length,
     manifest_sha256: rawManifest.hash, clearance_sha256: rawClearance.hash,
-    applied: flags["dry-run"] !== true,
+    applied: !dry,
   };
   if (counts.applied) {
-    const source = { schema: MANIFEST_SCHEMA, manifest_sha256: rawManifest.hash, clearance_sha256: rawClearance.hash, fixture };
+    const source = { schema: MANIFEST_SCHEMA, manifest_batch_id: manifest.batch_id,
+      manifest_sha256: rawManifest.hash, clearance_sha256: rawClearance.hash, fixture };
     const statements = [];
     // Keep each literal below D1's statement limit. These objects are private and never placed under public/media.
     for (const [hash, base64] of assets) {
@@ -106,8 +168,19 @@ export async function importSynthRealism(root: string, flags: Record<string, str
         statements.push(`INSERT OR IGNORE INTO synth_realism_assets (sha256,part,base64) VALUES (${lit(hash)},${part},${lit(data)});`);
       }
     }
-    statements.push(`INSERT INTO batches (id, task_type, title, source_json, status, imported_at)
-      VALUES (${batch}, ${lit(SYNTH_REALISM)}, ${batch}, ${lit(JSON.stringify(source))}, 'open', ${lit(new Date().toISOString())});`, ...items);
+    await budget(target, statements.length * 2 + items.length * 3 + 4);
+    const sourceJson = lit(JSON.stringify(source));
+    const now = lit(new Date().toISOString());
+    const stage = reserved
+      ? `UPDATE batches SET source_json = ${sourceJson}, imported_at = ${now}
+        WHERE id = ${batch} AND task_type = ${lit(SYNTH_REALISM)} AND status = 'closed'
+        AND json_extract(source_json, '$.awaiting_bundle') = 1
+        AND NOT EXISTS (SELECT 1 FROM synth_realism_items WHERE batch_id = ${batch});`
+      : `INSERT INTO batches (id, task_type, title, source_json, status, imported_at)
+        VALUES (${batch}, ${lit(SYNTH_REALISM)}, ${batch}, ${sourceJson}, 'closed', ${now});`;
+    statements.push(stage, ...items,
+      `UPDATE batches SET status = 'open' WHERE ${loading}
+        AND (SELECT COUNT(*) FROM synth_realism_items WHERE batch_id = ${batch}) = ${items.length};`);
     const parent = join(root, ".import");
     mkdirSync(parent, { recursive: true, mode: 0o700 });
     const folder = mkdtempSync(join(parent, "realism-"));
@@ -115,10 +188,20 @@ export async function importSynthRealism(root: string, flags: Record<string, str
     const sql = join(folder, "import.sql");
     try {
       writeFileSync(sql, statements.join("\n"), { mode: 0o600 });
-      d1File("local", sql);
+      try {
+        d1File(target, sql);
+      } catch (cause) {
+        if (target === "local") throw cause;
+        throw new Error("D1 rejected the import file; check the batch state before retrying", { cause });
+      }
     } finally {
       if (statSync(sql, { throwIfNoEntry: false })) unlinkSync(sql);
       rmdirSync(folder);
+    }
+    const stored = stateOf(target, batch);
+    if (!stored || stored.status !== "open" || stored.items !== items.length ||
+      JSON.parse(stored.source_json).manifest_sha256 !== rawManifest.hash) {
+      throw new Error("the loaded batch did not pass readback");
     }
   }
   console.log(JSON.stringify(counts, null, 2));

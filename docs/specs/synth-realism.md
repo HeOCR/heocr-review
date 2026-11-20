@@ -1,6 +1,6 @@
 # Synthetic realism pilot
 
-This admin-only review gives generator developers a human development signal about the appearance of synthetic pages. The queue uses a local Worker and local D1. A reference must be openly licensed, cleared by eval, and drawn from training or dev. Keep held-out material outside the workflow.
+This admin-only review gives generator developers a human development signal about the appearance of synthetic pages. The queue is available on a local Worker and to admins in production. A reference must be openly licensed, cleared by eval, and drawn from training or dev. Keep held-out material outside the workflow.
 
 ## Bundle contract for synth-gen
 
@@ -52,6 +52,14 @@ npm run import -- --task synth_realism --bundle /path/to/bundle \
   --clearance /path/to/eval-clearance.json --clearance-sha256 <lead-pinned-sha> --target local
 ```
 
+To reserve an empty production session and keep it off the reviewer queue until data arrives:
+
+```sh
+npm run import -- --task synth_realism --init-empty --batch synth_realism --target production --yes-production
+```
+
+Append `--into-empty-batch synth_realism --target production --yes-production` instead of `--target local` to fill that reservation with the first bundle. The original manifest batch ID is recorded in the batch's provenance. The importer opens the reserved batch after loading every pair and verifies the count and manifest SHA-256. Fixture imports remain local.
+
 A batch ID is immutable after import so an existing blind trial cannot change under a reviewer. Run with `--dry-run` to validate a bundle without loading it into local D1.
 
 ## Review and export
@@ -73,4 +81,4 @@ npm run import -- --task synth_realism --bundle .import/synth-demo \
   --target local --fixture
 ```
 
-The production guard requires a follow-up after the maintainer approves the strings and the reviewer-data notice. The pilot stores the reviewer's pseudonym, chosen side, choice timing, rating, tags and optional comment. Real assets and these records are available only to admins. A production change also needs the lead's deployment go.
+The maintainer approved the strings and bilingual reviewer-data notice on 2026-11-20. Real assets and reviewer records are available only to admins. Production deployment and bundle imports require the lead's go.

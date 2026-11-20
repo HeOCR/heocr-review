@@ -439,9 +439,9 @@ async function requireAdmin(ctx: Ctx): Promise<ReviewerRow> {
   return reviewer;
 }
 
-/** Development only until the maintainer approves the strings, privacy notice and production enablement. */
+/** Deployment and local mode both use the explicit flag. Every realism endpoint still requires an admin. */
 function realismEnabled(env: Env): boolean {
-  return env.ENVIRONMENT === "development" && env.SYNTH_REALISM_ENABLED === "1";
+  return env.SYNTH_REALISM_ENABLED === "1";
 }
 
 async function realismAccess(ctx: Ctx, id: string, write: boolean) {

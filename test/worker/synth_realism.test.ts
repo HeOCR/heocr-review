@@ -26,12 +26,12 @@ async function user(name: string) {
   return { id, cookie: client.cookie };
 }
 
-function request(path: string, who: {cookie: string}, admin: string, body?: unknown, development = true) {
+function request(path: string, who: {cookie: string}, admin: string, body?: unknown, enabled = true) {
   return handle(new Request(`http://localhost${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { cookie: who.cookie, origin: "http://localhost", "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-  }), { ...env, ENVIRONMENT: development ? "development" : "production", SYNTH_REALISM_ENABLED: "1", ADMIN_REVIEWER_IDS: admin }, exec);
+  }), { ...env, ENVIRONMENT: "production", SYNTH_REALISM_ENABLED: enabled ? "1" : "0", ADMIN_REVIEWER_IDS: admin }, exec);
 }
 
 describe("synthetic realism queue", () => {
