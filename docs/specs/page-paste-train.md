@@ -53,6 +53,10 @@ npm run import -- --task page_paste_train --bundle <dir> --manifest-sha256 <sha2
 npm run import -- --task page_paste_train --bundle <dir> --manifest-sha256 <sha256> --target local
 ```
 
+To reserve a batch ID ahead of delivery, use `--init-empty --batch <id> --source-id <id> --title <title>`
+instead of the bundle flags. The reservation has no pages and stays closed. The bundle must use the reserved batch
+and source IDs to fill it.
+
 The importer verifies manifest and image hashes, orientation, dimensions and boxes. It stages the batch closed with
 private assets, checks every stored page and chunk count, and opens the batch after readback. If staging is
 interrupted, repeat the same import with the same hash. Use a fresh batch ID for a different manifest.

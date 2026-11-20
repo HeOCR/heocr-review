@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmdirSync, statSync
 import { extname, join, resolve, sep } from "node:path";
 import sharp from "sharp";
 import { PAGE_PASTE_TRAIN } from "../../src/shared/page_paste_train";
-import { parseTrainingManifest, restrictedTrainingPath, type TrainingImage, type TrainingPageInput } from "../../src/tasks/page_paste_train/schema";
+import { parseTrainingManifest, restrictedTrainingPath, TRAIN_ID, type TrainingImage, type TrainingPageInput } from "../../src/tasks/page_paste_train/schema";
 import { str, type Target } from "./args";
 import { checkWriteBudget } from "./d1budget";
 import { assertOpenSource } from "./guard";
@@ -39,13 +39,58 @@ interface StoredBatch {
   task_type: string;
   source_json: string;
   status: string;
+  pages: number;
 }
 
 function batchState(target: Target, id: string): StoredBatch | undefined {
-  return d1Query<StoredBatch>(target, `SELECT task_type, source_json, status FROM batches WHERE id = ${id}`)[0]?.[0];
+  return d1Query<StoredBatch>(target, `SELECT task_type, source_json, status,
+    (SELECT COUNT(*) FROM page_paste_train_pages WHERE batch_id = b.id) AS pages FROM batches b WHERE id = ${id}`)[0]?.[0];
+}
+
+function awaitingBundle(state: StoredBatch, sourceId: string): boolean {
+  if (state.task_type !== PAGE_PASTE_TRAIN || state.status !== "closed" || state.pages !== 0) return false;
+  const source = JSON.parse(state.source_json);
+  return source.split === "train" && source.awaiting_bundle === true && source.catalog?.source_id === sourceId;
+}
+
+async function trainingBudget(target: Target, rows: number, flags: Record<string, string | true>) {
+  if (target === "production") {
+    const credentials = loadCredentials();
+    for (const key of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "D1_DAILY_WRITE_BUDGET"]) {
+      if (credentials[key]) process.env[key] = credentials[key];
+    }
+  }
+  await checkWriteBudget(target, rows, flags);
+}
+
+async function reserveTrainingBatch(flags: Record<string, string | true>, target: Target) {
+  const batchId = str(flags, "batch");
+  const sourceId = str(flags, "source-id");
+  const title = str(flags, "title");
+  if (!TRAIN_ID.test(batchId) || !TRAIN_ID.test(sourceId) || !title.trim() || title.length > 200) {
+    throw new Error("invalid training reservation batch id, source id or title");
+  }
+  const dry = flags["dry-run"] === true;
+  if (!dry) {
+    if (target === "local") d1Migrate(target);
+    const id = lit(batchId);
+    const prior = batchState(target, id);
+    if (prior && !awaitingBundle(prior, sourceId)) throw new Error("batch id already belongs to another import");
+    if (!prior) {
+      await trainingBudget(target, 2, flags);
+      const source = lit(JSON.stringify({ split: "train", awaiting_bundle: true, catalog: { source_id: sourceId } }));
+      d1Query(target, `INSERT INTO batches (id, task_type, title, source_json, status, imported_at)
+        VALUES (${id}, ${lit(PAGE_PASTE_TRAIN)}, ${lit(title)}, ${source}, 'closed', ${lit(new Date().toISOString())})
+        ON CONFLICT (id) DO NOTHING`);
+    }
+    const stored = batchState(target, id);
+    if (!stored || !awaitingBundle(stored, sourceId)) throw new Error("could not verify the closed empty reservation");
+  }
+  console.log(JSON.stringify({ batch_id: batchId, source_id: sourceId, pages: 0, status: "closed", awaiting_bundle: true, applied: !dry }));
 }
 
 export async function importPagePasteTrain(root: string, flags: Record<string, string | true>, target: Target) {
+  if (flags["init-empty"] === true) return reserveTrainingBatch(flags, target);
   const bundle = openPath(str(flags, "bundle"));
   assertOpenSource(bundle);
   const manifestPath = openPath(join(bundle, "manifest.json"), bundle);
@@ -84,24 +129,27 @@ export async function importPagePasteTrain(root: string, flags: Record<string, s
     return state.task_type === PAGE_PASTE_TRAIN && source.split === "train" && source.manifest_sha256 === manifestHash;
   };
   const prior = batchState(target, id);
-  if (prior && !sameImport(prior)) throw new Error("batch id already belongs to a different import");
+  if (prior && !sameImport(prior) && !awaitingBundle(prior, manifest.source.source_id)) throw new Error("batch id already belongs to a different import");
 
   const loading = `id = ${id} AND task_type = ${lit(PAGE_PASTE_TRAIN)}
     AND json_extract(source_json, '$.manifest_sha256') = ${lit(manifestHash)}
     AND json_extract(source_json, '$.split') = 'train' AND status = 'closed'`;
   if (prior?.status !== "open") {
-    if (target === "production") {
-      const credentials = loadCredentials();
-      for (const key of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "D1_DAILY_WRITE_BUDGET"]) {
-        if (credentials[key]) process.env[key] = credentials[key];
-      }
-    }
-    // SQLite rows and indexes, plus the final batch update.
-    await checkWriteBudget(target, 3 * pages.length + 2 * summary.asset_parts + 4, flags);
+    // SQLite rows and indexes, plus the initial and final batch updates.
+    await trainingBudget(target, 3 * pages.length + 2 * summary.asset_parts + 4, flags);
     const source = lit(JSON.stringify({ split: "train", catalog: manifest.source, manifest_sha256: manifestHash }));
+    const now = lit(new Date().toISOString());
+    // Update only an empty reservation for this same source. A competing import cannot replace pinned content.
     d1Query(target, `INSERT INTO batches (id, task_type, title, source_json, status, imported_at)
-      VALUES (${id}, ${lit(PAGE_PASTE_TRAIN)}, ${lit(manifest.title)}, ${source}, 'closed', ${lit(new Date().toISOString())})
-      ON CONFLICT (id) DO NOTHING`);
+      VALUES (${id}, ${lit(PAGE_PASTE_TRAIN)}, ${lit(manifest.title)}, ${source}, 'closed', ${now})
+      ON CONFLICT (id) DO UPDATE SET title = excluded.title, source_json = excluded.source_json, imported_at = excluded.imported_at
+      WHERE batches.status = 'closed' AND batches.task_type = excluded.task_type
+        AND json_extract(batches.source_json, '$.split') = 'train'
+        AND json_extract(batches.source_json, '$.awaiting_bundle') = 1
+        AND json_extract(batches.source_json, '$.catalog.source_id') = ${lit(manifest.source.source_id)}
+        AND NOT EXISTS (SELECT 1 FROM page_paste_train_pages WHERE batch_id = ${id})`);
+    const staged = batchState(target, id);
+    if (!staged || !sameImport(staged)) throw new Error("could not stage this manifest");
 
     const parent = join(root, ".import");
     mkdirSync(parent, { recursive: true, mode: 0o700 });
