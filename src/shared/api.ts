@@ -49,6 +49,11 @@ export interface LineVerifyView {
   pass: 1 | 2;
   /** "type": a v1.2 typed line (no candidate, either pass); "verify": an edition candidate's line. */
   lineKind: "verify" | "type";
+  /**
+   * In "type" mode, the typing box starts with `candidate` when this is true: a model's draft of a typed line (items
+   * v1.3, pass 1 only), for the reviewer to check letter by letter. Otherwise "type" mode sends no candidate.
+   */
+  draft: boolean;
   candidate: string;
   /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
   runs: AttentionRun[];

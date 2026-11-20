@@ -484,7 +484,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       ...(typing ? { placeholder: t("type_ph") } : {}),
     });
     const mineText = p.mine && ["edited", "pointed_print", "typed", "misaligned"].includes(p.mine.value) && p.mine.text !== null ? p.mine.text : null;
-    const start = asMisaligned ? (p.mine?.value === "misaligned" ? (mineText ?? "") : "") : (mineText ?? v.candidate); // "" on a blind pass
+    // "" on a blind pass; a typed line's draft (v.draft) starts the box until the reviewer has saved their own text.
+    const start = asMisaligned ? (p.mine?.value === "misaligned" ? (mineText ?? "") : "") : (mineText ?? v.candidate);
     area.value = readDraft(p.id) ?? start;
     const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
     pointed.checked = p.mine?.value === "pointed_print";
@@ -530,14 +531,18 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       }
     });
     const saveLabel = asMisaligned ? t("mis_save") : typing ? (v.pass === 2 ? t("type_save_final") : t("type_save")) : t("save");
+    const drafted = typing && v.draft && !asMisaligned;
     box.replaceChildren(
       ...(asMisaligned ? [h("p", { class: "muted small" }, t("mis_hint"))] : []),
+      ...(drafted ? [h("p", { class: "muted small draftnote" }, t("draft_note"))] : []),
       area,
       ...(typing || asMisaligned ? [] : [changes]),
       h(
         "div",
         { class: "edittools" },
-        typing || asMisaligned ? null : h("button", { type: "button", class: "act quiet", onclick: () => ((area.value = v.candidate), update(), area.focus()) }, icon("reset", { sm: true }), t("reset")),
+        (typing && !drafted) || asMisaligned
+          ? null
+          : h("button", { type: "button", class: "act quiet", onclick: () => ((area.value = v.candidate), update(), area.focus()) }, icon("reset", { sm: true }), t(drafted ? "draft_reset" : "reset")),
         asMisaligned ? null : h("label", { class: "check", for: "lv-pointed" }, pointed, t("nq")),
       ),
       ...(typing || asMisaligned ? [] : [preview]),

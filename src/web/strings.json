@@ -192,6 +192,14 @@
   "הקלידו כאן את השורה",
   "Type the line here"
  ],
+ "draft_note": [
+  "טיוטה של Claude — בדקו כל אות מול הסריקה",
+  "Claude's draft — check every letter against the scan"
+ ],
+ "draft_reset": [
+  "חזרה לטיוטה",
+  "Back to the draft"
+ ],
  "not_one": [
   "יותר משורה אחת",
   "More than one line"
