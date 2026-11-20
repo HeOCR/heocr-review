@@ -249,7 +249,7 @@ function pageProblems(page: Obj, level: number): string[] {
   if (!v11 && "script" in page) problems.push(`script is a ${ITEMS_SCHEMA_V11} field`);
   if (level >= 2) {
     if (!nonEmpty(page.segmenter)) problems.push("segmenter must name the line segmenter and its version");
-    if (!(isInt(page.kraken_lines) && page.kraken_lines > 0)) problems.push("kraken_lines must be a positive integer");
+    if (!(isInt(page.kraken_lines) && page.kraken_lines >= 0)) problems.push("kraken_lines must be a non-negative integer");
     if (!(typeof page.book_group === "string" && BATCH_ID.test(page.book_group))) problems.push("book_group must be 1-100 letters, digits, '.', '_' or '-'");
   } else {
     for (const key of ["segmenter", "kraken_lines", "book_group"]) if (key in page) problems.push(`${key} is a ${ITEMS_SCHEMA_V12} field`);
@@ -364,7 +364,7 @@ export function itemsFileProblems(payload: unknown): string[] {
     problems.push(...pageProblems(page, level).map((p) => `page ${id}: ${p}`));
   }
   const ids = new Set<string>();
-  if (!Array.isArray(payload.items) || payload.items.length === 0) problems.push("items must list at least one line");
+  if (!Array.isArray(payload.items)) problems.push("items must be a list of lines");
   for (const item of Array.isArray(payload.items) ? payload.items : []) {
     const id = isObj(item) ? item.item_id : undefined;
     if (!isObj(item) || !nonEmpty(id) || ids.has(id)) {
@@ -383,7 +383,7 @@ export function itemsFileProblems(payload: unknown): string[] {
       if (isObj(item) && typeof item.page_id === "string" && isInt(item.line_index)) lines.set(item.page_id, [...(lines.get(item.page_id) ?? []), item.line_index]);
     }
     for (const [id, page] of pages) {
-      if (!isInt(page.kraken_lines)) continue;
+      if (!isInt(page.kraken_lines) || page.kraken_lines < 0) continue;
       const got = lines.get(id) ?? [];
       const missing = [...Array(page.kraken_lines).keys()].filter((i) => !got.includes(i));
       const extra = got.filter((i, k) => i >= (page.kraken_lines as number) || got.indexOf(i) !== k);

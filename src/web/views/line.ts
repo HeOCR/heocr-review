@@ -10,12 +10,13 @@
  * never repeats a decision. A decision that fails to save is kept on this device and resent (SPEC §6).
  */
 import type { AttentionRun } from "../../shared/attention";
-import type { BatchSummary, DecisionOption, LineVerifyView, NextResponse, Progress, ProposalView } from "../../shared/api";
+import type { BatchSummary, DecisionOption, LineVerifyView, NextResponse, PageCheckView, Progress, ProposalView } from "../../shared/api";
 import { diffText } from "../../shared/diff";
 import type { Box, ImageView } from "../../shared/media";
 import { visibleTokens } from "../../shared/visible";
 import { hasNiqqud } from "../../shared/niqqud";
-import { ApiFailure, get, post } from "../api";
+import { ApiFailure, del, get, post } from "../api";
+import { pageScreen } from "./pagecheck";
 import { h, mount } from "../dom";
 import { lang, t, tRich, type StringKey } from "../i18n";
 import { icon, type IconName } from "../icons";
@@ -210,6 +211,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   const view = (): LineVerifyView | null => (current && current.view.kind === "line_verify" ? current.view : null);
   let waiting = batch.triage ?? { triage: 0, fix: 0 };
+  let pageDispose: (() => void) | null = null;
   /** This line is answered by triage: the triage queue, pass 1, with a candidate (the server's own test, triage.ts). */
   const triaging = (): boolean => {
     const v = view();
@@ -236,7 +238,10 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     current = res.proposal;
     revisiting = false;
     failure = null;
-    if (current) render();
+    pageDispose?.();
+    pageDispose = null;
+    if (res.page) renderPage(res.page);
+    else if (current) render();
     else renderDone();
   }
 
@@ -716,6 +721,40 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     return ctxBand(v.crop ? boxedImage(v.crop, t("line_ctx")) : null, Boolean(v.page), () => setPageOpen(true));
   }
 
+  /** A page in place of a line (migrations/0014): its completeness check (triage) or its missing lines (desktop). */
+  function renderPage(pv: PageCheckView): void {
+    closeEditor();
+    hooks.where?.(pv.title);
+    const base = `/api/batches/${encodeURIComponent(batch.id)}/pages/${pv.itemId}`;
+    const after = () => loadNext().catch(failScreen);
+    const screen = pageScreen(pv, {
+      answer: async (value) => {
+        await post(`${base}/check`, { answer: value });
+        await after();
+      },
+      add: async (box, value, text) => {
+        try {
+          const res = await post<{ id: string }>(`${base}/lines`, { box, value, ...(text === null ? {} : { text }) });
+          await after();
+          return res.id;
+        } catch (err) {
+          if (err instanceof ApiFailure && err.status === 400) return null;
+          throw err;
+        }
+      },
+      remove: async (id) => {
+        await del(`/api/batches/${encodeURIComponent(batch.id)}/added-lines/${id}`);
+        await after();
+      },
+      done: async () => {
+        await post(`${base}/done`, {});
+        await after();
+      },
+    });
+    pageDispose = screen.dispose;
+    mount(root, progressLine(progress), screen.el);
+  }
+
   /** The queue links' counts (main.ts draws them above the screen): kept current after every line. */
   function paintQueueCounts(): void {
     const links = document.querySelectorAll<HTMLAnchorElement>(".batchhead .subsetnav a");
@@ -887,6 +926,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       window.removeEventListener("online", onOnline);
       desktopMq.removeEventListener("change", onLayout);
       body.remove("editing", "typing");
+      pageDispose?.();
     },
   };
 }

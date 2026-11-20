@@ -64,6 +64,7 @@ describe("line verification: triage mode", () => {
     }
     const done = await next(c, "triage");
     expect(done.proposal).toBeNull();
+    expect(done.body.page ?? null).toBeNull();
     expect(done.body.triage).toMatchObject({ triage: 0, fix: 7 });
 
     // The fix queue: the "different" line among the typed lines; a triage answer is refused on a line without one.

@@ -481,7 +481,7 @@ export const lineVerify: TaskType = {
   },
 
   exportExtraFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, extra?: ExportExtra): ExportFile[] {
-    return isTriageBatch(batch) ? referenceTriageFiles(batch, resolved, exportedAt, extra?.triagePlants ?? []) : [];
+    return isTriageBatch(batch) ? referenceTriageFiles(batch, resolved, exportedAt, extra?.triagePlants ?? [], extra?.triagePages) : [];
   },
 
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[] {

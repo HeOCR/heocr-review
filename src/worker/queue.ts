@@ -1,6 +1,7 @@
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
+import { pageCounts } from "./pages";
 import { sha256Hex } from "../shared/sha256";
 import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
@@ -10,7 +11,7 @@ import { assignReserves, type ReserveRow } from "./reserves";
 import { servedMembers, type CurrentDecisionRow, type SubsetMemberRow } from "./subsets";
 import { NOT_GOLD, dueGold, isVolunteerV11 } from "./phist_gold";
 import { VOLUNTEER_DONE, isVolunteerV1, volunteerOpen } from "./verify_resolution";
-import { PENDING_SQL, TRIAGEABLE_SQL, candidateOf, isTriageBatch, triageable } from "../tasks/line_verify/triage";
+import { CONTENT_MATCH_SQL, PENDING_SQL, TRIAGEABLE_SQL, candidateOf, isTriageBatch, triageable } from "../tasks/line_verify/triage";
 
 /** How long a served proposal stays leased to its reviewer before others are offered it first. */
 export const LEASE_MS = 10 * 60 * 1000;
@@ -112,7 +113,7 @@ export interface SubsetFilter {
 export const TRIAGE_QUEUES = ["triage", "fix"] as const;
 export type TriageQueue = (typeof TRIAGE_QUEUES)[number];
 export async function triageFilter(db: D1Database, batchId: string, reviewerId: string, queue: TriageQueue): Promise<SubsetFilter> {
-  const mineDifferent = `EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL AND ${PENDING_SQL("d")})`;
+  const mineDifferent = `EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND ${PENDING_SQL("d")})`;
   const where = queue === "triage" ? `${TRIAGEABLE_SQL} AND NOT ${mineDifferent}` : `(NOT ${TRIAGEABLE_SQL} OR ${mineDifferent})`;
   const { results } = await db
     .prepare(`SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${where}`)
@@ -188,16 +189,19 @@ const inFilter = (n: number, volunteerPages: boolean) =>
  * SQL: proposal p still wants a decision from reviewer ?2 (who has not decided it): below the reviewer target, or for
  * a volunteer_v1 batch (`volunteer`: the reviewer is the admin or not), its routing step lets them decide it.
  */
-const wantsDecision = (volunteer: { admin: boolean } | null) =>
+const settledDecision = (triageBatch: boolean) =>
+  `d.superseded_at IS NULL AND NOT ${PENDING_SQL("d")}${triageBatch ? ` AND ${CONTENT_MATCH_SQL}` : ""}`;
+
+const wantsDecision = (volunteer: { admin: boolean } | null, settled: string) =>
   volunteer
     ? `${volunteerOpen(volunteer.admin)} AND ${NOT_GOLD}`
-    : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL AND NOT ${PENDING_SQL("d")}) < ${needed(3)}`;
+    : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND ${settled}) < ${needed(3)}`;
 
-const openSql = (volunteerPages: boolean, volunteer: { admin: boolean } | null) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
+const openSql = (volunteerPages: boolean, volunteer: { admin: boolean } | null, settled: string) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
   WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8, volunteerPages)}
-    AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL AND NOT ${PENDING_SQL("d")})
+    AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND ${settled})
     AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
-    AND ${wantsDecision(volunteer)}
+    AND ${wantsDecision(volunteer, settled)}
   ORDER BY EXISTS (SELECT 1 FROM assignments a WHERE a.proposal_id = p.id AND a.reviewer_id <> ?2 AND a.assigned_at > ?4),
     p.rank
   LIMIT ?5`;
@@ -220,9 +224,10 @@ export async function progressFor(
   // A volunteer_v1 line is covered once it is resolved or unresolved.
   // Gold lines (volunteer_v1_1) are never counted in progress: they are not the batch's lines.
   const g = volunteer ? ` AND ${NOT_GOLD}` : "";
+  const settled = settledDecision(isTriageBatch(batch));
   const covered = volunteer
     ? VOLUNTEER_DONE
-    : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL AND NOT ${PENDING_SQL("d")}) >= ${needed(3)}`;
+    : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND ${settled}) >= ${needed(3)}`;
   const row = await db
     .prepare(
       `SELECT
@@ -233,9 +238,9 @@ export async function progressFor(
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
           WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND s.reviewer_id = ?2) AS skipped,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
-          AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL AND NOT ${PENDING_SQL("d")})
+          AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND ${settled})
           AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
-          AND ${wantsDecision(volunteer)}) AS remaining`,
+          AND ${wantsDecision(volunteer, settled)}) AS remaining`,
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();
@@ -267,8 +272,8 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
   const mine = await db
-    .prepare("SELECT value, text, decided_on FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
-    .bind(p.id, reviewerId)
+    .prepare("SELECT value, text, decided_on FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL AND (?3 IS NULL OR proposal_sha256 = ?3)")
+    .bind(p.id, reviewerId, isTriageBatch(batch) ? p.contentSha256 : null)
     .first<{ value: string; text: string | null; decided_on: string }>();
   const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
   return {
@@ -310,7 +315,7 @@ export async function nextFor(
 ): Promise<NextResponse> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
-    .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null))
+    .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null, settledDecision(isTriageBatch(batch))))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const open = results.map(toProposal);
@@ -343,5 +348,7 @@ export async function triageCounts(db: D1Database, batch: BatchRecord, reviewerI
   const [triage, fix] = await Promise.all(
     TRIAGE_QUEUES.map(async (q) => (await progressFor(db, batch, reviewerId, nowMs, await triageFilter(db, batch.id, reviewerId, q))).remainingForMe),
   );
-  return { triage: triage!, fix: fix! };
+  // Pages wait in the queues too (migrations/0014): a check in triage, missing lines on the desktop.
+  const pages = await pageCounts(db, batch.id, reviewerId);
+  return { triage: triage! + pages.check, fix: fix! + pages.add };
 }

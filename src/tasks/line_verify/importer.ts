@@ -42,7 +42,6 @@ export const lineVerifyImporter: TaskImporter = {
         ? { blind_second_pass: { count: (file.blind_second_pass ?? []).length, sha256: blindListSha256(file.blind_second_pass ?? []) } }
         : {}),
     };
-    const used = new Set(file.items.map((it) => it.page_id));
     const level = itemsLevel(file.schema_version);
     const v11 = level >= 1;
     const v12 = level >= 2;
@@ -57,28 +56,26 @@ export const lineVerifyImporter: TaskImporter = {
         title: "אימות שורות מול הסריקה / Line verification",
         source: source as unknown as Record<string, unknown>,
       },
-      items: file.pages
-        .filter((p) => used.has(p.page_id))
-        .map((p) => ({
-          externalId: p.page_id,
-          title: [p.book_title, p.page_label].filter(Boolean).join(" · ") || p.page_id,
-          payload: {
-            image_sha256: p.sha256,
-            width: p.width,
-            height: p.height,
-            source: p.source,
-            book_id: p.book_id,
-            book_title: p.book_title,
-            page_label: p.page_label,
-            text_license: p.text_license,
-            attribution: p.attribution,
-            release_split: p.release_split,
-            ...(v11 ? { script: p.script } : {}),
-            ...(v12 ? { segmenter: p.segmenter, kraken_lines: p.kraken_lines, book_group: p.book_group } : {}),
-          },
-          imageStem: null,
-          bundleImage: { path: p.image, sha256: p.sha256, width: p.width, height: p.height },
-        })),
+      items: file.pages.map((p) => ({
+        externalId: p.page_id,
+        title: [p.book_title, p.page_label].filter(Boolean).join(" · ") || p.page_id,
+        payload: {
+          image_sha256: p.sha256,
+          width: p.width,
+          height: p.height,
+          source: p.source,
+          book_id: p.book_id,
+          book_title: p.book_title,
+          page_label: p.page_label,
+          text_license: p.text_license,
+          attribution: p.attribution,
+          release_split: p.release_split,
+          ...(v11 ? { script: p.script } : {}),
+          ...(v12 ? { segmenter: p.segmenter, kraken_lines: p.kraken_lines, book_group: p.book_group } : {}),
+        },
+        imageStem: null,
+        bundleImage: { path: p.image, sha256: p.sha256, width: p.width, height: p.height },
+      })),
       proposals: passes.map(({ it, pass }, rank) => {
         const page = pages.get(it.page_id)!;
         const kind = it.kind ?? "verify";

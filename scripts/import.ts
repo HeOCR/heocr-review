@@ -24,7 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { importer } from "../src/tasks/importers";
-import type { ProposalMedia } from "../src/tasks/types";
+import type { ProposalMedia, StoredImage } from "../src/tasks/types";
 import { parseArgs, str, target } from "./lib/args";
 import { assertOpenSource } from "./lib/guard";
 import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
@@ -50,9 +50,10 @@ const ROOT = resolve(import.meta.dirname, "..");
 
 /** How many static files this batch serves and their size (Workers static assets: 20,000 files per version on the
  * free plan, 25 MiB per file). */
-function mediaBudget(publicDir: string, media: Map<string, ProposalMedia>): { media_files: number; media_mb: number; largest_kb: number } {
+function mediaBudget(publicDir: string, media: Map<string, ProposalMedia>, itemImages: ReadonlyMap<string, StoredImage>): { media_files: number; media_mb: number; largest_kb: number } {
   const paths = new Set<string>();
   for (const m of media.values()) for (const img of [m.crop, m.page]) if (img?.ref.source === "static") paths.add(img.ref.path);
+  for (const image of itemImages.values()) if (image.ref.source === "static") paths.add(image.ref.path);
   const sizes = [...paths].map((p) => statSync(join(publicDir, p)).size);
   return {
     media_files: paths.size,
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
   if (typeof flags.title === "string" && flags.title.trim()) bundle.batch.title = flags.title.trim();
 
   const media = new Map<string, ProposalMedia>();
+  const itemImages = new Map<string, StoredImage>();
   const missing: string[] = [];
   const byItem = new Map<string, typeof bundle.proposals>();
   for (const p of bundle.proposals) byItem.set(p.itemExternalId, [...(byItem.get(p.itemExternalId) ?? []), p]);
@@ -141,6 +143,7 @@ async function main(): Promise<void> {
       if (!width || !height) throw new Error(`${item.externalId}: the bundle does not declare the page's size`);
       const lines = proposals.flatMap((p) => (p.pageBox ? [{ externalId: p.externalId, box: p.pageBox, contextBox: p.contextBox ?? p.pageBox }] : []));
       const cut = await cutLines(publicDir, bundle.batch.id, stem, join(bundleDir!, item.bundleImage.path), { width, height }, lines);
+      if (taskId === "line_verify") itemImages.set(item.externalId, cut.page);
       for (const p of proposals) {
         const crop = cut.crops.get(p.externalId);
         media.set(p.externalId, { ...(crop ? { crop } : {}), page: { ...cut.page, box: p.pageBox } });
@@ -170,7 +173,7 @@ async function main(): Promise<void> {
   if (missing.length) throw new Error(`no crop or page image for ${missing.length} item(s)/proposal(s): ${missing.slice(0, 5).join(", ")}`);
 
   const importedAt = new Date().toISOString();
-  const sql = buildImportSql(bundle, media, { minReviewers, importedAt, after: task.afterImportSql?.(bundle.batch.id, importedAt) });
+  const sql = buildImportSql(bundle, media, { minReviewers, importedAt, itemImages, after: task.afterImportSql?.(bundle.batch.id, importedAt) });
   mkdirSync(join(ROOT, ".import"), { recursive: true });
   const sqlPath = join(ROOT, ".import", `${safeSegment(bundle.batch.id)}.sql`);
   writeFileSync(sqlPath, sql);
@@ -180,7 +183,7 @@ async function main(): Promise<void> {
     items: bundle.items.length,
     proposals: bundle.proposals.length,
     crops: [...media.values()].filter((m) => m.crop).length,
-    ...mediaBudget(publicDir, media),
+    ...mediaBudget(publicDir, media, itemImages),
     sql: sqlPath,
     target: t,
   };

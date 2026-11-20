@@ -40,6 +40,7 @@ export interface ExportInput {
   /** line_verify: the pointed-book rule's drops, per triggering mark. */
   pointedDrops?: PointedDrop[];
   triagePlants?: ExportExtra["triagePlants"];
+  triagePages?: ExportExtra["triagePages"];
 }
 
 export interface ExportResult {
@@ -148,7 +149,15 @@ export function buildExport(input: ExportInput): ExportResult {
       .map((id) => ({ reviewer: id, display_name: creditFor.get(id)!.displayName, consented_at: creditFor.get(id)!.consentedAt })),
   };
   const ledgerName = decisionsFile.fileName.replace(/\.json$/, "") + "_ledger.json";
-  const extraFiles = type.exportExtraFiles?.(batch, resolved, exportedAt, input.triagePlants ? { exportedAt, exclusions: [], maintainerDecisions: [], verifyVotes: [], triagePlants: input.triagePlants } : undefined) ?? [];
+  const extraFiles =
+    type.exportExtraFiles?.(batch, resolved, exportedAt, {
+      exportedAt,
+      exclusions: [],
+      maintainerDecisions: [],
+      verifyVotes: [],
+      ...(input.triagePlants ? { triagePlants: input.triagePlants } : {}),
+      ...(input.triagePages ? { triagePages: input.triagePages } : {}),
+    }) ?? [];
   return { decisionsFile, ledgerFile: { fileName: ledgerName, content: ledger }, extraFiles, counts, problems };
 }
 

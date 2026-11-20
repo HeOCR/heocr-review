@@ -6,6 +6,7 @@ import { buildSubsetStatements, interimMembers } from "./scripts/lib/subset";
 import type { TaskImporter } from "./src/tasks/import";
 import { lineConsensusImporter } from "./src/tasks/line_consensus/importer";
 import { goldImport, type GoldFile } from "./src/tasks/line_verify/gold";
+import type { LvItemsFile } from "./src/tasks/line_verify/schema";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
 import { pageReviewImporter } from "./src/tasks/page_review/importer";
 import { referenceAuditImporter } from "./src/tasks/reference_audit/importer";
@@ -26,6 +27,23 @@ function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number
     ]),
   );
   return buildImportStatements(bundle, media, { minReviewers, importedAt, after: importer.afterImportSql?.(bundle.batch.id, importedAt) });
+}
+
+/** A manifest with scans and no line boxes, using the real schema and import SQL. */
+function emptyLineVerifyBatch(): string[] {
+  const raw = JSON.parse(readFileSync("test/fixtures/line_verify_v12/items.json", "utf8")) as LvItemsFile;
+  raw.batch_id = "fixture_line_verify_empty";
+  raw.pages = raw.pages.map((p) => ({ ...p, kraken_lines: 0 }));
+  raw.items = [];
+  raw.blind_second_pass = [];
+  const problems = lineVerifyImporter.problems(raw);
+  if (problems.length) throw new Error(problems.join("\n"));
+  const bundle = lineVerifyImporter.bundle(raw);
+  const itemImages = new Map(bundle.items.map((p) => [
+    p.externalId,
+    { ref: { source: "static" as const, path: "media/fixture/empty-page.jpg" }, width: 1000, height: 1400, box: null },
+  ]));
+  return buildImportStatements(bundle, new Map(), { minReviewers: 1, importedAt: "2026-11-20T00:00:00.000Z", itemImages });
 }
 
 /** The synthetic P-hist gold fixture added to the volunteer fixture batch, as scripts/import-gold.ts adds it. */
@@ -123,6 +141,7 @@ export default defineConfig(async () => {
                   TEST_LINE_CONSENSUS_SQL: lineConsensusBatch(),
                   TEST_LINE_VERIFY_V11_SQL: lineVerifyV11Batch(),
                   TEST_LINE_VERIFY_V12_SQL: lineVerifyV12Batch(),
+                  TEST_LINE_VERIFY_EMPTY_SQL: emptyLineVerifyBatch(),
                   TEST_LINE_VERIFY_VOL_SQL: lineVerifyVolBatch(),
                   TEST_LINE_VERIFY_GOLD_SQL: lineVerifyGoldSql("fixture_line_verify_vol"),
                 },
@@ -131,6 +150,8 @@ export default defineConfig(async () => {
           ],
           test: {
             name: "worker",
+            // Multi-request D1 flows can exceed the default 5 seconds on CI runners.
+            testTimeout: 15_000,
             include: ["test/worker/**/*.test.ts"],
             setupFiles: ["./test/worker/setup.ts"],
           },

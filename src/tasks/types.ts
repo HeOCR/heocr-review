@@ -105,6 +105,8 @@ export interface ExportExtra {
   pointedDrops?: PointedDrop[];
   /** line_verify triage: the batch's planted errors (migrations/0012_triage.sql). */
   triagePlants?: { proposalId: number; plantType: string; plantedSha256: string; candidateSha256: string }[];
+  /** line_verify triage: page checks and added lines (migrations/0014_page_completeness.sql). */
+  triagePages?: TriagePages;
 }
 
 export interface PointedDrop {
@@ -161,4 +163,11 @@ export function textProblem(text: unknown): string | null {
   if (text.length > MAX_TEXT_LENGTH) return `text must be at most ${MAX_TEXT_LENGTH} characters`;
   if (BAD_CONTROL.test(text)) return "text must not contain control characters";
   return null;
+}
+
+/** A triage batch's page records for the export (migrations/0014_page_completeness.sql). */
+export interface TriagePages {
+  pages: { pageId: string; width: number | null; height: number | null }[];
+  checks: { pageId: string; reviewerId: string; answer: "complete" | "missing_lines" | "lines_added"; decidedAt: string; missingAt: string | null }[];
+  added: { id: string; pageId: string; reviewerId: string; box: [number, number, number, number]; text: string | null; value: "typed" | "unreadable"; decidedAt: string }[];
 }

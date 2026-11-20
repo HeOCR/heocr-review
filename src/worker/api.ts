@@ -16,6 +16,7 @@ import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { TRIAGE_QUEUES, isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf, triageCounts, triageFilter, type TriageQueue } from "./queue";
 import { isTriageBatch, isTriageValue, triageable } from "../tasks/line_verify/triage";
+import { PAGE_ANSWERS, addLine, boxProblem, currentCheck, nextPage, normalizeAdded, pageItem, recordInitialPageCheck, recordPageCheck, removeLine } from "./pages";
 import type { LineRouting } from "../tasks/line_verify/resolution";
 import { dropPointedBook, pointedDropsExtra } from "./pointed_books";
 import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
@@ -208,6 +209,13 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   if (isTriageBatch(batch)) {
     const queue = params.get("queue") ?? "triage";
     if (!(TRIAGE_QUEUES as readonly string[]).includes(queue)) throw new HttpError(404, "not_found");
+    // A page comes before the next line: its completeness check (triage), or its missing lines (desktop; 0014).
+    const page = await nextPage(ctx.env.DB, batch, reviewer.id, queue as TriageQueue);
+    if (page) {
+      const counts = (await triageCounts(ctx.env.DB, batch, reviewer.id, ctx.now))!;
+      const progress = await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id));
+      return json({ proposal: null, progress, prefetch: [], page, triage: { queue: queue as TriageQueue, ...counts } });
+    }
     filter = await triageFilter(ctx.env.DB, batch.id, reviewer.id, queue as TriageQueue);
     const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, isAdmin(ctx.env, reviewer.id), queue === "triage");
     const counts = (await triageCounts(ctx.env.DB, batch, reviewer.id, ctx.now))!;
@@ -268,7 +276,8 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
-  await enforceWriteDay(ctx.env.DB, reviewer.id, ctx.now);
+  // The maintainer's own triage runs to thousands of lines a day: the daily cap is for volunteers (the per-minute one stays).
+  if (!isAdmin(ctx.env, reviewer.id)) await enforceWriteDay(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
@@ -504,4 +513,59 @@ export async function adminPhistGoldPull(ctx: Ctx, goldId: string): Promise<Resp
   if (!(await goldKnown(ctx.env.DB, goldId))) throw new HttpError(404, "not_found");
   await setPull(ctx.env.DB, goldId, body.pulled, typeof body.reason === "string" ? body.reason : null, admin.id, iso(ctx.now));
   return json({ goldId, pulled: body.pulled });
+}
+
+// ---------- page completeness (migrations/0014_page_completeness.sql) ----------
+
+/** A triage batch's page, for a signed-in reviewer who accepted the current terms (a write). */
+async function triagePage(ctx: Ctx, batchId: string, itemId: number) {
+  assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
+  const batch = await openBatch(ctx, batchId);
+  if (!isTriageBatch(batch)) throw new HttpError(404, "not_found");
+  if (!(await pageItem(ctx.env.DB, batch.id, itemId))) throw new HttpError(404, "not_found");
+  return { reviewer, batch };
+}
+
+/** POST {answer: "complete" | "missing_lines"}: is every printed line of the page boxed? */
+export async function checkPage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
+  const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
+  const body = await readJson(ctx.request);
+  if (!(PAGE_ANSWERS as readonly unknown[]).includes(body.answer)) throw new HttpError(400, "invalid_answer", `answer must be one of ${PAGE_ANSWERS.join(", ")}`);
+  if (!(await recordInitialPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, body.answer as "complete" | "missing_lines", iso(ctx.now)))) {
+    throw new HttpError(409, "not_open", "this page is not ready for a completeness check");
+  }
+  return json({ ok: true });
+}
+
+/** POST {box, value: "typed" | "unreadable", text}: a missing line, boxed and typed on the desktop. */
+export async function addPageLine(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
+  const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
+  if ((await currentCheck(ctx.env.DB, itemId, reviewer.id)) !== "missing_lines") throw new HttpError(409, "not_open", "add lines to a page marked as missing lines");
+  const body = await readJson(ctx.request);
+  const problem = boxProblem(body.box);
+  if (problem) throw new HttpError(400, "invalid_box", problem);
+  const n = normalizeAdded(body.value, body.text);
+  if (!n.ok) throw new HttpError(400, "invalid_decision", n.error);
+  const id = await addLine(ctx.env.DB, batch.id, itemId, reviewer.id, body.box as number[], n.value, n.text, iso(ctx.now));
+  return json({ id, value: n.value, text: n.text });
+}
+
+export async function removePageLine(ctx: Ctx, batchId: string, lineId: string): Promise<Response> {
+  assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
+  const batch = await openBatch(ctx, batchId);
+  if (!(await removeLine(ctx.env.DB, batch.id, lineId, reviewer.id, iso(ctx.now)))) throw new HttpError(404, "not_found");
+  return json({ ok: true });
+}
+
+/** POST: the page's missing lines are all added. */
+export async function finishPage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
+  const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
+  if ((await currentCheck(ctx.env.DB, itemId, reviewer.id)) !== "missing_lines") throw new HttpError(409, "not_open", "this page is not waiting for missing lines");
+  await recordPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, "lines_added", iso(ctx.now));
+  return json({ ok: true });
 }

@@ -13,7 +13,7 @@
  * where the correction started, with every earlier answer in `history`.
  */
 import { sha256Hex } from "../../shared/sha256";
-import type { BatchRecord, DecisionRecord, ExportFile, ProposalRecord, ResolvedProposal } from "../types";
+import type { BatchRecord, DecisionRecord, ExportFile, ProposalRecord, ResolvedProposal, TriagePages } from "../types";
 import type { LineVerifyPayload } from "./index";
 
 export const TRIAGE_VALUES = ["correct", "different", "niqqud_mismatch"] as const;
@@ -43,6 +43,9 @@ export const TRIAGEABLE_SQL = `(COALESCE(json_extract(p.payload_json, '$.pass'),
   AND json_extract(p.payload_json, '$.candidate_text') <> ''
   AND (COALESCE(json_extract(p.payload_json, '$.kind'), 'verify') = 'verify'
     OR json_extract(p.payload_json, '$.candidate_provenance') LIKE 'llm:%'))`;
+
+/** SQL over decision d and proposal p: the answer matches the line content. */
+export const CONTENT_MATCH_SQL = "d.proposal_sha256 = p.content_sha256";
 
 /**
  * SQL over a decision alias: the answer leaves its line open to the reviewer, for the desktop fix queue: "different",
@@ -95,7 +98,9 @@ interface TriageRow {
   /** Of the text triage showed: the planted text on a plant. */
   candidate_sha256: string | null;
   plant: { planted_sha256: string; type: string } | null;
-  queue: "triage" | "desktop_no_candidate";
+  queue: "triage" | "desktop_no_candidate" | "desktop_added";
+  /** desktop_added: the added line's box, in page pixels. */
+  box?: number[];
   triage: { decision: TriageValue; decided_at: string } | null;
   correction: { value: string; text: string | null; correction_start: "candidate" | "blank"; decided_at: string } | null;
 }
@@ -104,7 +109,7 @@ interface TriageRow {
  * reference_triage.v1: one row per pass-1 line and answering reviewer, plus every superseded answer in history; and
  * reference_triage_history.json, every replaced triage answer (eval's count source).
  */
-export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, plantList: TriagePlant[] = []): ExportFile[] {
+export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, plantList: TriagePlant[] = [], pageRecords?: TriagePages): ExportFile[] {
   const plants = new Map(plantList.map((x) => [x.proposalId, x]));
   const rows: TriageRow[] = [];
   const history: { item_id: string; reviewer: string; value: string; text: string | null; decided_at: string; superseded_at: string }[] = [];
@@ -131,27 +136,61 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
         candidate_sha256: candidate === "" ? null : plant ? plant.plantedSha256 : sha256Hex(candidate),
         plant: plant ? { planted_sha256: plant.plantedSha256, type: plant.plantType } : null,
         queue: candidate === "" ? "desktop_no_candidate" : "triage",
-        triage: lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.decidedOn } : null,
+        triage: lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.createdAt } : null,
         correction: isTriageValue(current.value)
           ? null
           : {
               value: plant ? plantCorrection(p, current) : current.value,
               text: current.text,
               correction_start: candidate === "" ? "blank" : "candidate",
-              decided_at: current.decidedOn,
+              decided_at: current.createdAt,
             },
       });
       for (const d of mine) {
-        if (d !== current && isTriageValue(d.value)) replaced.push({ item_id: itemId, reviewer, triage: { decision: d.value, decided_at: d.decidedOn }, replaced_at: d.supersededAt!.slice(0, 10) });
+        if (d !== current && isTriageValue(d.value)) replaced.push({ item_id: itemId, reviewer, triage: { decision: d.value, decided_at: d.createdAt }, replaced_at: d.supersededAt! });
       }
     }
     for (const d of r.superseded) {
-      history.push({ item_id: itemId, reviewer: d.reviewerId, value: d.value, text: d.text, decided_at: d.decidedOn, superseded_at: d.supersededAt!.slice(0, 10) });
+      history.push({ item_id: itemId, reviewer: d.reviewerId, value: d.value, text: d.text, decided_at: d.createdAt, superseded_at: d.supersededAt! });
     }
+  }
+  // Page completeness (amendment 1, migrations/0014): one entry per page and checking reviewer (a page nobody checked:
+  // completeness null); lines added on the desktop are rows of their own, queue "desktop_added", boxes in page pixels.
+  const pageSize = new Map<string, { width: number; height: number } | null>();
+  for (const r of lines) pageSize.set(payloadOf(r.proposal).page_id, { width: payloadOf(r.proposal).page.width, height: payloadOf(r.proposal).page.height });
+  for (const { pageId, width, height } of pageRecords?.pages ?? []) {
+    if (!pageSize.has(pageId)) pageSize.set(pageId, width !== null && height !== null ? { width, height } : null);
+  }
+  const checks = pageRecords?.checks ?? [];
+  type Completeness = { answer: "complete" | "missing_lines"; reviewer: string; decided_at: string; lines_added_at?: string } | null;
+  const pages = [...pageSize.keys()].flatMap((pageId): { page_id: string; completeness: Completeness }[] => {
+    const mine = checks.filter((c) => c.pageId === pageId).sort((a, b) => a.reviewerId.localeCompare(b.reviewerId));
+    if (!mine.length) return [{ page_id: pageId, completeness: null }];
+    return mine.map((c) => ({
+      page_id: pageId,
+      completeness:
+        c.answer === "lines_added"
+          ? { answer: "missing_lines" as const, reviewer: c.reviewerId, decided_at: c.missingAt ?? c.decidedAt, lines_added_at: c.decidedAt }
+          : { answer: c.answer, reviewer: c.reviewerId, decided_at: c.decidedAt },
+    }));
+  });
+  for (const a of pageRecords?.added ?? []) {
+    const size = pageSize.get(a.pageId);
+    rows.push({
+      item_id: `${a.pageId}#added:${a.id}`,
+      reviewer: a.reviewerId,
+      candidate_provenance: null,
+      candidate_sha256: null,
+      plant: null,
+      queue: "desktop_added",
+      triage: null,
+      correction: { value: a.value, text: a.text, correction_start: "blank", decided_at: a.decidedAt },
+      ...(size ? { box: [Math.round(a.box[0] * size.width), Math.round(a.box[1] * size.height), Math.round(a.box[2] * size.width), Math.round(a.box[3] * size.height)] } : {}),
+    });
   }
   const batchId = (batch.source as { batch_id?: string }).batch_id ?? batch.id;
   return [
-    { fileName: REFERENCE_TRIAGE_FILE, content: { schema: REFERENCE_TRIAGE_SCHEMA, batch_id: batchId, exported_at: exportedAt, rows, history } },
+    { fileName: REFERENCE_TRIAGE_FILE, content: { schema: REFERENCE_TRIAGE_SCHEMA, batch_id: batchId, exported_at: exportedAt, pages, rows, history } },
     { fileName: REFERENCE_TRIAGE_HISTORY_FILE, content: { schema: REFERENCE_TRIAGE_HISTORY_SCHEMA, batch_id: batchId, exported_at: exportedAt, replaced } },
   ];
 }
