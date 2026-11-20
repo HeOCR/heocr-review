@@ -103,6 +103,10 @@ export interface ExportExtra {
   phistGold?: { grades: PhistGoldGrade[]; pulled: string[] };
   /** line_verify: the pointed-book rule's drops, per triggering mark (migrations/0011). */
   pointedDrops?: PointedDrop[];
+  /** line_transcribe: each reviewer's standing in the gate batch (who counts is decided there). */
+  standings?: Record<string, string>;
+  /** line_transcribe: pages volunteers reported as having text outside the boxes, with the maintainer's answer. */
+  pageFlags?: PageFlagExtra[];
 }
 
 export interface PointedDrop {
@@ -127,6 +131,13 @@ export interface VerifyVote {
   notCountedReason: string | null;
   step: string;
   byAdmin: boolean;
+}
+
+export interface PageFlagExtra {
+  pageKey: string;
+  kind: string;
+  reports: { reviewerId: string; at: string }[];
+  maintainer: null | { answer: "confirmed" | "dismissed"; reviewerId: string; at: string };
 }
 
 export interface TaskType {

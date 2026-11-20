@@ -318,6 +318,55 @@ maintainer had decided, which keep his references), the batch's `ai_flags.json`,
   `wrangler.jsonc` does not set it; the launch PR does (docs/runbooks/volunteer-launch.md). A local Worker sets it in
   `.dev.vars` to try the task.
 
+### Handwriting transcription (preview only; draft until eval's amendment 3)
+
+```sh
+npm run import -- --task line_transcribe --bundle <bundle dir> --target local|preview
+```
+
+Volunteers transcribe the handwriting (H) eval pages one line at a time (task type `line_transcribe`; heocr-eval's
+`h_eval_v1`, amendments 1 and 2). The bundle mirrors HASH's `data/eval/` at the registered commit:
+
+- `h_line_items_v1.json`, schema `h_line_items.v1`: the line boxes data-collection makes and eval registers;
+- `h_eval_v1/manifest.jsonl` and `h_eval_v1_1/manifest.jsonl`: the registered manifests, which give each page's
+  languages and holding institution;
+- the page images, at the box file's own paths (`data/scans/...`).
+
+The import refuses the box file until its sha256 is in `REGISTERED_SHA256` (`src/tasks/line_transcribe/schema.ts`).
+It also refuses a manifest whose sha256 isn't the registered one. Two kinds of page are held out of the queue and
+listed in the export's `held_pages`: pages flagged `no_hebrew_text` (until eval rules on them) and pages with no box.
+Page images are stored upright with EXIF orientation applied, because boxes are in the displayed frame.
+
+- **From scratch:** there is no pre-fill and no machine reading of any kind. A line is typed or marked whole-line
+  unreadable. `[?]` marks one illegible span inside a line.
+- **Box problems:** the boxes are machine-made and fragment on dense or faded pages. All three box problems are
+  `not_on_page` for `agreement.py`. The export keeps which one the volunteer meant as `box_reason`:
+  - *continued* (`continued`): the whole line is typed in its first, rightmost piece. Every line shows the rule,
+    and the band around it outlines all the page's boxes with the current one highlighted;
+  - *no text* (`no_text`): a false box;
+  - *box doesn't hold one line* (`not_on_page`): two lines merged in one box.
+
+  The export's `joins` attaches each continued piece to the nearest piece on its right in the same row that isn't a
+  box problem, by geometry and not by box order. A piece with none is `unattached` and goes back for re-boxing. The line band shows the whole width of the page, so the rest of a split row is in view.
+- **Text outside the boxes:** a volunteer can report that the page has a text line no box covers. The report doesn't
+  decide the line they are on. Reported pages wait in the maintainer's admin queue, drawn with their boxes, for him
+  to confirm (re-box the page) or dismiss. Reports and answers go in the export's `page_flags`.
+- **Routing and agreement:** as in volunteer line review. Two blind transcriptions, then a blind third, then the
+  maintainer, under eval's `agreement.py`.
+- **Who counts:** anyone may transcribe, but only decisions from volunteers who count in the mid-century volunteer
+  batch (95% on at least 20 gold lines) count toward agreement. Other decisions are kept and don't count, so a line
+  is offered until counted decisions settle it. A change in a volunteer's standing there, or an admin's exclusion,
+  is applied to their H lines. There is no handwriting gold yet.
+- **Terms first:** the task is listed and served only to the maintainer and to volunteers who have accepted terms that
+  cover typing handwritten pages (`TRANSCRIBE_TERMS_VERSION` = `2026-11-18-v1` in `src/tasks/line_transcribe/schema.ts`,
+  the current terms since heocr-review#21), on preview too. Everyone re-accepts the current terms before their next
+  decision anyway. Tests and local dev may set `DEV_TRANSCRIBE_TERMS_VERSION`; preview and production ignore it.
+- **The maintainer** only breaks ties in this batch; he is not a transcriber.
+- **Strata kept apart:** `primary`, `seen_writer` and `other_hebrew_script` are on every line of the export
+  (`h_line_transcriptions.v0`), with counts per stratum. Volunteers are not told a page is a seen writer's.
+- **Other languages:** `other_hebrew_script` lines are served only when the volunteer ticks, for the session, that
+  they read the page's languages. The choice stays in the browser tab and goes with each request. It is never stored.
+
 ## Decisions out
 
 ```sh

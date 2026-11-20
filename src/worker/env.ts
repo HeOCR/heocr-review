@@ -17,4 +17,9 @@ export interface Env {
   CONSENSUS_ENABLED?: string;
   /** .dev.vars only. */
   DEV_AUTH_BYPASS?: string;
+  /**
+   * Development only (tests, local dev): the terms version that covers handwriting transcription, in place of
+   * TRANSCRIBE_TERMS_VERSION. Ignored in preview and production.
+   */
+  DEV_TRANSCRIBE_TERMS_VERSION?: string;
 }

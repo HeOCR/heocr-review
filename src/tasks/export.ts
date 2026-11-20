@@ -7,7 +7,7 @@
  * every reviewer's current decision (one per reviewer per proposal); the consumer applies a proposal when at least
  * min_reviewers of them agree. The ledger records the same outcome per proposal, plus superseded and stale history.
  */
-import type { BatchRecord, Credit, DecisionRecord, ExportFile, PhistGoldGrade, PointedDrop, ProposalRecord, ResolvedProposal, VerifyVote } from "./types";
+import type { BatchRecord, Credit, DecisionRecord, ExportFile, PageFlagExtra, PhistGoldGrade, PointedDrop, ProposalRecord, ResolvedProposal, VerifyVote } from "./types";
 import { taskType } from "./registry";
 
 /**
@@ -39,6 +39,10 @@ export interface ExportInput {
   phistGold?: { grades: PhistGoldGrade[]; pulled: string[] };
   /** line_verify: the pointed-book rule's drops, per triggering mark. */
   pointedDrops?: PointedDrop[];
+  /** line_transcribe: each reviewer's standing in the gate batch. */
+  standings?: Record<string, string>;
+  /** line_transcribe: reported pages and the maintainer's answers. */
+  pageFlags?: PageFlagExtra[];
 }
 
 export interface ExportResult {
@@ -95,7 +99,7 @@ export function buildExport(input: ExportInput): ExportResult {
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
   const resolved = resolveProposals(batch, proposals, decisions);
-  const decisionsFile = type.exportDecisions(batch, resolved, { exportedAt, exclusions: input.exclusions ?? [], maintainerDecisions: input.maintainerDecisions ?? [], verifyVotes: input.verifyVotes ?? [], ...(input.phistGold ? { phistGold: input.phistGold } : {}), ...(input.pointedDrops ? { pointedDrops: input.pointedDrops } : {}) });
+  const decisionsFile = type.exportDecisions(batch, resolved, { exportedAt, exclusions: input.exclusions ?? [], maintainerDecisions: input.maintainerDecisions ?? [], verifyVotes: input.verifyVotes ?? [], ...(input.phistGold ? { phistGold: input.phistGold } : {}), ...(input.pointedDrops ? { pointedDrops: input.pointedDrops } : {}), ...(input.standings ? { standings: input.standings } : {}), ...(input.pageFlags ? { pageFlags: input.pageFlags } : {}) });
   const problems = type.validateExport(batch, proposals, decisionsFile.content);
   const count = (status: ResolvedProposal["status"]) => resolved.filter((r) => r.status === status).length;
   const reviewers = new Set(decisions.map((d) => d.reviewerId));

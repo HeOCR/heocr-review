@@ -6,6 +6,7 @@ import { buildSubsetStatements, interimMembers } from "./scripts/lib/subset";
 import type { TaskImporter } from "./src/tasks/import";
 import { lineConsensusImporter } from "./src/tasks/line_consensus/importer";
 import { goldImport, type GoldFile } from "./src/tasks/line_verify/gold";
+import { lineTranscribeImporter } from "./src/tasks/line_transcribe/importer";
 import { lineVerifyImporter } from "./src/tasks/line_verify/importer";
 import { pageReviewImporter } from "./src/tasks/page_review/importer";
 import { referenceAuditImporter } from "./src/tasks/reference_audit/importer";
@@ -14,7 +15,9 @@ import type { ProposalMedia } from "./src/tasks/types";
 /** One fixture batch as SQL statements, with fake static media, for the Worker tests. */
 function fixtureBatch(importer: TaskImporter, path: string, minReviewers: number, importedAt: string, sidecars?: Record<string, string>): string[] {
   const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-  const side = Object.fromEntries(Object.entries(sidecars ?? {}).map(([k, v]) => [k, JSON.parse(readFileSync(v, "utf8")) as unknown]));
+  const parse = (v: string): unknown =>
+    v.endsWith(".jsonl") ? readFileSync(v, "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as unknown) : JSON.parse(readFileSync(v, "utf8"));
+  const side = Object.fromEntries(Object.entries(sidecars ?? {}).map(([k, v]) => [k, parse(v)]));
   const bundle = importer.bundle(raw, side);
   const media = new Map<string, ProposalMedia>(
     bundle.proposals.map((p) => [
@@ -125,6 +128,10 @@ export default defineConfig(async () => {
                   TEST_LINE_VERIFY_V12_SQL: lineVerifyV12Batch(),
                   TEST_LINE_VERIFY_VOL_SQL: lineVerifyVolBatch(),
                   TEST_LINE_VERIFY_GOLD_SQL: lineVerifyGoldSql("fixture_line_verify_vol"),
+                  TEST_LINE_TRANSCRIBE_SQL: fixtureBatch(lineTranscribeImporter, "test/fixtures/line_transcribe/h_line_items_v1.json", 1, "2026-11-18T13:00:00.000Z", {
+                    "h_eval_v1/manifest.jsonl": "test/fixtures/line_transcribe/h_eval_v1/manifest.jsonl",
+                    "h_eval_v1_1/manifest.jsonl": "test/fixtures/line_transcribe/h_eval_v1_1/manifest.jsonl",
+                  }),
                 },
               },
             }),

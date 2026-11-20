@@ -1,5 +1,5 @@
 /** Row shapes, mappers and SQL shared by the Worker (D1 binding) and scripts/export.ts (wrangler d1 execute). */
-import type { BatchRecord, Credit, DecisionRecord, ProposalMedia, ProposalRecord } from "./types";
+import type { BatchRecord, Credit, DecisionRecord, PageFlagExtra, ProposalMedia, ProposalRecord } from "./types";
 
 
 export interface BatchRow {
@@ -128,6 +128,11 @@ export const CONSENSUS_EXPORT_SQL = {
   exclusions: "SELECT reviewer_id, excluded_at FROM agreement_exclusions WHERE batch_id = ?1",
   maintainer: `SELECT m.decision_id FROM maintainer_decisions m JOIN decisions d ON d.id = m.decision_id
     JOIN proposals p ON p.id = d.proposal_id WHERE p.batch_id = ?1`,
+  /** line_transcribe: volunteers' page reports and the maintainer's answers. */
+  pageFlags: `SELECT i.external_id AS page_key, f.kind, f.reviewer_id, f.created_at FROM page_flags f JOIN items i ON i.id = f.item_id
+    WHERE i.batch_id = ?1 ORDER BY i.external_id, f.kind, f.created_at, f.reviewer_id`,
+  pageFlagAnswers: `SELECT i.external_id AS page_key, a.kind, a.answer, a.reviewer_id, a.answered_at FROM page_flag_answers a JOIN items i ON i.id = a.item_id
+    WHERE i.batch_id = ?1`,
 };
 
 /** line_verify volunteer_v1_1: the export's gold input for a batch (every gold decision's grade; the lines pulled now). */
@@ -178,6 +183,36 @@ export interface VerifyVoteRow {
 }
 
 export const toVerifyVote = (r: VerifyVoteRow) => ({ decisionId: r.decision_id, counted: r.counted === 1, notCountedReason: r.not_counted_reason, step: r.step, byAdmin: r.by_admin === 1 });
+
+export interface PageFlagRow {
+  page_key: string;
+  kind: string;
+  reviewer_id: string;
+  created_at: string;
+}
+export interface PageFlagAnswerRow {
+  page_key: string;
+  kind: string;
+  answer: "confirmed" | "dismissed";
+  reviewer_id: string;
+  answered_at: string;
+}
+
+/** The export's page flags from their rows: one entry per page and kind, with every report and the answer. */
+export function pageFlagsOf(flags: PageFlagRow[], answers: PageFlagAnswerRow[]): PageFlagExtra[] {
+  const out = new Map<string, PageFlagExtra>();
+  for (const f of flags) {
+    const k = `${f.page_key}\u0000${f.kind}`;
+    const e = out.get(k) ?? { pageKey: f.page_key, kind: f.kind, reports: [], maintainer: null };
+    e.reports.push({ reviewerId: f.reviewer_id, at: f.created_at });
+    out.set(k, e);
+  }
+  for (const a of answers) {
+    const e = out.get(`${a.page_key}\u0000${a.kind}`);
+    if (e) e.maintainer = { answer: a.answer, reviewerId: a.reviewer_id, at: a.answered_at };
+  }
+  return [...out.values()];
+}
 
 export const EXPORT_SQL = {
   batch: `${BATCH_SQL} WHERE id = ?1`,

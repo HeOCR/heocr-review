@@ -8,6 +8,7 @@ import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
 import { lineConsensusView } from "./views/consensus";
 import { CONVENTIONS } from "./views/conventions";
+import { lineTranscribeView } from "./views/transcribe";
 import { lineVerifyView } from "./views/line";
 import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
@@ -180,7 +181,9 @@ async function route(): Promise<void> {
         ? pageReviewView(batch, hooks, startAt, subset?.id)
         : batch.taskType === "line_consensus"
           ? lineConsensusView(batch, hooks, startAt)
-          : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
+          : batch.taskType === "line_transcribe"
+            ? lineTranscribeView(batch, hooks, startAt)
+            : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
     show("task", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
     setWhere(batch.title);
     dispose = view.dispose;

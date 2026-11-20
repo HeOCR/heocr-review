@@ -19,6 +19,8 @@ declare global {
       TEST_LINE_VERIFY_V12_SQL: string[];
       TEST_LINE_VERIFY_VOL_SQL: string[];
       TEST_LINE_VERIFY_GOLD_SQL: string[];
+      /** The handwriting transcription batch (line_transcribe), gated on the volunteer line batch. */
+      TEST_LINE_TRANSCRIBE_SQL: string[];
     }
   }
 }
