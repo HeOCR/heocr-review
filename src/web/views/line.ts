@@ -1,21 +1,39 @@
 /**
- * The line verification screen (task type line_verify): one printed line at a time, shown large, under it a
- * smaller context band, then the candidate transcription in large RTL type with the attention spans marked.
- * Keyboard first: Enter exact, E edit, N print has niqqud, U unreadable, M misaligned, S skip, B back; every key has a
- * button. A line the agent pre-check flags (v1.1 batches) says why, and is not marked exact before the full page has
- * been opened; the flag is only where to look and never proposes a text. A blind second pass ("type" mode) shows no
- * candidate: the reviewer types the line from a blank box (Ctrl+Enter saves), and the answer is final.
+ * The line verification screen (task type line_verify), in the design's layout (design/review SPEC §3, §4.1, §4.2):
+ * the line cut from the scan, the candidate under it on the same edges, one slot for rare notices, and every answer in
+ * the dock (Exact and Correct it; the rare answers in More, a sheet on a phone and part of the row on a desktop).
+ * The page is beside the line on a desktop and a full-screen view on a phone.
+ *
+ * Rules kept from before: a line is not decided before its image has loaded; a line the agent pre-check flagged is
+ * not marked exact before its full page has been seen (on a desktop the page beside it counts, on a phone it has to
+ * be opened: linerules.ts); a blind second pass ("type" mode) shows no candidate and is final once saved; a held key
+ * never repeats a decision. A decision that fails to save is kept on this device and resent (SPEC §6).
  */
 import type { AttentionRun } from "../../shared/attention";
 import type { BatchSummary, DecisionOption, LineVerifyView, NextResponse, Progress, ProposalView } from "../../shared/api";
+import { diffText } from "../../shared/diff";
 import type { Box, ImageView } from "../../shared/media";
 import { visibleTokens } from "../../shared/visible";
 import { hasNiqqud } from "../../shared/niqqud";
 import { ApiFailure, get, post } from "../api";
 import { h, mount } from "../dom";
+import { lang, t, tRich, type StringKey } from "../i18n";
+import { icon, type IconName } from "../icons";
+import {
+  DESKTOP_QUERY,
+  clearDraft,
+  dropPending,
+  exactNeedsPage,
+  failureKind,
+  keepPending,
+  keepable,
+  pendingFor,
+  readDraft,
+  writeDraft,
+  type FailureKind,
+} from "../linerules";
 import { compare } from "../text";
-import { failureHandler, prefetch, progressBar, type ReviewHooks, type ReviewScreen } from "./common";
-import { viewer } from "./viewer";
+import { prefetch, type ReviewHooks, type ReviewScreen } from "./common";
 
 /** Displayed height of the line's ink, in CSS pixels, per zoom step. */
 const LINE_HEIGHTS = [40, 52, 66, 84, 108, 140];
@@ -23,10 +41,11 @@ const MAX_SEGMENTS = 4;
 
 /**
  * The line, cut from its context crop on the client and shown large. A line too long for the screen at that size
- * is wrapped into up to four stacked pieces, right piece first (Hebrew reads right to left), with a little overlap
- * so no letter is lost at a cut. Every piece shows the same image file, so the browser fetches it once.
+ * is wrapped into stacked pieces (at most `maxPieces`, shrinking the ink height if it must), right piece first
+ * (Hebrew reads right to left), with a little overlap so no letter is lost at a cut. Every piece shows the same image
+ * file, so the browser fetches it once.
  */
-export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, onLoad: () => void): HTMLElement {
+export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, onLoad: () => void, maxPieces = MAX_SEGMENTS, label = "השורה בסריקה / the line on the scan"): HTMLElement {
   const W = img.width;
   const H = img.height;
   const lh = Math.max(1, (box[3] - box[1]) * H);
@@ -37,10 +56,13 @@ export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: nu
   const y0 = Math.max(0, box[1] * H - padY);
   const y1 = Math.min(H, box[3] * H + padY);
   const lw = x1 - x0;
-  const natural = (lw * inkHeight) / lh;
-  const n = Math.max(1, Math.min(MAX_SEGMENTS, Math.ceil(natural / Math.max(120, width))));
+  const pieceW = Math.max(120, width);
+  // Shrink the ink so the line fits in maxPieces at this width ("Fit width" is maxPieces 1).
+  const ink = Math.min(inkHeight, (maxPieces * pieceW * lh) / lw);
+  const natural = (lw * ink) / lh;
+  const n = Math.max(1, Math.min(maxPieces, Math.ceil(natural / pieceW - 1e-9)));
   const overlap = n > 1 ? 0.025 * lw : 0;
-  const strip = h("div", { class: "linestrip", dir: "ltr", "aria-label": "השורה בסריקה / the line on the scan", role: "img" });
+  const strip = h("div", { class: "linestrip", dir: "ltr", "aria-label": label, role: "img" });
   let loaded = false;
   const done = () => {
     if (!loaded) {
@@ -52,7 +74,7 @@ export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: nu
     const right = Math.min(W, x1 - (k * lw) / n + overlap);
     const left = Math.max(0, x1 - ((k + 1) * lw) / n - overlap);
     const segW = right - left;
-    const scale = Math.min(width / segW, inkHeight / lh);
+    const scale = Math.min(width / segW, ink / lh);
     const image = h("img", { src: img.url, alt: "", decoding: "async", draggable: "false" });
     image.style.cssText = `width:${W * scale}px;left:${-left * scale}px;top:${-y0 * scale}px`;
     if (k === 0) {
@@ -83,28 +105,16 @@ export function candidateNodes(runs: AttentionRun[], from: keyof typeof ATTN_TIT
   let at = 0;
   return runs.map((run) => {
     if (run.text === "") return h("span", { class: "caret attn", title: titles.caret }, "‸");
-    const inner: Node[] = visibleTokens(run.text).map((t) => {
+    const inner: Node[] = visibleTokens(run.text).map((tok) => {
       const here = at;
-      at += Array.from(t.raw).length;
-      if (t.kind === "text") return document.createTextNode(t.shown);
-      if (t.kind === "space") return odd[here] ? h("bdi", { class: "ws", title: t.label ?? "" }, "␣") : document.createTextNode(" ");
-      return h("bdi", { class: "sp", title: t.label ?? "", dir: /^[⟨]/.test(t.shown) ? "ltr" : "auto" }, t.shown);
+      at += Array.from(tok.raw).length;
+      if (tok.kind === "text") return document.createTextNode(tok.shown);
+      if (tok.kind === "space") return odd[here] ? h("bdi", { class: "ws", title: tok.label ?? "" }, "␣") : document.createTextNode(" ");
+      return h("bdi", { class: "sp", title: tok.label ?? "", dir: /^[⟨]/.test(tok.shown) ? "ltr" : "auto" }, tok.shown);
     });
     return run.attention ? h("mark", { class: "attn", title: titles.mark }, ...inner) : h("span", {}, ...inner);
   });
 }
-
-const KEYS: [string, string, string][] = [
-  ["Enter", "מדויק", "exact"],
-  ["E", "עריכה", "edit"],
-  ["N", "בדפוס יש ניקוד", "print has niqqud"],
-  ["U", "לא קריא", "unreadable"],
-  ["M", "לא תואם", "misaligned"],
-  ["S", "דילוג", "skip"],
-  ["B", "הקודם", "back"],
-  ["+/−", "זום", "zoom"],
-  ["P", "עמוד מלא", "page"],
-];
 
 /** The keys of the typing screen's answers without text: [shown, e.code]. */
 const TYPING_KEYS: Record<string, [string, string]> = {
@@ -115,77 +125,182 @@ const TYPING_KEYS: Record<string, [string, string]> = {
   continued: ["K", "KeyK"],
 };
 
+/** The key list behind "?" (SPEC §7, as the code has it). */
+const KEY_LIST: [string, StringKey][] = [
+  ["Enter · 1", "exact"],
+  ["E · 2", "fix"],
+  ["N", "niqqud"],
+  ["U · 3", "unread"],
+  ["M · 4", "misal"],
+  ["S · 5", "skip"],
+  ["B", "prev"],
+  ["+ / − · Z / X", "zoom_in"],
+  ["P", "page"],
+  ["Esc", "close"],
+];
+
+/** The more-sheet answers on the verify screen: [value, label, explanation, icon, key]. */
+const MORE: [string, StringKey, StringKey, IconName, string][] = [
+  ["pointed_print", "niqqud", "niqqud_sub", "niqqud", "N"],
+  ["unreadable", "unread", "unread_sub", "unreadable", "U"],
+  ["misaligned", "misal", "misal_sub", "misaligned", "M"],
+];
+
+const PAGE_ZOOMS = [1, 1.5, 2, 3, 4];
+
 /** `startAt` opens one line first (link #p/<id>); then the queue continues. */
 export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
-  const root = h("div", { class: "review lineverify" });
+  const root = h("div", { class: "taskroot" });
+  const desktopMq = matchMedia(DESKTOP_QUERY);
   const history: number[] = [];
   let current: ProposalView | null = null;
+  let revisiting = false;
   let progress: Progress = batch.progress;
   let editing: HTMLTextAreaElement | null = null;
   let busy = false;
   let ready = false; // the line's image has loaded: confirming a line nobody could see would be a blind "exact"
-  // A phone shows the line in two pieces rather than four; +/− changes it.
-  let zoom = matchMedia("(max-width: 520px)").matches ? 0 : 2;
-  let showPage = false;
-  let sawPage = false; // the full page has been opened on this line (a pre-check flag asks for it before "exact")
-  const fail = failureHandler(root, hooks);
+  let zoom = 2;
+  let fitWidth = false; // phone: the whole line across the width ("Fit width") instead of two pieces
+  let pageOpened = false; // phone: the full page was opened on this line
+  let pageZoom = 0;
+  let failure: { kind: FailureKind; kept: boolean; value: string; text?: string; reason?: string } | null = null;
+  let saveState: "saved" | "saving" | "failed" | null = null;
+  let keysOpen = false;
 
   const view = (): LineVerifyView | null => (current && current.view.kind === "line_verify" ? current.view : null);
-  const status = (text: string) => {
-    const msg = root.querySelector(".msg");
-    if (msg) msg.textContent = text;
+  const desktop = () => desktopMq.matches;
+  const q = <T extends Element = HTMLElement>(sel: string) => root.querySelector<T>(sel);
+  const status = (nodes: string | Node[]) => {
+    const msg = q(".msg");
+    if (msg) msg.replaceChildren(...(typeof nodes === "string" ? [nodes] : nodes));
   };
+  const body = document.body.classList;
 
   async function loadNext(): Promise<void> {
     const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next`);
     progress = res.progress;
     prefetch(res.prefetch);
     current = res.proposal;
-    if (current) render(false);
+    revisiting = false;
+    failure = null;
+    if (current) render();
     else renderDone();
   }
 
   async function open(id: number): Promise<void> {
     const res = await get<{ proposal: ProposalView }>(`/api/proposals/${id}`);
     current = res.proposal;
-    render(true);
+    revisiting = true;
+    failure = null;
+    render();
+  }
+
+  /** Errors outside a save (loading a line): the whole screen says so, with a way to try again. */
+  function failScreen(err: unknown): void {
+    if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
+    const kind = failureKind(err, navigator.onLine);
+    const [title, text] =
+      kind === "offline" ? (["e_off_h", "e_off_p"] as const) : kind === "rate_limited" ? (["e_rate_h", "e_rate_p"] as const) : kind === "daily_limit" ? (["e_quota_h", "e_quota_p"] as const) : (["e_srv_h", "e_srv_hint"] as const);
+    mount(
+      root,
+      h(
+        "section",
+        { class: "state", role: "alert" },
+        h("span", { class: "mark" }, icon(kind === "offline" ? "offline" : kind === "rate_limited" ? "clock" : "warning")),
+        h("h1", {}, t(title)),
+        h("p", { class: "muted" }, t(text)),
+        h("div", { class: "stack" }, h("button", { type: "button", class: "act primary", onclick: () => void loadNext().catch(failScreen) }, t("retry"))),
+      ),
+    );
+    console.warn(err);
+  }
+
+  /** Post one decision; the terms may need accepting first. */
+  async function send(id: number, value: string, text?: string): Promise<void> {
+    const payload = text === undefined ? { value } : { value, text };
+    try {
+      await post(`/api/proposals/${id}/decision`, payload);
+    } catch (err) {
+      if (!(err instanceof ApiFailure && err.code === "terms_required")) throw err;
+      await hooks.needTerms();
+      await post(`/api/proposals/${id}/decision`, payload);
+    }
   }
 
   async function act(value: string, text?: string): Promise<void> {
     if (!current || busy) return;
-    if ((value === "exact" || value === "pointed_print" || value === "typed") && !ready) return status("התמונה עוד נטענת. / The image is still loading.");
-    if (value === "exact" && view()?.precheck && !sawPage) {
-      return status("הבדיקה המוקדמת סימנה את השורה: פתחו קודם את העמוד המלא (P). / The pre-check flagged this line: open the full page first (P).");
-    }
+    const v = view();
+    if ((value === "exact" || value === "pointed_print" || value === "typed") && !ready) return status(t("img_loading"));
+    if (value === "exact" && v && exactNeedsPage(Boolean(v.precheck), pageOpened, desktop())) return status(t("flag_phone"));
     busy = true;
     const id = current.id;
+    setSaving(value);
     try {
-      const body = text === undefined ? { value } : { value, text };
-      try {
-        await post(`/api/proposals/${id}/decision`, body);
-      } catch (err) {
-        if (!(err instanceof ApiFailure && err.code === "terms_required")) throw err;
-        await hooks.needTerms();
-        await post(`/api/proposals/${id}/decision`, body);
-      }
+      await send(id, value, text);
+      dropPending(id);
+      clearDraft(id);
       if (history[history.length - 1] !== id) history.push(id);
+      saveState = "saved";
       await loadNext();
     } catch (err) {
-      fail(err);
+      if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
+      const kind = failureKind(err, navigator.onLine);
+      const kept = keepable(kind) && keepPending({ proposalId: id, batchId: batch.id, value, ...(text === undefined ? {} : { text }), keptAt: new Date().toISOString() });
+      failure = { kind, kept, value, ...(text === undefined ? {} : { text }), ...(err instanceof ApiFailure && err.message ? { reason: err.message } : {}) };
+      saveState = "failed";
+      render();
+      console.warn(err);
     } finally {
       busy = false;
+    }
+  }
+
+  /** Resend the decisions kept on this device (a failed save, or one from before a reload), oldest first, once. */
+  async function resendKept(): Promise<void> {
+    if (busy) return;
+    const kept = pendingFor(batch.id);
+    if (!kept.length) return;
+    busy = true;
+    let currentSent = false;
+    try {
+      for (const p of kept) {
+        try {
+          await send(p.proposalId, p.value, p.text);
+          dropPending(p.proposalId);
+          clearDraft(p.proposalId);
+          if (current?.id === p.proposalId) currentSent = true;
+        } catch (err) {
+          if (!keepable(failureKind(err, navigator.onLine))) dropPending(p.proposalId); // the server refused it: drop it
+          else break; // still failing: try again on the next chance
+        }
+      }
+    } finally {
+      busy = false;
+    }
+    if (currentSent) {
+      saveState = "saved";
+      await loadNext().catch(failScreen);
+    } else if (!pendingFor(batch.id).length && failure) {
+      failure = null;
+      saveState = "saved";
+      render();
     }
   }
 
   async function doSkip(): Promise<void> {
     if (!current || busy) return;
     busy = true;
+    setSaving("skip");
     try {
       await post(`/api/proposals/${current.id}/skip`);
       history.push(current.id);
       await loadNext();
     } catch (err) {
-      fail(err);
+      busy = false;
+      if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
+      render();
+      status(t("e_srv_h"));
+      console.warn(err);
     } finally {
       busy = false;
     }
@@ -194,11 +309,208 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   /** Back to the previous line, where any new decision replaces the one made there (the undo). */
   function back(): void {
     const id = history.pop();
-    if (id !== undefined) open(id).catch(fail);
+    if (id !== undefined) open(id).catch(failScreen);
+  }
+
+  /** The pressed answer says "Saving…"; every answer is disabled, so a second tap can't send a second decision. */
+  function setSaving(value: string): void {
+    saveState = "saving";
+    for (const b of root.querySelectorAll<HTMLButtonElement>(".dock .act, .savebar .act")) {
+      b.disabled = true;
+      if (b.dataset.value === value) {
+        b.dataset.busy = "";
+        const span = b.querySelector("span");
+        if (span) span.firstChild!.textContent = t("saving");
+      }
+    }
+    renderSaveState();
+  }
+
+  function renderSaveState(): void {
+    const el = q(".savestate");
+    if (!el) return;
+    el.dataset.state = saveState ?? "";
+    el.replaceChildren(
+      ...(saveState === "saved" ? [icon("exact", { sm: true }), t("saved")] : saveState === "saving" ? [t("saving")] : saveState === "failed" ? [icon("warning", { sm: true }), t("failed")] : []),
+    );
+  }
+
+  // ---------- the more sheet (phone) ----------
+  function setMore(open: boolean): void {
+    q(".moregroup")?.classList.toggle("open", open);
+    q(".scrim")?.classList.toggle("open", open);
+    q(".more-btn")?.setAttribute("aria-expanded", String(open));
+    if (open) q<HTMLButtonElement>(".moregroup .act")?.focus();
+  }
+  const moreOpen = () => Boolean(q(".moregroup.open"));
+
+  // ---------- the page ----------
+  function pageAside(v: LineVerifyView): HTMLElement {
+    const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle;
+    const scroller = h("div", { class: "scroller", tabindex: "0", "aria-label": t("pg") });
+    if (v.page) {
+      const box = v.page.box;
+      scroller.append(
+        h(
+          "div",
+          { class: "frame" },
+          h("img", { src: v.page.url, width: v.page.width, height: v.page.height, alt: `${t("pg")} · ${where}`, decoding: "async", draggable: "false" }),
+          box ? h("div", { class: "hl", style: `left:${box[0] * 100}%;top:${box[1] * 100}%;width:${(box[2] - box[0]) * 100}%;height:${(box[3] - box[1]) * 100}%` }) : null,
+        ),
+      );
+    } else scroller.append(h("p", { class: "muted src" }, t("no_image")));
+    return h(
+      "aside",
+      { class: "side", "aria-label": t("pg") },
+      h(
+        "h2",
+        {},
+        h("span", {}, `${t("pg")} · `, h("bdi", {}, where)),
+        h("button", { type: "button", class: "act quiet desktop-only", onclick: toggleEnlarged, disabled: !v.page }, t("enlarge"), " ", h("kbd", {}, "P")),
+      ),
+      scroller,
+      h("p", { class: "src" }, h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)),
+      h(
+        "div",
+        { class: "backbar" },
+        h("button", { type: "button", class: "act primary", onclick: () => setPageOpen(false) }, icon("back"), t("back_line")),
+        h("button", { type: "button", class: "act", "aria-label": t("zoom_out"), onclick: () => zoomPage(-1) }, icon("zoom-out")),
+        h("button", { type: "button", class: "act", "aria-label": t("zoom_in"), onclick: () => zoomPage(1) }, icon("zoom-in")),
+      ),
+    );
+  }
+
+  function layoutPage(): void {
+    const frame = q(".side .frame");
+    if (frame) frame.style.width = `${100 * PAGE_ZOOMS[pageZoom]!}%`;
+    // Bring the line's box into view on the page.
+    requestAnimationFrame(() => q(".side .hl")?.scrollIntoView({ block: "center", inline: "center" }));
+  }
+
+  function zoomPage(step: number): void {
+    pageZoom = Math.max(0, Math.min(PAGE_ZOOMS.length - 1, pageZoom + step));
+    layoutPage();
+  }
+
+  /** Phone: the page full screen; opening it is what a flagged line asks for before "Exact". */
+  function setPageOpen(open: boolean): void {
+    if (!view()?.page) return;
+    q(".side")?.classList.toggle("open", open);
+    if (open) {
+      pageOpened = true;
+      pageZoom = 0;
+      layoutPage();
+      updateFlag();
+      q<HTMLButtonElement>(".side .backbar .act")?.focus();
+    } else q<HTMLButtonElement>(".ctxbox .open")?.focus();
+  }
+
+  /** Desktop: P enlarges the page over the task, and P or Esc puts it back. */
+  function toggleEnlarged(): void {
+    if (!view()?.page) return;
+    const side = q(".side");
+    side?.classList.toggle("enlarged");
+    layoutPage();
+  }
+
+  /** A flagged line: on a phone, "Exact" waits until the page has been opened (SPEC §4.1, §14.3). */
+  function updateFlag(): void {
+    const v = view();
+    const exact = q<HTMLButtonElement>('.dock .act[data-value="exact"]');
+    const needs = Boolean(v) && exactNeedsPage(Boolean(v!.precheck), pageOpened, desktop());
+    if (exact) {
+      if (needs) {
+        exact.dataset.needsPage = "";
+        exact.setAttribute("aria-describedby", "lv-flag");
+      } else {
+        delete exact.dataset.needsPage;
+        exact.removeAttribute("aria-describedby");
+      }
+    }
+    q(".ctxbox")?.classList.toggle("ask-open", needs);
+  }
+
+  // ---------- the crop and the candidate ----------
+  function renderStrip(): void {
+    const v = view();
+    const holder = q(".linebox .strip");
+    if (!v || !holder) return;
+    if (!v.crop || !v.crop.box) {
+      ready = true;
+      holder.replaceChildren(h("p", { class: "muted" }, t("no_image")));
+      return;
+    }
+    const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
+    // A phone shows two pieces (or one, "Fit width"); a desktop one strip when it fits, else two.
+    const pieces = !desktop() && fitWidth ? 1 : 2;
+    const strip = lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true), pieces, t("line_on_scan"));
+    holder.replaceChildren(strip);
+    fitCandidate(strip.children.length);
   }
 
   /**
-   * The edit box. `misaligned` (a v1.2 verify line whose candidate is not this line): a blank box; the decision is
+   * SPEC §14.7: pick the candidate's size (19–25 px on a phone, 22–31 on a desktop) so it breaks into as many lines as
+   * the crop has pieces, when it can: the largest size that does, else the smallest.
+   */
+  function fitCandidate(pieces: number): void {
+    const el = q(".txt.cand");
+    if (!el || !el.textContent) return;
+    const [lo, hi] = desktop() ? [22, 31] : [19, 25];
+    const lines = (px: number) => {
+      el.style.fontSize = `${px}px`;
+      const cs = getComputedStyle(el);
+      const lh = parseFloat(cs.lineHeight) || px * 1.65;
+      const content = el.scrollHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      return Math.round(content / lh);
+    };
+    el.style.minHeight = "0";
+    let size = lo;
+    for (let px = hi; px >= lo; px--) {
+      if (lines(px) <= pieces) {
+        size = px;
+        break;
+      }
+    }
+    el.style.fontSize = `${size}px`;
+    el.style.minHeight = "";
+  }
+
+  function setZoom(step: number): void {
+    zoom = Math.max(0, Math.min(LINE_HEIGHTS.length - 1, zoom + step));
+    renderStrip();
+  }
+
+  function setFit(fit: boolean): void {
+    fitWidth = fit;
+    for (const b of root.querySelectorAll<HTMLButtonElement>(".cropbar button")) b.setAttribute("aria-pressed", String((b.dataset.mode === "fit") === fit));
+    renderStrip();
+  }
+
+  // ---------- editing ----------
+  function closeEditor(): void {
+    editing = null;
+    body.remove("editing");
+    const box = q(".editbox");
+    if (box) {
+      box.replaceChildren();
+      box.hidden = true;
+    }
+  }
+
+  /** "You changed": the removed text struck through, the inserted text underlined, in one line (SPEC §4.2). */
+  function changesLine(from: string, to: string): (Node | string)[] {
+    const segs = diffText(from, to).filter((s) => s.op !== "equal");
+    if (!segs.length) return [];
+    const parts: (Node | string)[] = [];
+    for (const s of segs) {
+      if (parts.length) parts.push(" ");
+      parts.push(s.op === "delete" ? h("del", {}, s.text) : h("ins", {}, s.text));
+    }
+    return [`${t("changed")} `, h("bdi", { dir: "rtl" }, ...parts)];
+  }
+
+  /**
+   * The edit box. `asMisaligned` (a v1.2 verify line whose candidate is not this line): a blank box; the decision is
    * misaligned with the line as typed (heocr-eval: every line needs a text, and the count measures the aligner).
    */
   function startEdit(asMisaligned = false): void {
@@ -206,62 +518,51 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (editing) return editing.focus();
     if (!v || !current) return;
     const typing = v.mode === "type";
-    if (asMisaligned) return startMisaligned();
     if (typing && current.mine && v.pass === 2) return; // a blind pass is final
-    const box = root.querySelector(".editbox") as HTMLElement;
+    const p = current;
+    const box = q(".editbox")!;
     const area = h("textarea", {
       dir: "rtl",
       lang: "he",
-      rows: 2,
+      rows: 3,
       spellcheck: "false",
       autocomplete: "off",
       autocapitalize: "off",
       maxlength: 1000,
-      "aria-label": "השורה המתוקנת / the corrected line",
+      "aria-label": asMisaligned || typing ? t("mis_title") : t("edit_title"),
+      ...(typing ? { placeholder: t("type_ph") } : {}),
     });
-    const mineText = (current.mine?.value === "edited" || current.mine?.value === "pointed_print" || current.mine?.value === "typed") && current.mine.text !== null ? current.mine.text : null;
-    area.value = mineText ?? v.candidate; // "" on a blind pass: nothing to start from
-    // The print is pointed and the candidate is not: correct the letters only; the decision is pointed_print.
+    const mineText = p.mine && ["edited", "pointed_print", "typed", "misaligned"].includes(p.mine.value) && p.mine.text !== null ? p.mine.text : null;
+    const start = asMisaligned ? (p.mine?.value === "misaligned" ? (mineText ?? "") : "") : (mineText ?? v.candidate); // "" on a blind pass
+    area.value = readDraft(p.id) ?? start;
     const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
-    pointed.checked = current.mine?.value === "pointed_print";
-    const pointedRow = h(
-      "label",
-      { class: "row check", for: "lv-pointed" },
-      pointed,
-      typing
-        ? " בדפוס יש ניקוד: הקלידו את האותיות בלבד, בלי ניקוד / Print has niqqud: type the letters only, without niqqud"
-        : " בדפוס יש ניקוד: תקנו את האותיות בלבד, בלי ניקוד / Print has niqqud: fix the letters only, without niqqud",
-    );
-    const preview = h("div", { class: "preview texts" });
+    pointed.checked = p.mine?.value === "pointed_print";
+    const changes = h("p", { class: "changes", role: "status" });
+    const preview = h("div", { class: "preview desktop-only" });
     const update = () => {
       // A line is one line: a pasted line break becomes a space.
       if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
-      if (typing) return; // nothing to compare with: the candidate is never sent
-      const cmp = compare(v.candidate, area.value, "", "");
-      preview.replaceChildren(
-        h("div", { class: "row" }, h("span", { class: "lab" }, "מקור:"), cmp.current),
-        h("div", { class: "row" }, h("span", { class: "lab" }, "שלך:"), cmp.proposed),
-        h("div", { class: "row" }, h("span", { class: "lab" }, ""), cmp.codes),
-      );
+      writeDraft(p.id, area.value);
+      if (typing || asMisaligned) return; // nothing to compare with: the candidate is never sent on a blind pass
+      changes.replaceChildren(...changesLine(v.candidate, area.value));
+      preview.replaceChildren(compare(v.candidate, area.value, "", "").codes);
     };
     const save = () => {
       const text = area.value;
-      if (pointed.checked && hasNiqqud(text)) {
-        status("עם \"בדפוס יש ניקוד\" מקלידים אותיות בלבד, בלי ניקוד. / With \"print has niqqud\", type letters only, without niqqud.");
-        return;
+      if (asMisaligned) {
+        if (!text.trim()) return status(t("type_line"));
+        if (hasNiqqud(text)) return status(t("type_letters"));
+        return void act("misaligned", text);
       }
-      if (typing && hasNiqqud(text)) {
-        status("מקלידים אותיות בלבד. אם בדפוס יש ניקוד, סמנו זאת. / Type letters only. If the print has niqqud, tick the box.");
-        return;
-      }
-      if (typing && !text.trim()) return status("הקלידו את השורה. / Type the line.");
-      cancel();
+      if (pointed.checked && hasNiqqud(text)) return status(t("nq_letters"));
+      if (typing && hasNiqqud(text)) return status(t("type_letters"));
+      if (typing && !text.trim()) return status(t("type_line"));
       void act(typing ? (pointed.checked ? "pointed_print" : "typed") : pointed.checked ? "pointed_print" : "edited", text);
     };
     const cancel = () => {
-      editing = null;
-      box.replaceChildren();
-      box.hidden = true;
+      clearDraft(p.id);
+      closeEditor();
+      q<HTMLButtonElement>(".dock .act")?.focus();
     };
     area.addEventListener("input", update);
     area.addEventListener("keydown", (e) => {
@@ -277,319 +578,271 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         else cancel();
       }
     });
+    const saveLabel = asMisaligned ? t("mis_save") : typing ? (v.pass === 2 ? t("type_save_final") : t("type_save")) : t("save");
     box.replaceChildren(
+      ...(asMisaligned ? [h("p", { class: "muted small" }, t("mis_hint"))] : []),
       area,
-      pointedRow,
-      preview,
+      ...(typing || asMisaligned ? [] : [changes]),
       h(
         "div",
-        { class: "row" },
-        h("button", { type: "button", class: "primary", onclick: save }, typing && v.pass === 2 ? "שמירה (סופית) / Save (final) " : typing ? "שמירה / Save " : "שמירת התיקון / Save ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
-        typing ? null : h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
+        { class: "edittools" },
+        typing || asMisaligned ? null : h("button", { type: "button", class: "act quiet", onclick: () => ((area.value = v.candidate), update(), area.focus()) }, icon("reset", { sm: true }), t("reset")),
+        asMisaligned ? null : h("label", { class: "check", for: "lv-pointed" }, pointed, t("nq")),
+      ),
+      ...(typing || asMisaligned ? [] : [preview]),
+      h(
+        "div",
+        { class: "savebar" },
+        h("button", { type: "button", class: "act primary", "data-value": asMisaligned ? "misaligned" : "edited", onclick: save }, h("span", {}, saveLabel), " ", h("kbd", {}, "Ctrl+Enter")),
+        typing ? null : h("button", { type: "button", class: "act", onclick: cancel }, t("cancel"), " ", h("kbd", {}, "Esc")),
       ),
     );
     box.hidden = false;
+    body.add("editing");
     editing = area;
     update();
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
   }
 
-  function startMisaligned(): void {
-    const box = root.querySelector(".editbox") as HTMLElement;
-    const area = h("textarea", { dir: "rtl", lang: "he", rows: 2, spellcheck: "false", autocomplete: "off", autocapitalize: "off", maxlength: 1000, "aria-label": "השורה כפי שהיא בסריקה / the line as the scan shows it" });
-    area.value = current?.mine?.value === "misaligned" && current.mine.text ? current.mine.text : "";
-    const cancel = () => {
-      editing = null;
-      box.replaceChildren();
-      box.hidden = true;
-    };
-    const save = () => {
-      const text = area.value;
-      if (!text.trim()) return status("הקלידו את השורה. / Type the line.");
-      if (hasNiqqud(text)) return status("מקלידים אותיות בלבד, בלי ניקוד. / Type letters only, without niqqud.");
-      cancel();
-      void act("misaligned", text);
-    };
-    area.addEventListener("input", () => {
-      if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
-    });
-    area.addEventListener("keydown", (e) => {
-      if (e.isComposing) return;
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        save();
-      } else if (e.key === "Enter") e.preventDefault();
-      else if (e.key === "Escape") {
-        e.preventDefault();
-        cancel();
-      }
-    });
-    box.replaceChildren(
-      h("p", { class: "muted small" }, "הטקסט המוצע אינו השורה הזאת: הקלידו את השורה כפי שהיא בסריקה, אותיות בלבד. / The candidate is not this line: type the line as the scan shows it, letters only."),
-      area,
-      h(
-        "div",
-        { class: "row" },
-        h("button", { type: "button", class: "primary", onclick: save }, "שמירה: לא תואם / Save as misaligned ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
-        h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
-      ),
-    );
-    box.hidden = false;
-    editing = area;
-    area.focus();
-  }
-
   /** Misaligned: with a typed text where the line needs one (v1.2 verify lines), else a verdict alone. */
   function misaligned(): void {
+    setMore(false);
     if (current?.options.find((o) => o.value === "misaligned")?.withText) startEdit(true);
     else void act("misaligned");
   }
 
-  /**
-   * A line typed from a blank box: a typed line (no candidate) or any line's blind second pass. The line, its context,
-   * the box, and the answers that are not text (unreadable, and a typed line's box problems or a pass-2 misaligned).
-   */
-  function renderTyping(p: ProposalView, v: LineVerifyView, mine: DecisionOption | undefined): void {
-    const final = v.pass === 2;
-    const btn = (value: string, key: string, cls: string) => {
-      const o = p.options.find((x) => x.value === value);
-      return h("button", { type: "button", class: `act ${cls}`, onclick: () => void act(value), "data-value": value, title: o?.label.en ?? value }, h("span", {}, o?.label.he ?? value), h("kbd", { dir: "ltr" }, key));
-    };
-    mount(
-      root,
-      progressBar(progress),
-      h(
-        "article",
-        { class: "card proposal" },
-        h(
-          "header",
-          { class: "meta" },
-          final ? h("span", { class: "tag", title: "Blind second pass" }, "מעבר שני (עיוור)") : h("span", { class: "tag", title: "Typing" }, "הקלדה"),
-          v.script ? h("span", { class: `tag script-${v.script.id}`, title: v.script.label.en }, v.script.label.he) : null,
-          h("span", { class: "muted small title", dir: "auto" }, `${p.itemTitle} · שורה ${v.lineIndex}`),
-        ),
+  // ---------- the screen ----------
+  function moreButton(value: string, text: string, sub: string | null, ic: IconName | null, key: string, onclick: () => void): HTMLElement {
+    return h(
+      "button",
+      { type: "button", class: "act", "data-value": value, onclick },
+      ic ? icon(ic) : null,
+      h("span", {}, text, sub ? h("span", { class: "sub" }, sub) : null),
+      key ? h("kbd", {}, key) : null,
+    );
+  }
+
+  function slotNodes(p: ProposalView, v: LineVerifyView, mine: DecisionOption | undefined): Node[] {
+    const out: Node[] = [];
+    if (v.precheck) {
+      const reasons = v.precheck.reasons.map((r) => r.label[lang()]).join(", ");
+      out.push(
         h(
           "p",
-          { class: "ask" },
-          `הקלידו את השורה המסומנת כפי שהיא בסריקה, אות באות${final ? ". הטקסט נשמר סופית." : ", גם כותרת, מספר עמוד או מילת קישור."}`,
+          { class: "precheck", id: "lv-flag" },
+          icon("flag"),
+          h("span", {}, ...tRich("flag", { reasons }), h("span", { class: "block phone-only muted" }, t("flag_phone"))),
+        ),
+      );
+    }
+    if (failure) {
+      const rich = failure.kind === "offline" ? tRich("fail_note") : failure.kind === "rate_limited" ? tRich("fail_rate") : failure.kind === "daily_limit" ? tRich("fail_quota") : failure.kind === "server" ? tRich("fail_srv") : tRich("fail_rejected", { reason: failure.reason ?? t("e_srv_h") });
+      out.push(
+        h(
+          "div",
+          { class: "notice failed", role: "alert" },
+          icon(failure.kind === "offline" ? "offline" : "warning"),
           h(
-            "span",
-            { class: "muted small block", lang: "en", dir: "ltr" },
-            final ? "Type the marked line as the scan shows it, letter by letter. Saving is final." : "Type the marked line as the scan shows it, letter by letter: running heads, page numbers and catchwords too.",
+            "div",
+            {},
+            ...rich,
+            !failure.kept && keepable(failure.kind) ? ` ${t("fail_unkept")}` : "",
+            keepable(failure.kind)
+              ? h(
+                  "div",
+                  { class: "row" },
+                  h("button", { type: "button", class: "act", onclick: () => (failure!.kept ? void resendKept() : void act(failure!.value, failure!.text)) }, icon("reset", { sm: true }), t("retry")),
+                  failure.kept ? h("span", { class: "tag" }, t("keep")) : null,
+                )
+              : null,
           ),
         ),
-        h("div", { class: "linebox" }),
-        mine ? h("p", { class: "mine" }, `ההחלטה שלך${final ? " (סופית)" : ""}: ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "", final ? "" : " · החלטה חדשה תחליף אותה.") : null,
-        h("div", { class: "editbox", hidden: true }),
-        h("p", { class: "msg", role: "status" }),
-        h("div", { class: "ctxbox" }),
+      );
+    }
+    if (revisiting && mine) {
+      const final = v.mode === "type" && v.pass === 2;
+      out.push(h("p", { class: "mine" }, t(final ? "mine_final" : "mine", { v: mine.label[lang()] }), p.mine?.text ? ` («${p.mine.text}»)` : "", final ? "" : ` · ${t("mine_replace")}`));
+    }
+    if (keysOpen) {
+      out.push(
         h(
-          "p",
-          { class: "attrib muted small" },
-          h("span", { class: "block" }, "מקור / Source: ", h("bdi", { dir: "auto" }, `${v.bookTitle}${v.pageLabel ? `, עמ' ${v.pageLabel}` : ""}`)),
+          "div",
+          { class: "notice keys-panel", role: "dialog", "aria-label": t("keys_h") },
+          icon("conventions"),
+          h("div", {}, h("strong", {}, t("keys_h")), h("dl", {}, ...KEY_LIST.flatMap(([k, s]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, t(s))]))),
         ),
-      ),
-      h(
-        "nav",
-        { class: "actions six" },
-        ...p.options.filter((o) => !o.withText).map((o) => btn(o.value, TYPING_KEYS[o.value]?.[0] ?? "", "bad")),
-        h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
-      ),
+      );
+    }
+    out.push(h("p", { class: "msg", role: "status" }));
+    return out;
+  }
+
+  function render(): void {
+    const p = current!;
+    const v = view();
+    if (!v) throw new Error(`lineVerifyView cannot show ${p.view.kind}`);
+    closeEditor();
+    ready = false;
+    pageOpened = false;
+    pageZoom = 0;
+    keysOpen = false;
+    const typing = v.mode === "type";
+    body.toggle("typing", typing);
+    const option = (value: string) => p.options.find((o) => o.value === value);
+    const mine = p.mine ? option(p.mine.value) : undefined;
+    hooks.where?.(t("where", { line: v.lineIndex, page: v.pageLabel || "–" }));
+    const pct = progress.ownOnly || !progress.total ? 0 : Math.round((progress.covered / progress.total) * 100);
+
+    const answers = typing
+      ? []
+      : [
+          h("button", { type: "button", class: "act primary", "data-value": "exact", onclick: () => void act("exact") }, h("span", {}, t("exact")), h("kbd", {}, "Enter")),
+          h("button", { type: "button", class: "act", "data-value": "edited", onclick: () => startEdit() }, h("span", {}, t("fix")), h("kbd", {}, "E")),
+        ];
+    const rare = typing
+      ? [
+          ...p.options.filter((o) => !o.withText).map((o) => moreButton(o.value, o.label[lang()], null, o.value === "unreadable" ? "unreadable" : o.value === "misaligned" ? "misaligned" : null, TYPING_KEYS[o.value]?.[0] ?? "", () => (setMore(false), void act(o.value)))),
+          moreButton("skip", t("skip"), t("skip_sub"), "skip", "S", () => (setMore(false), void doSkip())),
+        ]
+      : [
+          ...MORE.filter(([value]) => option(value)).map(([value, text, sub, ic, key]) =>
+            moreButton(value, t(text), t(sub), ic, key, () => (setMore(false), value === "misaligned" ? misaligned() : void act(value))),
+          ),
+          moreButton("skip", t("skip"), t("skip_sub"), "skip", "S", () => (setMore(false), void doSkip())),
+        ];
+
+    const work = h(
+      "div",
+      { class: "review lineverify" },
+      h("p", { class: "ask" }, typing ? [t("type_ask"), " ", v.pass === 2 ? t("type_ask_final") : t("type_ask_more")] : t("ask")),
       h(
         "div",
-        { class: "subnav" },
-        h("button", { type: "button", class: "small", onclick: back, disabled: history.length === 0 }, "→ הקודם ", h("kbd", { dir: "ltr" }, "B")),
-        h("button", { type: "button", class: "small", onclick: () => setZoom(-1), "aria-label": "הקטנה / zoom out" }, "−"),
-        h("button", { type: "button", class: "small", onclick: () => setZoom(1), "aria-label": "הגדלה / zoom in" }, "+"),
-        current && p.mine ? h("button", { type: "button", class: "small", onclick: () => void loadNext().catch(fail) }, "לתור ←") : null,
+        { class: "linebox" },
+        h("div", { class: "strip" }),
+        h(
+          "div",
+          { class: "cropbar" },
+          h("button", { type: "button", "data-mode": "pieces", "aria-pressed": String(!fitWidth), onclick: () => setFit(false) }, icon("pieces", { sm: true }), t("pieces")),
+          h("button", { type: "button", "data-mode": "fit", "aria-pressed": String(fitWidth), onclick: () => setFit(true) }, icon("fit", { sm: true }), t("fit")),
+        ),
       ),
+      typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes(v.runs, v.precheck ? "precheck" : "ocr")),
+      h("div", { class: "slot" }, ...slotNodes(p, v, mine)),
+      h("div", { class: "editbox", hidden: true }),
+      contextBand(v),
+      h(
+        "footer",
+        { class: "dock" },
+        h("nav", { class: "actions" }, ...answers, h("div", { class: "moregroup", role: "group", "aria-label": t("more") }, ...rare)),
+        h(
+          "div",
+          { class: "subnav" },
+          h("button", { type: "button", class: "act quiet", onclick: back, disabled: history.length === 0 }, icon("previous", { sm: true }), t("prev"), " ", h("kbd", {}, "B")),
+          h("button", { type: "button", class: "act quiet zoom", "aria-label": t("zoom_out"), onclick: () => setZoom(-1) }, icon("zoom-out", { sm: true }), h("kbd", {}, "−")),
+          h("button", { type: "button", class: "act quiet zoom", "aria-label": t("zoom_in"), onclick: () => setZoom(1) }, icon("zoom-in", { sm: true }), h("kbd", {}, "+")),
+          revisiting ? h("button", { type: "button", class: "act quiet", onclick: () => void loadNext().catch(failScreen) }, t("to_queue")) : null,
+          h("span", { class: "savestate", role: "status" }),
+          h("button", { type: "button", class: "act quiet more-btn", "aria-haspopup": "true", "aria-expanded": "false", onclick: () => setMore(!moreOpen()) }, icon("more", { sm: true }), t("more")),
+        ),
+      ),
+      h("div", { class: "scrim", onclick: () => setMore(false) }),
     );
+    mount(
+      root,
+      h("div", { class: "progress", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("div", { class: "bar", style: `width:${pct}%` })),
+      h("div", { class: "deck" }, work, pageAside(v)),
+    );
+    renderSaveState();
+    updateFlag();
     renderStrip();
-    renderContext();
-    if (!mine || !final) startEdit();
+    layoutPage();
+    if (typing && (!mine || v.pass !== 2)) startEdit();
+    else (q<HTMLButtonElement>(".dock .act.primary") ?? q<HTMLButtonElement>(".dock .act"))?.focus({ preventScroll: true });
   }
 
-  function renderStrip(): void {
-    const v = view();
-    const holder = root.querySelector(".linebox") as HTMLElement | null;
-    if (!v || !holder) return;
-    if (!v.crop || !v.crop.box) {
-      ready = true;
-      holder.replaceChildren(h("p", { class: "muted" }, "אין תמונה לשורה הזאת. / No image for this line."));
-      return;
-    }
-    const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
-    holder.replaceChildren(lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true)));
-  }
-
-  function renderContext(): void {
-    const v = view();
-    const holder = root.querySelector(".ctxbox") as HTMLElement | null;
-    if (!v || !holder) return;
-    const toggle = h(
-      "button",
-      { type: "button", class: "small", onclick: togglePage, disabled: !v.page },
-      showPage ? "חזרה להקשר / Back to context " : "העמוד המלא / Full page ",
-      h("kbd", { dir: "ltr" }, "P"),
-    );
-    if (showPage && v.page) {
-      holder.replaceChildren(viewer(null, v.page).el, h("div", { class: "row" }, toggle));
-      return;
-    }
+  /** The line among its neighbours, with the line in the brand box; on a phone the band opens the page. */
+  function contextBand(v: LineVerifyView): HTMLElement {
     const c = v.crop;
     const band = c
       ? h(
           "div",
-          { class: "frame ctxband" },
-          h("img", { src: c.url, width: c.width, height: c.height, alt: "השורה עם השורות שלפניה ואחריה / the line with its neighbours", decoding: "async", draggable: "false" }),
-          c.box
-            ? h("div", {
-                class: "hl",
-                style: `left:${c.box[0] * 100}%;top:${c.box[1] * 100}%;width:${(c.box[2] - c.box[0]) * 100}%;height:${(c.box[3] - c.box[1]) * 100}%`,
-              })
-            : null,
+          { class: "frame" },
+          h("img", { src: c.url, width: c.width, height: c.height, alt: t("line_ctx"), decoding: "async", draggable: "false" }),
+          c.box ? h("div", { class: "hl", style: `left:${c.box[0] * 100}%;top:${c.box[1] * 100}%;width:${(c.box[2] - c.box[0]) * 100}%;height:${(c.box[3] - c.box[1]) * 100}%` }) : null,
         )
       : null;
-    if (band && c) band.style.width = `min(100%, ${Math.round((150 * c.width) / Math.max(1, c.height))}px)`;
-    holder.replaceChildren(h("div", { class: "ctxscroll", dir: "ltr" }, band), h("div", { class: "row" }, toggle));
-  }
-
-  function togglePage(): void {
-    if (!view()?.page) return;
-    showPage = !showPage;
-    if (showPage) sawPage = true;
-    renderContext();
-  }
-
-  function setZoom(step: number): void {
-    zoom = Math.max(0, Math.min(LINE_HEIGHTS.length - 1, zoom + step));
-    renderStrip();
-  }
-
-  function render(revisiting: boolean): void {
-    const p = current!;
-    const v = view();
-    if (!v) throw new Error(`lineVerifyView cannot show ${p.view.kind}`);
-    editing = null;
-    ready = false;
-    showPage = false;
-    sawPage = false;
-    const option = (value: string) => p.options.find((o) => o.value === value);
-    const btn = (value: string, key: string, cls: string, onclick: () => void) => {
-      const o = option(value);
-      return h(
-        "button",
-        { type: "button", class: `act ${cls}`, onclick, "data-value": value, title: o?.label.en ?? value },
-        h("span", {}, o?.label.he ?? value),
-        h("kbd", { dir: "ltr" }, key),
-      );
-    };
-    const mine = p.mine ? option(p.mine.value) : undefined;
-    if (v.mode === "type") return renderTyping(p, v, mine);
-    mount(
-      root,
-      progressBar(progress),
-      h(
-        "article",
-        { class: "card proposal" },
-        h(
-          "header",
-          { class: "meta" },
-          h("span", { class: "tag", title: v.source.label.en }, v.source.label.he),
-          h("span", { class: "tag", title: v.provenance.label.en }, v.provenance.label.he),
-          v.script ? h("span", { class: `tag script-${v.script.id}`, title: v.script.label.en }, v.script.label.he) : null,
-          h("span", { class: "muted small title", dir: "auto" }, `${p.itemTitle} · שורה ${v.lineIndex}`),
-        ),
-        h(
-          "p",
-          { class: "ask" },
-          "האם הטקסט זהה בדיוק לשורה המסומנת, אות באות וסימן בסימן?",
-          h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Is the text exactly the marked line, letter by letter and mark by mark?"),
-        ),
-        h("div", { class: "linebox" }),
-        h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes(v.runs, v.precheck ? "precheck" : "ocr")),
-        v.precheck
-          ? h(
-              "p",
-              { class: "precheck" },
-              `בדיקה מוקדמת: ייתכן שהטקסט שגוי (${v.precheck.reasons.map((r) => r.label.he).join(", ")}). בדקו מול העמוד המלא לפני "מדויק".`,
-              h(
-                "span",
-                { class: "muted small block", lang: "en", dir: "ltr" },
-                `Pre-check: the text may be wrong (${v.precheck.reasons.map((r) => r.label.en).join(", ")}). Check it against the full page before "Exact".`,
-              ),
-            )
-          : null,
-        v.runs.some((r) => r.attention) && !v.precheck
-          ? h("p", { class: "legend muted small" }, h("mark", { class: "attn" }, "מסומן"), " = כאן מנועי ה-OCR קראו אחרת; בדקו היטב. / OCR engines disagree here; look closely.")
-          : null,
-        revisiting && mine ? h("p", { class: "mine" }, `ההחלטה שלך: ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "", " · החלטה חדשה תחליף אותה.") : null,
-        h("div", { class: "editbox", hidden: true }),
-        h("p", { class: "msg", role: "status" }),
-        h("div", { class: "ctxbox" }),
-        h(
-          "p",
-          { class: "attrib muted small" },
-          h("span", { class: "block" }, "מקור / Source: ", h("bdi", { dir: "auto" }, `${v.bookTitle}${v.pageLabel ? `, עמ' ${v.pageLabel}` : ""}`)),
-          h("bdi", { class: "block", dir: "auto" }, v.attribution),
-          h("span", { class: "block" }, "רישיון הטקסט / Text licence: ", h("bdi", { dir: "auto" }, v.textLicense)),
-        ),
-      ),
-      h(
-        "nav",
-        { class: "actions six" },
-        btn("exact", "Enter", "ok", () => void act("exact")),
-        btn("edited", "E", "edit", () => startEdit()),
-        btn("pointed_print", "N", "ok pointed", () => void act("pointed_print")),
-        btn("unreadable", "U", "bad", () => void act("unreadable")),
-        btn("misaligned", "M", "bad", misaligned),
-        h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
-      ),
-      h(
-        "div",
-        { class: "subnav" },
-        h(
-          "button",
-          { type: "button", class: "small", onclick: back, disabled: history.length === 0, title: "Back to the previous line; a new decision there replaces yours" },
-          "→ הקודם (לשינוי ההחלטה) ",
-          h("kbd", { dir: "ltr" }, "B"),
-        ),
-        h("button", { type: "button", class: "small", onclick: () => setZoom(-1), "aria-label": "הקטנה / zoom out" }, "−"),
-        h("button", { type: "button", class: "small", onclick: () => setZoom(1), "aria-label": "הגדלה / zoom in" }, "+"),
-        revisiting ? h("button", { type: "button", class: "small", onclick: () => void loadNext().catch(fail) }, "לתור ←") : null,
-        h("p", { class: "keys muted small" }, "קיצורים: ", ...KEYS.flatMap(([k, t, en]) => [h("kbd", { dir: "ltr", title: en }, k), ` ${t} · `])),
-      ),
+    return h(
+      "div",
+      { class: "ctxbox band", dir: "ltr", ...(v.page ? { onclick: (e: Event) => (e.target as HTMLElement).closest(".open") || setPageOpen(true) } : {}) },
+      band,
+      h("button", { type: "button", class: "open", disabled: !v.page, onclick: () => setPageOpen(true) }, icon("page", { sm: true }), t("page")),
     );
-    renderStrip();
-    renderContext();
   }
 
   function renderDone(): void {
+    hooks.where?.(null);
     mount(
       root,
-      progressBar(progress),
       h(
         "section",
-        { class: "card done" },
-        h("h2", {}, "אין עוד שורות בשבילך כרגע. תודה רבה!"),
-        h("p", { lang: "en", dir: "ltr", class: "muted" }, "No lines left for you right now. Thank you!"),
-        progress.skippedByMe
-          ? h(
-              "button",
-              { type: "button", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(fail) },
-              `חזרה ל-${progress.skippedByMe} השורות שדילגת עליהן`,
-            )
-          : null,
-        history.length ? h("button", { type: "button", onclick: back }, "→ חזרה להחלטה האחרונה") : null,
-        h("p", { class: "msg", role: "status" }),
+        { class: "state" },
+        h("span", { class: "mark" }, icon("exact")),
+        h("h1", {}, t("done_h")),
+        h(
+          "div",
+          { class: "stack" },
+          progress.skippedByMe
+            ? h("button", { type: "button", class: "act primary", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(failScreen) }, t("done_skips", { n: progress.skippedByMe }))
+            : null,
+          history.length ? h("button", { type: "button", class: "act", onclick: back }, icon("previous", { sm: true }), t("done_last")) : null,
+          h("a", { class: "act quiet", href: "#tasks" }, t("all_tasks")),
+        ),
       ),
     );
+  }
+
+  /** Esc closes what is open, innermost first: the key list, the sheet, the phone's page, the enlarged page. */
+  function escape(): boolean {
+    if (keysOpen) {
+      keysOpen = false;
+      q(".keys-panel")?.remove();
+      return true;
+    }
+    if (moreOpen()) {
+      setMore(false);
+      return true;
+    }
+    const side = q(".side");
+    if (side?.classList.contains("open")) {
+      setPageOpen(false);
+      return true;
+    }
+    if (side?.classList.contains("enlarged")) {
+      toggleEnlarged();
+      return true;
+    }
+    return false;
+  }
+
+  function toggleKeys(): void {
+    const v = view();
+    if (!current || !v) return;
+    keysOpen = !keysOpen;
+    const slot = q(".slot");
+    if (!slot) return;
+    q(".keys-panel")?.remove();
+    if (keysOpen) {
+      const nodes = slotNodes(current, v, undefined);
+      const panel = nodes.find((n) => n instanceof HTMLElement && n.classList.contains("keys-panel"));
+      if (panel) slot.prepend(panel);
+    }
   }
 
   const onKey = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const target = e.target as HTMLElement | null;
+    if (e.key === "Escape" && escape()) return e.preventDefault();
     if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return;
     // A focused button or link handles its own Enter and Space.
     if (target && (target.tagName === "BUTTON" || target.tagName === "A") && (e.key === "Enter" || e.key === " ")) return;
@@ -597,7 +850,12 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const typing = current.view.mode === "type";
     // Holding a key down must not decide line after line.
     if (e.repeat) return e.preventDefault();
+    if (e.key === "?") {
+      e.preventDefault();
+      return toggleKeys();
+    }
     // e.code is the physical key, so the shortcuts work in a Hebrew keyboard layout too.
+    // Backspace no longer goes back: a typist's stray press would leave the line (maintainer, 2026-11-19).
     const actions: Record<string, () => void> = {
       Enter: () => void act("exact"),
       NumpadEnter: () => void act("exact"),
@@ -613,14 +871,13 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       KeyS: () => void doSkip(),
       Digit5: () => void doSkip(),
       KeyB: back,
-      Backspace: back,
       Equal: () => setZoom(1),
       NumpadAdd: () => setZoom(1),
       KeyZ: () => setZoom(1),
       Minus: () => setZoom(-1),
       NumpadSubtract: () => setZoom(-1),
       KeyX: () => setZoom(-1),
-      KeyP: togglePage,
+      KeyP: () => (desktop() ? toggleEnlarged() : setPageOpen(!q(".side.open"))),
     };
     // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
     if (typing) {
@@ -641,15 +898,26 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(renderStrip, 120);
   };
+  const onLayout = () => {
+    updateFlag();
+    renderStrip();
+  };
+  const onOnline = () => void resendKept();
   document.addEventListener("keydown", onKey);
   window.addEventListener("resize", onResize);
-  mount(root, h("p", { class: "muted" }, "טוען… / Loading…"));
-  (startAt === undefined ? loadNext() : open(startAt)).catch(fail);
+  window.addEventListener("online", onOnline);
+  desktopMq.addEventListener("change", onLayout);
+  mount(root, h("p", { class: "muted" }, t("loading")));
+  // A decision kept from an earlier visit is sent once before the next line is asked for.
+  (startAt === undefined ? resendKept().then(loadNext) : open(startAt)).catch(failScreen);
   return {
     el: root,
     dispose: () => {
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("online", onOnline);
+      desktopMq.removeEventListener("change", onLayout);
+      body.remove("editing", "typing");
     },
   };
 }

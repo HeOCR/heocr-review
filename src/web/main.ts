@@ -24,14 +24,16 @@ let dispose: (() => void) | null = null;
 let prefs: Prefs = loadPrefs();
 
 /**
- * Screens adopted to the design render in main.doc. The rest (the task views, sign-in, terms, admin) render in
- * main.legacy, styled by css/bridge.css, until their design-adoption step (HeOCR/heocr-review#54-#58).
+ * Screens adopted to the design render in main.doc (general pages) or main.task with body.task (task screens:
+ * line verification). The rest (consensus, audit, page review, sign-in, terms, admin) render in main.legacy, styled
+ * by css/bridge.css, until their design-adoption step (HeOCR/heocr-review#56-#58).
  */
-type Look = "doc" | "legacy";
+type Look = "doc" | "task" | "legacy";
 function show(look: Look, ...nodes: Node[]): void {
   dispose?.();
   dispose = null;
   app.className = look;
+  document.body.classList.toggle("task", look === "task");
   // The legacy views are Hebrew-first and laid out right to left; they keep that until they are adopted.
   if (look === "legacy") {
     app.lang = "he";
@@ -45,9 +47,11 @@ function show(look: Look, ...nodes: Node[]): void {
   window.scrollTo(0, 0);
 }
 
-/** The top bar's middle: the open batch's title (isolated: it is document text), or nothing. */
-function setWhere(title: string | null): void {
-  where.replaceChildren(...(title ? [h("b", {}, h("bdi", {}, title))] : []));
+/** The top bar's middle: the open batch's title (isolated: it is document text) and, on a task, where in it. */
+let whereTitle: string | null = null;
+function setWhere(title: string | null, line: string | null = null): void {
+  whereTitle = title;
+  where.replaceChildren(...(title ? [h("b", {}, h("bdi", {}, title)), ...(line ? [h("span", {}, line)] : [])] : []));
 }
 
 function renderNav(): void {
@@ -153,7 +157,7 @@ async function route(): Promise<void> {
       return show("doc", picker(batches));
     }
     const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
-    const hooks = { needTerms, signedOut };
+    const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
     const startAt = linked ? Number(linked[1]) : undefined;
     const view: ReviewScreen =
       batch.taskType === "page_review"
@@ -161,7 +165,7 @@ async function route(): Promise<void> {
         : batch.taskType === "line_consensus"
           ? lineConsensusView(batch, hooks, startAt)
           : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
-    show("legacy", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
+    show(batch.taskType === "line_verify" ? "task" : "legacy", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
   } catch (err) {

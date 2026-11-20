@@ -133,10 +133,13 @@ describe("line_verify P-hist gold (volunteer_v1_1)", () => {
     const gold = new Set((await goldIds()).map((g) => g.id));
     let n = 0;
     let goldServed = 0;
+    const shapes = { gold: new Set<string>(), other: new Set<string>() };
     for (;;) {
       const res = await r.next();
       const p = res.body.proposal;
       if (!p) break;
+      // The screen is the same for gold: the same fields in the proposal and its view (design SPEC §4.1).
+      shapes[gold.has(p.id) ? "gold" : "other"].add(`${Object.keys(p).sort().join(",")}|${Object.keys(p.view).sort().join(",")}`);
       expect(res.body.progress.total).toBe(11); // the fixture's lines only
       expect(gold.has(p.id)).toBe(goldDue(n, r.id));
       if (gold.has(p.id)) {
@@ -151,6 +154,7 @@ describe("line_verify P-hist gold (volunteer_v1_1)", () => {
       n++;
     }
     expect(goldServed).toBeGreaterThanOrEqual(2); // 11 lines at 1 in 5 for the first 75
+    for (const shape of shapes.gold) expect(shapes.other).toContain(shape);
     expect(new Set((await grades(r.id)).map((g) => g.gold_id)).size).toBe(goldServed); // each at most once
   });
 

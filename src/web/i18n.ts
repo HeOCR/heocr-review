@@ -26,3 +26,20 @@ export function setLang(next: Lang, root: { lang: string; dir: string } = docume
   root.lang = next;
   root.dir = next === "he" ? "rtl" : "ltr";
 }
+
+/**
+ * A string that marks a lead-in with <strong>…</strong> (the design's notices), as DOM nodes: the only markup
+ * recognised is <strong>; everything else stays text, so nothing is parsed as HTML.
+ */
+export function tRich(key: StringKey, vars: Record<string, string | number> = {}, doc: Document = document): Node[] {
+  return t(key, vars)
+    .split(/(<strong>.*?<\/strong>)/)
+    .filter((part) => part !== "")
+    .map((part) => {
+      const m = /^<strong>(.*)<\/strong>$/.exec(part);
+      if (!m) return doc.createTextNode(part);
+      const el = doc.createElement("strong");
+      el.textContent = m[1] ?? "";
+      return el;
+    });
+}

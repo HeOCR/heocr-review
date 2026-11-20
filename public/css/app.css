@@ -1,0 +1,16 @@
+/* HeOCR Review: the app's own glue around the design's stylesheet (design/review/css/review.css, copied unchanged).
+   Only what the app's markup needs and the mockups don't: in the app, #app is the <main> that holds a task screen. */
+body.rv.task main#app.task { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+main#app.task > .taskroot { display: contents; }
+main#app.task > .batchhead { padding: 8px 16px 0; }
+.linebox > .strip { display: flex; flex-direction: column; align-items: center; }
+.ctxbox.band .frame img { display: block; width: 100%; height: auto; }
+.side .scroller .frame img { display: block; width: 100%; height: auto; }
+.keys-panel dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin-top: 6px; }
+.keys-panel dd { margin: 0; }
+/* lineStrip() places each piece's image by offset (one image file for every piece). */
+.linestrip .seg img { position: absolute; max-width: none; height: auto; display: block; }
+/* A task screen fills the window; the site footer belongs to the general pages. */
+body.rv.task > #foot { display: none; }
+/* review.css's .rv .act sets display and outranks .desktop-only: keep desktop-only controls off a phone. */
+@media (max-width: 899px) { .rv .act.desktop-only { display: none; } }
