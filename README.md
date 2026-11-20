@@ -3,7 +3,11 @@
 A small online app where volunteers sign in and review correction proposals against real Hebrew page scans, for
 the [HeOCR](https://github.com/HeOCR) open Hebrew OCR project.
 
-Three task types:
+Review tasks:
+
+- **Synthetic realism (admin development pilot).** Compare a generated page with an eval-cleared training or dev
+  scan, choose the real scan blindly, then rate the revealed pair and tag visible differences. See the
+  [bundle contract and local workflow](docs/specs/synth-realism.md).
 
 - **Reference audit (E2d4).** An agent audited 38 Hebrew Wikisource reference pages against their scans and
   proposed 519 corrections (`reference_audit_proposals.v1` in [hocrgen](https://github.com/HeOCR/hocrgen)). A human

@@ -1,3 +1,5 @@
+import { SYNTH_REALISM } from "../../shared/synth_realism";
+import { t } from "../i18n";
 import { get, put } from "../api";
 import { h } from "../dom";
 
@@ -124,7 +126,7 @@ export function adminView(): HTMLElement {
                     () => (msg.textContent = "Export failed"),
                   ),
               },
-              "Export decisions + ledger",
+              b.taskType === SYNTH_REALISM ? t("sr_export") : "Export decisions + ledger",
             ),
             msg,
           );
