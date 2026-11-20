@@ -1,3 +1,4 @@
+import { PAGE_PASTE_TRAIN } from "../../shared/page_paste_train";
 import { SYNTH_REALISM } from "../../shared/synth_realism";
 import { t } from "../i18n";
 import { get, put } from "../api";
@@ -126,7 +127,7 @@ export function adminView(): HTMLElement {
                     () => (msg.textContent = "Export failed"),
                   ),
               },
-              b.taskType === SYNTH_REALISM ? t("sr_export") : "Export decisions + ledger",
+              b.taskType === PAGE_PASTE_TRAIN ? t("train_paste_export") : b.taskType === SYNTH_REALISM ? t("sr_export") : "Export decisions + ledger",
             ),
             msg,
           );

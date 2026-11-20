@@ -1,3 +1,4 @@
+import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { SYNTH_REALISM } from "../shared/synth_realism";
 import type { BatchSummary, ConfigResponse, MeResponse, ProposalView } from "../shared/api";
 import { ApiFailure, get } from "./api";
@@ -14,6 +15,7 @@ import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
 import { settingsView } from "./views/settings";
 import { signInView } from "./views/signin";
+import { pagePasteTrainView } from "./views/page_paste_train";
 import { synthRealismView } from "./views/synth_realism";
 import { termsView } from "./views/terms";
 
@@ -180,7 +182,8 @@ async function route(): Promise<void> {
     const startAt = linked ? Number(linked[1]) : undefined;
     const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage") : undefined;
     const view: ReviewScreen =
-      batch.taskType === SYNTH_REALISM
+      batch.taskType === PAGE_PASTE_TRAIN ? pagePasteTrainView(batch, hooks)
+        : batch.taskType === SYNTH_REALISM
         ? synthRealismView(batch, hooks)
         : batch.taskType === "page_review"
         ? pageReviewView(batch, hooks, startAt, subset?.id)

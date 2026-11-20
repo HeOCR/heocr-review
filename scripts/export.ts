@@ -13,6 +13,8 @@
  * Then copy the decisions file over hocrgen's docs/reference_audit_decisions.json in a PR, and check it there:
  *   python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json
  */
+import { PAGE_PASTE_TRAIN } from "../src/shared/page_paste_train";
+import { isTrainingPaste, TRAIN_EXPORT_FILE, TRAIN_EXPORT_SQL, trainingExport, type TrainingExportRow } from "../src/tasks/page_paste_train/export";
 import { SYNTH_REALISM } from "../src/shared/synth_realism";
 import { EXPORT_FILE, REALISM_EXPORT_SQL, realismExport, type RealismRow } from "../src/tasks/synth_realism/export";
 import { TRIAGE_PLANTS_SQL, toTriagePlant } from "../src/tasks/line_verify/triage";
@@ -34,6 +36,16 @@ function main(): void {
   const one = <T>(sql: string) => d1Query<T>(t, inline(sql, batchId))[0] ?? [];
   const batchRow = one<BatchRow>(EXPORT_SQL.batch)[0];
   if (!batchRow) throw new Error(`no batch ${batchId} in ${t}`);
+  if (batchRow.task_type === PAGE_PASTE_TRAIN) {
+    if (flags.public === true) throw new Error("page-paste training exports require the private export path");
+    const batch = toBatch(batchRow);
+    if (!isTrainingPaste(batch)) throw new Error("page-paste training requires a training source");
+    const { file, counts } = trainingExport(batch, one<TrainingExportRow>(TRAIN_EXPORT_SQL), new Date().toISOString());
+    mkdirSync(out, { recursive: true, mode: 0o700 });
+    writeFileSync(join(out, TRAIN_EXPORT_FILE), formatJson(file), { mode: 0o600, flag: "wx" });
+    console.log(JSON.stringify({ batch: batchId, target: t, files: [TRAIN_EXPORT_FILE], counts }));
+    return;
+  }
   if (batchRow.task_type === SYNTH_REALISM) {
     if (flags.public === true || t !== "local") throw new Error("synth_realism exports are private and local only");
     const batch = toBatch(batchRow);
