@@ -14,6 +14,7 @@
  *   python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json
  */
 import { TRIAGE_PLANTS_SQL, toTriagePlant } from "../src/tasks/line_verify/triage";
+import { ADDED_LINES_SQL, PAGE_CHECKS_SQL, toTriagePages, type AddedLineRow, type PageCheckRow } from "../src/tasks/line_verify/pagerecords";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildExport, formatJson } from "../src/tasks/export";
@@ -41,6 +42,7 @@ function main(): void {
       ? {
           pointedDrops: one<PointedDropRow>(POINTED_DROPS_SQL).map(toPointedDrop),
           triagePlants: one<{ proposal_id: number; plant_type: string; planted_sha256: string; candidate_sha256: string }>(TRIAGE_PLANTS_SQL).map(toTriagePlant),
+          triagePages: toTriagePages(one<PageCheckRow>(PAGE_CHECKS_SQL), one<AddedLineRow>(ADDED_LINES_SQL)),
         }
       : {}),
     ...(batchRow.task_type === "line_consensus"

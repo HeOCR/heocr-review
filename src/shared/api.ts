@@ -208,6 +208,30 @@ export interface NextResponse {
   prefetch: string[];
   /** A triage batch (migrations/0012_triage.sql): which queue this is, and how many lines each still holds for me. */
   triage?: { queue: "triage" | "fix"; triage: number; fix: number };
+  /** A triage batch: a page to check (triage) or to add missing lines to (fix), in place of a line (0014). */
+  page?: PageCheckView | null;
+}
+
+/** One of a page's line boxes, in page fractions. */
+export interface PageLineBox {
+  box: Box;
+  lineIndex: number;
+}
+
+/**
+ * Page completeness (migrations/0014_page_completeness.sql): "check", the page with all its boxes and the question
+ * whether every printed line is boxed; "add" (desktop), the same page where the reviewer boxes and types the missing
+ * lines (`added`, theirs so far).
+ */
+export interface PageCheckView {
+  batchId: string;
+  itemId: number;
+  pageId: string;
+  title: string;
+  mode: "check" | "add";
+  image: ImageView | null;
+  boxes: PageLineBox[];
+  added: { id: string; box: Box; text: string | null; value: "typed" | "unreadable" }[];
 }
 
 export interface DecisionRequest {

@@ -3,6 +3,8 @@
  * when the admin, or a reviewer whose decisions count, marks a line "print has niqqud", every other undecided line of
  * that book leaves the batch. Gold lines are never taken out. Only D1 here.
  */
+import { ADDED_LINES_SQL, PAGE_CHECKS_SQL, toTriagePages, type AddedLineRow, type PageCheckRow } from "../tasks/line_verify/pagerecords";
+import type { TriagePages } from "../tasks/types";
 import { TRIAGE_PLANTS_SQL, toTriagePlant, type TriagePlant } from "../tasks/line_verify/triage";
 import { notCountedReason } from "../tasks/line_consensus/consensus";
 import { standingOf } from "../tasks/line_consensus/index";
@@ -58,9 +60,11 @@ export async function dropPointedBook(
 }
 
 /** The export's pointed-drop input for a batch: one row per triggering mark. */
-export async function pointedDropsExtra(db: D1Database, batchId: string): Promise<{ pointedDrops: PointedDrop[]; triagePlants: TriagePlant[] }> {
+export async function pointedDropsExtra(db: D1Database, batchId: string): Promise<{ pointedDrops: PointedDrop[]; triagePlants: TriagePlant[]; triagePages: TriagePages }> {
   const { results } = await db.prepare(POINTED_DROPS_SQL).bind(batchId).all<PointedDropRow>();
   // A triage batch's plants (migrations/0012_triage.sql) travel with the drops: both are line_verify export inputs.
   const plants = await db.prepare(TRIAGE_PLANTS_SQL).bind(batchId).all<{ proposal_id: number; plant_type: string; planted_sha256: string; candidate_sha256: string }>();
-  return { pointedDrops: results.map(toPointedDrop), triagePlants: plants.results.map(toTriagePlant) };
+  const checks = await db.prepare(PAGE_CHECKS_SQL).bind(batchId).all<PageCheckRow>();
+  const added = await db.prepare(ADDED_LINES_SQL).bind(batchId).all<AddedLineRow>();
+  return { pointedDrops: results.map(toPointedDrop), triagePlants: plants.results.map(toTriagePlant), triagePages: toTriagePages(checks.results, added.results) };
 }

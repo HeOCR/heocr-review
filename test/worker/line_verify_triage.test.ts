@@ -62,6 +62,10 @@ describe("line verification: triage mode", () => {
       expect((await c.post(`/api/proposals/${proposal!.id}/decision`, { value, text: "x" })).status).toBe(400);
       expect((await c.post(`/api/proposals/${proposal!.id}/decision`, { value })).status, value).toBe(200);
     }
+    // The page's completeness check comes after its triage lines (migrations/0014; line_verify_pages.test.ts).
+    const pageCheck = await next(c, "triage");
+    expect(pageCheck.body.page).toMatchObject({ mode: "check" });
+    expect((await c.post(`/api/batches/${V12}/pages/${pageCheck.body.page!.itemId}/check`, { answer: "complete" })).status).toBe(200);
     const done = await next(c, "triage");
     expect(done.proposal).toBeNull();
     expect(done.body.triage).toMatchObject({ triage: 0, fix: 7 });

@@ -58,3 +58,25 @@ form.dev input { width: 10em; min-height: 44px; } form.dev button { min-height: 
 .rv .lineverify.triage .dock .moregroup { grid-column: 1 / -1; }
 /* A whole-screen state inside a task (done, fixes wait for the desktop) keeps the phone's 16px side gutter. */
 main#app.task .state { padding-inline: 16px; }
+
+/* Page completeness (migrations/0014): the page with every line box; on the desktop, boxes drawn by dragging. */
+.rv .pagecheck .pagewrap, .rv .pageadd .pagewrap { overflow: auto; max-height: 70vh; border: 1px solid var(--line); border-radius: 6px; }
+.rv .pageframe { position: relative; display: block; width: 100%; touch-action: none; user-select: none; }
+.rv .pageframe img { display: block; width: 100%; height: auto; }
+.rv .pageframe .pb { position: absolute; border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: none; }
+.rv .pageframe .pb.added { border-color: var(--good, #3fb68b); border-style: dashed; }
+.rv .pageframe .pb.added span { position: absolute; inset-inline-start: -1.6em; top: 0; font-size: 12px; color: var(--good, #3fb68b); }
+.rv .pageframe .pb.drawing { border-style: dotted; }
+.rv .pageadd .pageframe { cursor: crosshair; }
+.rv .pageadd .addform { margin-top: 12px; }
+.rv .pageadd .addform textarea { width: 100%; font-size: 1.2rem; }
+.rv .pageadd .addedlist { margin: 4px 0 12px; padding-inline-start: 1.6em; }
+.rv .pagecheck .dock .actions { grid-template-columns: 1fr; }
+@media (min-width: 900px) { .rv .pagecheck .dock .actions { grid-template-columns: repeat(2, 1fr); } }
+/* On a desktop the whole page fits the screen's height, so every box is in view at once. */
+@media (min-width: 900px) {
+  .rv .pagecheck .pagewrap, .rv .pageadd .pagewrap { max-height: none; text-align: center; overflow: visible; border: 0; }
+  .rv .pagecheck .pageframe, .rv .pageadd .pageframe { display: inline-block; width: auto; vertical-align: top; }
+  .rv .pagecheck .pageframe img { height: 64vh; width: auto; }
+  .rv .pageadd .pageframe img { height: 80vh; width: auto; }
+}

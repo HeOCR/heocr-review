@@ -1,6 +1,7 @@
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
+import { pageCounts } from "./pages";
 import { sha256Hex } from "../shared/sha256";
 import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
@@ -343,5 +344,7 @@ export async function triageCounts(db: D1Database, batch: BatchRecord, reviewerI
   const [triage, fix] = await Promise.all(
     TRIAGE_QUEUES.map(async (q) => (await progressFor(db, batch, reviewerId, nowMs, await triageFilter(db, batch.id, reviewerId, q))).remainingForMe),
   );
-  return { triage: triage!, fix: fix! };
+  // Pages wait in the queues too (migrations/0014): a check in triage, missing lines on the desktop.
+  const pages = await pageCounts(db, batch.id, reviewerId);
+  return { triage: triage! + pages.check, fix: fix! + pages.add };
 }
