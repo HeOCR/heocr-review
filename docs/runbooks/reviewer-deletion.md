@@ -143,6 +143,10 @@ deletion changes no stored verdict.
 other `synth_realism_trials` rows as unpublished private records: move them to `deleted-N` for unlinking, or
 delete them for the delete choice, before removing the reviewer row. Unlinked realism records remain admin-only.
 
+**Page-paste queue** (`migrations/0016_page_paste.sql`): move the assigned reviewer's `page_paste_pages` rows to
+a blocked placeholder before deleting the reviewer. Leave the page registration and plant audit intact. This keeps its
+lines out of the ordinary queues. The decisions themselves follow their usual class.
+
 Before the production run, rehearse the same file on a local Worker loaded with a private copy of production's D1
 (`docs/runbooks/testing-and-imports.md`), never on a remote test database.
 
@@ -157,7 +161,8 @@ SELECT
    + (SELECT COUNT(*) FROM assignments WHERE reviewer_id = '$RV')
    + (SELECT COUNT(*) FROM consent_events WHERE reviewer_id = '$RV')
    + (SELECT COUNT(*) FROM rate_limits WHERE key LIKE '%:' || '$RV')
-   + (SELECT COUNT(*) FROM synth_realism_trials WHERE reviewer_id = '$RV') AS other_rows;
+   + (SELECT COUNT(*) FROM synth_realism_trials WHERE reviewer_id = '$RV')
+   + (SELECT COUNT(*) FROM page_paste_pages WHERE reviewer_id = '$RV')    AS other_rows;
 ```
 
 All three must be `0`. Then check the placeholders' counts against step 4:

@@ -10,6 +10,7 @@ import type { ReviewScreen } from "./views/common";
 import { lineConsensusView } from "./views/consensus";
 import { CONVENTIONS } from "./views/conventions";
 import { lineVerifyView } from "./views/line";
+import { pagePasteView } from "./views/page_paste";
 import { pageReviewView } from "./views/page";
 import { reviewView } from "./views/review";
 import { settingsView } from "./views/settings";
@@ -154,7 +155,7 @@ async function route(): Promise<void> {
     const linked = /^p\/(\d{1,12})$/.exec(hash);
     // #b/<batch>, or #b/<batch>/s/<subset> to work through one subset of it (a filter on the queue), or in a triage
     // batch #b/<batch>/q/fix for the desktop fix queue (the triage queue is the default).
-    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100})|\/q\/(triage|fix))?$/.exec(hash);
+    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100})|\/q\/(triage|fix|paste))?$/.exec(hash);
     let batch: BatchSummary | undefined;
     if (linked) {
       try {
@@ -178,9 +179,11 @@ async function route(): Promise<void> {
     const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
     const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
     const startAt = linked ? Number(linked[1]) : undefined;
-    const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage") : undefined;
+    const queue = batch.triage ? chosen?.[3] === "fix" ? "fix" : "triage" : undefined;
+    const paste = chosen?.[3] === "paste" && batch.pagePaste !== undefined;
+    if (chosen?.[3] === "paste" && !paste) return show("doc", picker(batches));
     const view: ReviewScreen =
-      batch.taskType === SYNTH_REALISM
+      paste ? pagePasteView(batch, hooks) : batch.taskType === SYNTH_REALISM
         ? synthRealismView(batch, hooks)
         : batch.taskType === "page_review"
         ? pageReviewView(batch, hooks, startAt, subset?.id)
@@ -189,7 +192,7 @@ async function route(): Promise<void> {
           : batch.taskType === "line_verify"
             ? lineVerifyView(batch, hooks, startAt, queue)
             : reviewView(batch, hooks, startAt);
-    const head = batch.triage ? [queueNav(batch, linked ? undefined : queue)] : batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
+    const head = batch.triage ? [queueNav(batch, paste ? "paste" : linked ? undefined : queue)] : batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
     show("task", ...head.map((n) => h("div", { class: "batchhead" }, n)), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
@@ -224,14 +227,15 @@ function subsetNav(batch: BatchSummary, current: string | undefined): HTMLElemen
 }
 
 /** A triage batch's two queues: triage (any screen) and the desktop fixes, with what each still holds for me. */
-function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): HTMLElement {
-  const link = (q: "triage" | "fix", label: string) =>
-    h("a", { href: `#b/${encodeURIComponent(batch.id)}${q === "fix" ? "/q/fix" : ""}`, ...(current === q ? { "aria-current": "page", class: "on" } : {}) }, label);
+function queueNav(batch: BatchSummary, current: "triage" | "fix" | "paste" | undefined): HTMLElement {
+  const link = (q: "triage" | "fix" | "paste", label: string) =>
+    h("a", { href: `#b/${encodeURIComponent(batch.id)}${q === "triage" ? "" : `/q/${q}`}`, ...(current === q ? { "aria-current": "page", class: "on" } : {}) }, label);
   return h(
     "nav",
     { class: "subsetnav small", "aria-label": t("filter") },
     link("triage", t("q_triage", { n: batch.triage!.triage })),
     link("fix", t("q_fix", { n: batch.triage!.fix })),
+    batch.pagePaste ? link("paste", t("paste_queue")) : null,
   );
 }
 

@@ -1,3 +1,4 @@
+import { OUTSIDE_PAGE_PASTE } from "../tasks/line_verify/page_paste";
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
@@ -116,7 +117,7 @@ export async function triageFilter(db: D1Database, batchId: string, reviewerId: 
   const mineDifferent = `EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND ${PENDING_SQL("d")})`;
   const where = queue === "triage" ? `${TRIAGEABLE_SQL} AND NOT ${mineDifferent}` : `(NOT ${TRIAGEABLE_SQL} OR ${mineDifferent})`;
   const { results } = await db
-    .prepare(`SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${where}`)
+    .prepare(`SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${OUTSIDE_PAGE_PASTE} AND ${where}`)
     .bind(batchId, reviewerId)
     .all<{ id: number }>();
   const ids = results.map((r) => r.id);
@@ -240,6 +241,7 @@ export async function progressFor(
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND ${settled})
           AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
+          AND ${isTriageBatch(batch) ? OUTSIDE_PAGE_PASTE : "1 = 1"}
           AND ${wantsDecision(volunteer, settled)}) AS remaining`,
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
@@ -261,7 +263,7 @@ export async function progressFor(
 async function asTriaged(db: D1Database, batch: BatchRecord, p: ProposalRecord, view: ProposalView["view"]): Promise<ProposalView["view"]> {
   if (view.kind !== "line_verify" || !isTriageBatch(batch) || !triageable(p)) return view;
   const plant = await db
-    .prepare("SELECT planted_text, candidate_sha256 FROM triage_plants WHERE batch_id = ?1 AND proposal_id = ?2")
+    .prepare("SELECT planted_text, candidate_sha256 FROM triage_plants WHERE batch_id = ?1 AND proposal_id = ?2 AND voided_at IS NULL")
     .bind(batch.id, p.id)
     .first<{ planted_text: string; candidate_sha256: string }>();
   const shown = plant && plant.candidate_sha256 === sha256Hex(candidateOf(p)) ? plant.planted_text : view.candidate;

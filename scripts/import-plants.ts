@@ -1,3 +1,4 @@
+import { OUTSIDE_PAGE_PASTE } from "../src/tasks/line_verify/page_paste";
 /**
  * Import heocr-eval's ratified plant list into a triage batch (reference_triage_v1 amendment 2):
  *
@@ -33,7 +34,7 @@ async function main(): Promise<void> {
     t,
     inline(
       `SELECT ${PROPOSAL_COLUMNS}, (SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id) AS decisions
-       FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.batch_id = ?1 AND p.active = 1`,
+       FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.batch_id = ?1 AND p.active = 1 AND ${OUTSIDE_PAGE_PASTE}`,
       batchId,
     ),
   )[0]!;

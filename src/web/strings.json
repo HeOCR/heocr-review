@@ -1131,5 +1131,57 @@
  "sr_rating_pair": [
   "עד כמה סוגי המסמך והסריקה דומים בשתי התמונות?",
   "How similar are these two documents and scans?"
+ ],
+ "paste_title": [
+  "הדבקת תעתיק לעמוד",
+  "Paste a page transcription"
+ ],
+ "paste_queue": [
+  "הדבקת עמודים",
+  "Page paste"
+ ],
+ "paste_desktop": [
+  "להדבקת תעתיק לעמוד, פתחו את המשימה במחשב.",
+  "Open this task on a computer to paste a page transcription."
+ ],
+ "paste_done": [
+  "כל העמודים בתור הזה נשמרו.",
+  "All pages in this queue have been saved."
+ ],
+ "paste_zoom": [
+  "הגדלת הסריקה",
+  "Scan zoom"
+ ],
+ "paste_text": [
+  "תעתיק העמוד",
+  "Page transcription"
+ ],
+ "paste_hint": [
+  "הדביקו את התעתיק לפי הסדר בסריקה, שורה אחת לכל שורת כתב יד.",
+  "Paste the transcription in scan order, one line per manuscript line."
+ ],
+ "paste_counts": [
+  "שורות צפויות: {expected} · שורות שהוזנו: {entered}",
+  "Expected lines: {expected} · Entered lines: {entered}"
+ ],
+ "paste_mismatch": [
+  "כדי לשמור, מספר השורות שהוזנו צריך להתאים למספר השורות הצפוי.",
+  "To save, match the entered line count to the expected count."
+ ],
+ "paste_line": [
+  "בדקו את שורה {line}. יש להזין טקסט בשורה אחת, ללא ניקוד.",
+  "Check line {line}. Enter text on one line, without niqqud."
+ ],
+ "paste_stale": [
+  "העמוד השתנה או כבר נשמר. רעננו את הדף.",
+  "The page changed or has already been saved. Reload the page."
+ ],
+ "paste_failed": [
+  "העמוד לא נשמר. נסו שוב.",
+  "The page wasn’t saved. Try again."
+ ],
+ "paste_save": [
+  "שמירה ולעמוד הבא",
+  "Save and next page"
  ]
 }
