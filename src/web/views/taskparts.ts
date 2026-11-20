@@ -13,7 +13,7 @@ import { keepable, type FailureKind } from "../linerules";
 /** A 3 px accent line and nothing else: counts, never streaks or agreement rates (SPEC §1). */
 export function progressLine(p: Progress): HTMLElement {
   const pct = p.ownOnly || !p.total ? 0 : Math.round((p.covered / p.total) * 100);
-  return h("div", { class: "progress", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("div", { class: "bar", style: `width:${pct}%` }));
+  return h("div", { class: "progress", role: "progressbar", "aria-label": t("progress"), "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("div", { class: "bar", style: `width:${pct}%` }));
 }
 
 /** One of the main answers in the dock (Exact, Correct it; Accept, Reject). */
