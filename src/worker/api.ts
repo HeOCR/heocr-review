@@ -16,7 +16,7 @@ import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
 import { TRIAGE_QUEUES, isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf, triageCounts, triageFilter, type TriageQueue } from "./queue";
 import { isTriageBatch, isTriageValue, triageable } from "../tasks/line_verify/triage";
-import { PAGE_ANSWERS, addLine, boxProblem, currentCheck, nextPage, normalizeAdded, pageItem, recordPageCheck, removeLine } from "./pages";
+import { PAGE_ANSWERS, addLine, boxProblem, currentCheck, nextPage, normalizeAdded, pageItem, recordInitialPageCheck, recordPageCheck, removeLine } from "./pages";
 import type { LineRouting } from "../tasks/line_verify/resolution";
 import { dropPointedBook, pointedDropsExtra } from "./pointed_books";
 import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
@@ -534,7 +534,9 @@ export async function checkPage(ctx: Ctx, batchId: string, itemId: number): Prom
   const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
   const body = await readJson(ctx.request);
   if (!(PAGE_ANSWERS as readonly unknown[]).includes(body.answer)) throw new HttpError(400, "invalid_answer", `answer must be one of ${PAGE_ANSWERS.join(", ")}`);
-  await recordPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, body.answer as "complete" | "missing_lines", iso(ctx.now));
+  if (!(await recordInitialPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, body.answer as "complete" | "missing_lines", iso(ctx.now)))) {
+    throw new HttpError(409, "not_open", "this page is not ready for a completeness check");
+  }
   return json({ ok: true });
 }
 

@@ -167,6 +167,7 @@ export function textProblem(text: unknown): string | null {
 
 /** A triage batch's page records for the export (migrations/0014_page_completeness.sql). */
 export interface TriagePages {
-  checks: { pageId: string; reviewerId: string; answer: "complete" | "missing_lines" | "lines_added"; decidedOn: string; missingOn: string | null }[];
-  added: { id: string; pageId: string; reviewerId: string; box: [number, number, number, number]; text: string | null; value: "typed" | "unreadable"; decidedOn: string }[];
+  pages: { pageId: string; width: number | null; height: number | null }[];
+  checks: { pageId: string; reviewerId: string; answer: "complete" | "missing_lines" | "lines_added"; decidedAt: string; missingAt: string | null }[];
+  added: { id: string; pageId: string; reviewerId: string; box: [number, number, number, number]; text: string | null; value: "typed" | "unreadable"; decidedAt: string }[];
 }

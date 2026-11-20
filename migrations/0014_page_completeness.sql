@@ -1,6 +1,6 @@
 -- Page completeness in triage (heocr-eval's reference_triage_v1 amendment 1, heocr-restricted-eval#154): a page's
 -- reference is composed of its line answers, so a printed line the segmenter never boxed would be missed. Once a
--- reviewer has answered a page's triage lines, triage shows the page with all its boxes and asks whether every printed
+-- reviewer has settled all of a page's active pass-1 lines, triage shows the page with all its boxes and asks whether every printed
 -- line is boxed: 'complete', or 'missing_lines', which sends the page to their desktop queue. There they box and type
 -- each missing line (page_added_lines) and finish with 'lines_added'. A newer answer supersedes the last (kept).
 CREATE TABLE page_checks (

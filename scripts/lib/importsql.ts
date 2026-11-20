@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, type ImportBundle } from "../../src/tasks/import";
-import type { ProposalMedia } from "../../src/tasks/types";
+import type { ProposalMedia, StoredImage } from "../../src/tasks/types";
 import { lit } from "./sql";
 
 export function contentSha256(contentKey: unknown): string {
@@ -15,10 +15,18 @@ export function contentSha256(contentKey: unknown): string {
 /** Above this many proposals the import deactivates the batch first instead of listing every id it keeps. */
 export const LARGE_BATCH = 2000;
 
+interface ImportOptions {
+  minReviewers: number;
+  importedAt: string;
+  after?: string[];
+  addOnly?: boolean;
+  itemImages?: ReadonlyMap<string, StoredImage>;
+}
+
 export function buildImportStatements(
   bundle: ImportBundle,
   media: Map<string, ProposalMedia>,
-  opts: { minReviewers: number; importedAt: string; after?: string[]; addOnly?: boolean },
+  opts: ImportOptions,
 ): string[] {
   const { batch } = bundle;
   const b = lit(batch.id);
@@ -29,8 +37,13 @@ export function buildImportStatements(
   ON CONFLICT (id) DO UPDATE SET title = excluded.title, source_json = excluded.source_json, min_reviewers = excluded.min_reviewers, imported_at = excluded.imported_at;`,
   ];
   for (const item of bundle.items) {
+    const image = opts.itemImages?.get(item.externalId);
+    // The batch's import timestamp identifies the current page manifest while retaining old items for decision history.
+    const payload = !opts.addOnly && batch.taskType === "line_verify"
+      ? { ...item.payload, line_verify_imported_at: opts.importedAt, ...(image ? { page_image: image } : {}) }
+      : item.payload;
     out.push(
-      `INSERT INTO items (batch_id, external_id, title, payload_json) VALUES (${b}, ${lit(item.externalId)}, ${lit(item.title)}, ${lit(JSON.stringify(item.payload))})
+      `INSERT INTO items (batch_id, external_id, title, payload_json) VALUES (${b}, ${lit(item.externalId)}, ${lit(item.title)}, ${lit(JSON.stringify(payload))})
   ON CONFLICT (batch_id, external_id) DO UPDATE SET title = excluded.title, payload_json = excluded.payload_json;`,
     );
   }
@@ -56,6 +69,6 @@ export function buildImportStatements(
   return out;
 }
 
-export function buildImportSql(bundle: ImportBundle, media: Map<string, ProposalMedia>, opts: { minReviewers: number; importedAt: string; after?: string[] }): string {
+export function buildImportSql(bundle: ImportBundle, media: Map<string, ProposalMedia>, opts: ImportOptions): string {
   return buildImportStatements(bundle, media, opts).join("\n") + "\n";
 }

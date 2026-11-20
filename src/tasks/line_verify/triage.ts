@@ -44,6 +44,9 @@ export const TRIAGEABLE_SQL = `(COALESCE(json_extract(p.payload_json, '$.pass'),
   AND (COALESCE(json_extract(p.payload_json, '$.kind'), 'verify') = 'verify'
     OR json_extract(p.payload_json, '$.candidate_provenance') LIKE 'llm:%'))`;
 
+/** SQL over decision d and proposal p: the answer matches the line content. */
+export const CONTENT_MATCH_SQL = "d.proposal_sha256 = p.content_sha256";
+
 /**
  * SQL over a decision alias: the answer leaves its line open to the reviewer, for the desktop fix queue: "different",
  * or any triage answer on a line with a plant (eval's amendment 2: every plant goes to the desktop).
@@ -133,28 +136,31 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
         candidate_sha256: candidate === "" ? null : plant ? plant.plantedSha256 : sha256Hex(candidate),
         plant: plant ? { planted_sha256: plant.plantedSha256, type: plant.plantType } : null,
         queue: candidate === "" ? "desktop_no_candidate" : "triage",
-        triage: lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.decidedOn } : null,
+        triage: lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.createdAt } : null,
         correction: isTriageValue(current.value)
           ? null
           : {
               value: plant ? plantCorrection(p, current) : current.value,
               text: current.text,
               correction_start: candidate === "" ? "blank" : "candidate",
-              decided_at: current.decidedOn,
+              decided_at: current.createdAt,
             },
       });
       for (const d of mine) {
-        if (d !== current && isTriageValue(d.value)) replaced.push({ item_id: itemId, reviewer, triage: { decision: d.value, decided_at: d.decidedOn }, replaced_at: d.supersededAt!.slice(0, 10) });
+        if (d !== current && isTriageValue(d.value)) replaced.push({ item_id: itemId, reviewer, triage: { decision: d.value, decided_at: d.createdAt }, replaced_at: d.supersededAt! });
       }
     }
     for (const d of r.superseded) {
-      history.push({ item_id: itemId, reviewer: d.reviewerId, value: d.value, text: d.text, decided_at: d.decidedOn, superseded_at: d.supersededAt!.slice(0, 10) });
+      history.push({ item_id: itemId, reviewer: d.reviewerId, value: d.value, text: d.text, decided_at: d.createdAt, superseded_at: d.supersededAt! });
     }
   }
   // Page completeness (amendment 1, migrations/0014): one entry per page and checking reviewer (a page nobody checked:
   // completeness null); lines added on the desktop are rows of their own, queue "desktop_added", boxes in page pixels.
-  const pageSize = new Map<string, { width: number; height: number }>();
+  const pageSize = new Map<string, { width: number; height: number } | null>();
   for (const r of lines) pageSize.set(payloadOf(r.proposal).page_id, { width: payloadOf(r.proposal).page.width, height: payloadOf(r.proposal).page.height });
+  for (const { pageId, width, height } of pageRecords?.pages ?? []) {
+    if (!pageSize.has(pageId)) pageSize.set(pageId, width !== null && height !== null ? { width, height } : null);
+  }
   const checks = pageRecords?.checks ?? [];
   type Completeness = { answer: "complete" | "missing_lines"; reviewer: string; decided_at: string; lines_added_at?: string } | null;
   const pages = [...pageSize.keys()].flatMap((pageId): { page_id: string; completeness: Completeness }[] => {
@@ -164,8 +170,8 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
       page_id: pageId,
       completeness:
         c.answer === "lines_added"
-          ? { answer: "missing_lines" as const, reviewer: c.reviewerId, decided_at: c.missingOn ?? c.decidedOn, lines_added_at: c.decidedOn }
-          : { answer: c.answer, reviewer: c.reviewerId, decided_at: c.decidedOn },
+          ? { answer: "missing_lines" as const, reviewer: c.reviewerId, decided_at: c.missingAt ?? c.decidedAt, lines_added_at: c.decidedAt }
+          : { answer: c.answer, reviewer: c.reviewerId, decided_at: c.decidedAt },
     }));
   });
   for (const a of pageRecords?.added ?? []) {
@@ -178,7 +184,7 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
       plant: null,
       queue: "desktop_added",
       triage: null,
-      correction: { value: a.value, text: a.text, correction_start: "blank", decided_at: a.decidedOn },
+      correction: { value: a.value, text: a.text, correction_start: "blank", decided_at: a.decidedAt },
       ...(size ? { box: [Math.round(a.box[0] * size.width), Math.round(a.box[1] * size.height), Math.round(a.box[2] * size.width), Math.round(a.box[3] * size.height)] } : {}),
     });
   }
