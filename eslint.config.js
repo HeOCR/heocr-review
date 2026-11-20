@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["node_modules/", ".wrangler/", "public/app.js", "public/media/", "coverage/", "out/", ".import/", "hocrgen/", "design/"] },
+  { ignores: ["node_modules/", ".wrangler/", "public/app.js", "public/media/", "coverage/", "out/", ".import/", "hocrgen/", "design/", ".e2e-browsers/", ".e2e-state-*/", "test-results/", "playwright-report/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

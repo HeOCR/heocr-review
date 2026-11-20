@@ -412,3 +412,7 @@ own session cookie (no `Domain`), so a reviewer signs in once per host.
 Code: MIT. Contributed decisions and edited text: CC0 1.0 (since terms `2026-11-12-v1`; decisions under
 `2026-11-07-v1` were CC BY-SA 4.0, except the maintainer's own, which he released under CC0 1.0:
 [record](docs/decisions/2026-11-12-cc0.md)). Each exported decision's `terms_version` is in the ledger.
+
+### Browser tests
+
+Run `npx playwright install chromium` once, then `npm run test:e2e`. The suite starts a local Wrangler Worker on port 18787 with its own temporary local D1 and synthetic fixture batches. It intercepts fixture media with a placeholder image; no project scans or remote Cloudflare resources are used. The temporary database is removed when the server exits. The accessibility check records the existing unnamed progress bar in `docs/known-issues.md`.

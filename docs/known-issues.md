@@ -20,3 +20,5 @@ private details here: the per-case records (which source, which lines) are kept 
 - **To undo:** set those lines active again from the private record (`UPDATE proposals SET active = 1 WHERE id IN (…)`).
 - **Next:** if the reference spec decides to transcribe the markers, the lines can return with proposals that carry
   them. Then watch for the same markers in other mid-century books before they reach volunteers.
+
+- The review screen's progress bar has no accessible name (axe `aria-progressbar-name`). The browser suite tracks this existing WCAG issue as an explicit baseline; it should be removed when the bar has a reviewed, localised label.
