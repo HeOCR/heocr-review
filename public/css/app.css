@@ -24,3 +24,9 @@ body.rv.task > #foot { display: none; }
 .audit .linebox .frame img { display: block; width: 100%; height: auto; }
 /* The audit's code-point row is desktop-only (SPEC §9); .texts .row sets display and outranks .desktop-only. */
 @media (max-width: 899px) { .rv .texts .row.desktop-only { display: none; } }
+/* The local-only dev sign-in form (never on a deployed Worker). */
+form.dev { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 8px; border: 1px dashed var(--control-line); border-radius: var(--radius); }
+form.dev input { width: 10em; min-height: 44px; } form.dev button { min-height: 44px; padding-inline: 12px; border: 1px solid var(--control-line); border-radius: var(--radius); }
+/* The terms card: the approved Hebrew and English texts, one under the other. */
+.card.terms > div + div { border-top: 1px solid var(--line); padding-top: 10px; }
+.card.terms p { margin-block: 6px; }

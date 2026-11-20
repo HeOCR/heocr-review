@@ -25,8 +25,8 @@ let prefs: Prefs = loadPrefs();
 
 /**
  * Screens adopted to the design render in main.doc (general pages) or main.task with body.task (task screens: line
- * verification, volunteer lines, reference audit). The rest (page review, sign-in, terms, admin) render in
- * main.legacy, styled by css/bridge.css, until their design-adoption step (HeOCR/heocr-review#57, #58).
+ * verification, volunteer lines, reference audit). Page review renders in main.legacy, styled by css/bridge.css,
+ * until its design-adoption step (HeOCR/heocr-review#58); admin stays there (desktop only, not adapted: SPEC §9).
  */
 type Look = "doc" | "task" | "legacy";
 function show(look: Look, ...nodes: Node[]): void {
@@ -112,18 +112,24 @@ function signedIn(next: MeResponse): void {
 function signedOut(): void {
   me = null;
   renderNav();
-  show("legacy", signInView(config, signedIn));
+  show("doc", signInView(config, signedIn));
 }
 
 /** The terms changed mid-session: show them over the review, then put the review back as it was. */
 function needTerms(): Promise<void> {
   return new Promise((resolve) => {
     const kept = Array.from(app.childNodes);
+    const keptLook = { className: app.className, task: document.body.classList.contains("task") };
+    // The terms are a general page: shown in main.doc over the task, which comes back as it was.
+    app.className = "doc";
+    document.body.classList.remove("task");
     mount(
       app,
       termsView(me!, (next) => {
         me = next;
         renderNav();
+        app.className = keptLook.className;
+        document.body.classList.toggle("task", keptLook.task);
         mount(app, ...kept);
         resolve();
       }),
@@ -139,7 +145,7 @@ async function route(): Promise<void> {
   if (hash === "settings") return show("doc", settingsView(me, prefs, { changed: (next) => ((me = next), renderNav()), prefsChanged: setPrefs, signedOut }));
   if (hash === "admin" && me.isAdmin) return show("legacy", adminView());
   if (!me.termsCurrent) {
-    return show("legacy", termsView(me, (next) => signedIn(next)));
+    return show("doc", termsView(me, (next) => signedIn(next)));
   }
   try {
     const { batches } = await get<{ batches: BatchSummary[] }>("/api/batches");

@@ -157,7 +157,7 @@ The app follows the designer's set in `design/review/` (HeOCR/heocr-review#51), 
 (HeOCR/heocr-review#53–#58, in `design/review/CLASSMAP.md`'s order). The app loads `public/css/tokens.css`,
 `fonts.css` and `review.css` (copies of the design's, checked byte for byte by a test) and the subset fonts in
 `public/fonts/`. Views not adopted yet render in `main.legacy`, styled by `public/css/bridge.css` (the old styles,
-scoped); each step removes its part. The public pages keep `public/styles.css` until step 5.
+scoped); each step removes its part. The public pages (`/`, `/privacy`, `/terms`, 404) are not part of the design set and keep `public/styles.css`.
 
 - Interface strings are `[Hebrew, English]` in `src/web/strings.json`, with the design's keys; one language at a
   time (`t()` in `src/web/i18n.ts`). The maintainer approved the Hebrew on 2026-11-19; new wording goes through

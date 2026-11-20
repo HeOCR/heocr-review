@@ -2,6 +2,7 @@ import * as api from "./api";
 import type { Ctx } from "./api";
 import type { Env } from "./env";
 import { HttpError, errorResponse, json } from "./http";
+import { isD1QuotaError, secondsToUtcMidnight } from "./ratelimit";
 
 type Handler = (ctx: Ctx, ...params: string[]) => Promise<Response>;
 
@@ -47,6 +48,10 @@ export async function handle(request: Request, env: Env, exec: ExecutionContext)
     if (err instanceof HttpError) return errorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     if (/is not configured$/.test(message)) return json({ error: "server_misconfigured" }, 500);
+    if (isD1QuotaError(message)) {
+      console.error("d1 quota", message);
+      return json({ error: "daily_limit", message: "the site's daily database quota is used up" }, 429, { "retry-after": String(secondsToUtcMidnight()) });
+    }
     console.error("unhandled", message);
     return json({ error: "internal_error" }, 500);
   }

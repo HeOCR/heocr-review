@@ -779,5 +779,13 @@
  "done_a_skips": [
   "חזרה ל־{n} ההצעות שדילגת עליהן",
   "Go back to the {n} proposals you skipped"
+ ],
+ "signin_failed": [
+  "ההתחברות נכשלה. נסו שוב.",
+  "Sign-in failed. Please try again."
+ ],
+ "signin_off": [
+  "ההתחברות עדיין לא הוגדרה.",
+  "Sign-in is not configured yet."
  ]
 }
