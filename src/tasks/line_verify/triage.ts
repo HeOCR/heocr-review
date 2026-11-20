@@ -60,23 +60,13 @@ export interface TriagePlant {
   plantType: string;
   plantedSha256: string;
   candidateSha256: string;
-  itemId?: string;
-  voidedAt?: string | null;
-  voidReason?: "page_paste" | null;
 }
-export interface TriagePlantRow {
-  proposal_id: number; plant_type: string; planted_sha256: string; candidate_sha256: string;
-  item_id: string; voided_at: string | null; void_reason: "page_paste" | null;
-}
-export const TRIAGE_PLANTS_SQL = "SELECT proposal_id, plant_type, planted_sha256, candidate_sha256, item_id, voided_at, void_reason FROM triage_plants WHERE batch_id = ?1";
-export const toTriagePlant = (r: TriagePlantRow): TriagePlant => ({
+export const TRIAGE_PLANTS_SQL = "SELECT proposal_id, plant_type, planted_sha256, candidate_sha256 FROM triage_plants WHERE batch_id = ?1";
+export const toTriagePlant = (r: { proposal_id: number; plant_type: string; planted_sha256: string; candidate_sha256: string }): TriagePlant => ({
   proposalId: r.proposal_id,
   plantType: r.plant_type,
   plantedSha256: r.planted_sha256,
   candidateSha256: r.candidate_sha256,
-  itemId: r.item_id,
-  voidedAt: r.voided_at,
-  voidReason: r.void_reason,
 });
 
 /** The line's plant, if it was made on the line's current candidate (a plant on a since-changed candidate is void). */
@@ -107,12 +97,12 @@ interface TriageRow {
   candidate_provenance: string | null;
   /** Of the text triage showed: the planted text on a plant. */
   candidate_sha256: string | null;
-  plant: { planted_sha256: string; type: string; voided_at?: string; void_reason?: "page_paste" | null } | null;
-  queue: "triage" | "desktop_no_candidate" | "desktop_added" | "page_paste";
+  plant: { planted_sha256: string; type: string } | null;
+  queue: "triage" | "desktop_no_candidate" | "desktop_added";
   /** desktop_added: the added line's box, in page pixels. */
   box?: number[];
   triage: { decision: TriageValue; decided_at: string } | null;
-  correction: { value: string; text: string | null; correction_start: "candidate" | "blank" | "page_paste"; decided_at: string } | null;
+  correction: { value: string; text: string | null; correction_start: "candidate" | "blank"; decided_at: string } | null;
 }
 
 /**
@@ -134,7 +124,6 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
     const reviewers = [...new Set(r.current.map((d) => d.reviewerId))].sort();
     for (const reviewer of reviewers) {
       const current = r.current.find((d) => d.reviewerId === reviewer)!;
-      const pasted = current.correctionStart === "page_paste";
       // The reviewer's answers on this content, oldest first (a stale answer, on content since changed, is not theirs).
       const mine = [...r.superseded.filter((d) => d.reviewerId === reviewer && d.proposalSha256 === current.proposalSha256), current].sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt),
@@ -143,20 +132,17 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
       rows.push({
         item_id: itemId,
         reviewer,
-        candidate_provenance: pasted ? null : provenance,
-        candidate_sha256: pasted || candidate === "" ? null : plant ? plant.plantedSha256 : sha256Hex(candidate),
-        plant: !pasted && plant ? {
-          planted_sha256: plant.plantedSha256, type: plant.plantType,
-          ...(plant.voidedAt ? { voided_at: plant.voidedAt, void_reason: plant.voidReason } : {}),
-        } : null,
-        queue: pasted ? "page_paste" : candidate === "" ? "desktop_no_candidate" : "triage",
-        triage: !pasted && lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.createdAt } : null,
+        candidate_provenance: provenance,
+        candidate_sha256: candidate === "" ? null : plant ? plant.plantedSha256 : sha256Hex(candidate),
+        plant: plant ? { planted_sha256: plant.plantedSha256, type: plant.plantType } : null,
+        queue: candidate === "" ? "desktop_no_candidate" : "triage",
+        triage: lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.createdAt } : null,
         correction: isTriageValue(current.value)
           ? null
           : {
-              value: !pasted && plant ? plantCorrection(p, current) : current.value,
+              value: plant ? plantCorrection(p, current) : current.value,
               text: current.text,
-              correction_start: current.correctionStart ?? (candidate === "" ? "blank" : "candidate"),
+              correction_start: candidate === "" ? "blank" : "candidate",
               decided_at: current.createdAt,
             },
       });
@@ -203,12 +189,8 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
     });
   }
   const batchId = (batch.source as { batch_id?: string }).batch_id ?? batch.id;
-  const voidedPlants = plantList.filter((plant) => plant.voidedAt).map((plant) => ({
-    item_id: plant.itemId, plant_type: plant.plantType, candidate_sha256: plant.candidateSha256,
-    planted_sha256: plant.plantedSha256, voided_at: plant.voidedAt, reason: plant.voidReason,
-  }));
   return [
-    { fileName: REFERENCE_TRIAGE_FILE, content: { schema: REFERENCE_TRIAGE_SCHEMA, batch_id: batchId, exported_at: exportedAt, pages, rows, history, ...(voidedPlants.length ? { voided_plants: voidedPlants } : {}) } },
+    { fileName: REFERENCE_TRIAGE_FILE, content: { schema: REFERENCE_TRIAGE_SCHEMA, batch_id: batchId, exported_at: exportedAt, pages, rows, history } },
     { fileName: REFERENCE_TRIAGE_HISTORY_FILE, content: { schema: REFERENCE_TRIAGE_HISTORY_SCHEMA, batch_id: batchId, exported_at: exportedAt, replaced } },
   ];
 }

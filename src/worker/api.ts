@@ -1,5 +1,3 @@
-import { OUTSIDE_PAGE_PASTE } from "../tasks/line_verify/page_paste";
-import { nextPagePaste, pagePasteProgress, savePagePaste } from "./page_paste";
 import { SYNTH_REALISM, type Side } from "../shared/synth_realism";
 import { nextRealism, realismAdmin, realismAsset, realismChoice, realismFeedback, realismProgress } from "./synth_realism";
 import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
@@ -191,9 +189,6 @@ export async function batches(ctx: Ctx): Promise<Response> {
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
-    const paste = isTriageBatch(b) && isAdmin(ctx.env, reviewer.id)
-      ? await pagePasteProgress(ctx.env.DB, b.id, reviewer.id)
-      : null;
     out.push({
       id: b.id,
       taskType: b.taskType,
@@ -201,7 +196,6 @@ export async function batches(ctx: Ctx): Promise<Response> {
       title: b.title,
       progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
       subsets: await subsetsOf(ctx.env.DB, b.id),
-      ...(paste?.total ? { pagePaste: paste } : {}),
       ...(isTriageBatch(b) ? { triage: (await triageCounts(ctx.env.DB, b, reviewer.id, ctx.now))! } : {}),
     });
   }
@@ -252,8 +246,6 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   const proposal = Number.isSafeInteger(id) ? await getProposal(ctx.env.DB, id) : null;
   if (!proposal || !proposal.active) throw new HttpError(404, "not_found");
   const batch = await openBatch(ctx, proposal.batchId);
-  if (isTriageBatch(batch) && !(await ctx.env.DB.prepare(`SELECT 1 FROM proposals p WHERE p.id = ?1 AND ${OUTSIDE_PAGE_PASTE}`)
-    .bind(proposal.id).first())) throw new HttpError(409, "not_open");
   // A volunteer line: only one this reviewer was served (or decided); the maintainer's: only one that went to them.
   if (isConsensus(batch)) {
     if (!(await lineOpenTo(ctx.env.DB, proposal, reviewerId, isAdmin(ctx.env, reviewerId)))) throw new HttpError(409, "not_open", "this line is not open to you");
@@ -445,27 +437,6 @@ async function requireAdmin(ctx: Ctx): Promise<ReviewerRow> {
   const reviewer = await requireReviewer(ctx);
   if (!isAdmin(ctx.env, reviewer.id)) throw new HttpError(403, "admin_only");
   return reviewer;
-}
-
-async function pagePasteAccess(ctx: Ctx, batchId: string, write: boolean) {
-  const reviewer = await requireAdmin(ctx);
-  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
-  if (write) assertSameOrigin(ctx.request);
-  enforce(write ? LIMITS.writeMinute : LIMITS.readMinute, reviewer.id, ctx.now);
-  const batch = await openBatch(ctx, batchId);
-  if (!isTriageBatch(batch)) throw new HttpError(404, "not_found");
-  return reviewer.id;
-}
-
-export async function pasteNext(ctx: Ctx, batchId: string): Promise<Response> {
-  const reviewer = await pagePasteAccess(ctx, batchId, false);
-  return json(await nextPagePaste(ctx.env.DB, batchId, reviewer));
-}
-
-export async function pasteSave(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
-  const reviewer = await pagePasteAccess(ctx, batchId, true);
-  const { text } = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
-  return json(await savePagePaste(ctx.env.DB, batchId, itemId, reviewer, text, iso(ctx.now)));
 }
 
 /** Deployment and local mode both use the explicit flag. Every realism endpoint still requires an admin. */

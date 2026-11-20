@@ -60,7 +60,6 @@ export interface DecisionRecord {
   /** YYYY-MM-DD (UTC). */
   decidedOn: string;
   supersededAt: string | null;
-  correctionStart?: "page_paste";
   /** The proposal content the reviewer saw; a decision on changed content is stale and never exported. */
   proposalSha256: string;
   termsVersion: string;

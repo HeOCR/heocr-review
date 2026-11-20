@@ -45,7 +45,6 @@ export interface DecisionRow {
   created_at: string;
   decided_on: string;
   superseded_at: string | null;
-  correction_start?: "page_paste" | null;
 }
 
 export function toBatch(row: BatchRow): BatchRecord & { status: string } {
@@ -97,7 +96,6 @@ export function toDecision(row: DecisionRow): DecisionRecord {
     createdAt: row.created_at,
     decidedOn: row.decided_on,
     supersededAt: row.superseded_at,
-    ...(row.correction_start ? { correctionStart: row.correction_start } : {}),
   };
 }
 
@@ -115,7 +113,7 @@ export const BATCH_SQL = `SELECT id, task_type, title, source_json, min_reviewer
   (SELECT s.mode FROM batch_settings s WHERE s.batch_id = batches.id) AS mode
   FROM batches`;
 export const DECISION_SQL = `SELECT id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at,
-  decided_on, superseded_at, correction_start FROM decisions`;
+  decided_on, superseded_at FROM decisions`;
 
 export interface CreditRow {
   reviewer_id: string;

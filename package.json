@@ -22,7 +22,6 @@
     "maintainer-decided": "tsx scripts/maintainer-decided.ts",
     "batch-setting": "tsx scripts/batch-setting.ts",
     "prefill-swap": "tsx scripts/prefill-swap.ts",
-    "register-page-paste": "tsx scripts/register-page-paste.ts",
     "import-plants": "tsx scripts/import-plants.ts",
     "import-gold": "tsx scripts/import-gold.ts",
     "test:e2e": "playwright test"

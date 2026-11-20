@@ -200,7 +200,6 @@ export interface BatchSummary {
   subsets: { id: string; title: string; size: number }[];
   /** A triage batch (migrations/0012_triage.sql): how many lines each of my two queues still holds. */
   triage?: { triage: number; fix: number };
-  pagePaste?: { total: number; completed: number };
 }
 
 export interface NextResponse {
@@ -243,11 +242,4 @@ export interface DecisionRequest {
 export interface ApiError {
   error: string;
   message?: string;
-}
-
-/** A registered page in the assigned admin's separate desktop queue. */
-export interface PagePasteQueue {
-  total: number;
-  completed: number;
-  page: { itemId: number; title: string; expected: number; image: ImageView } | null;
 }
