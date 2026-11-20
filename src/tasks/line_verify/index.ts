@@ -17,7 +17,7 @@ import { imageUrl } from "../../shared/media";
 import { sha256Hex } from "../../shared/sha256";
 import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType, VerifyVote } from "../types";
 import { PHIST_GOLD_FILE, PHIST_GOLD_SHA256, type GoldMark } from "./gold";
-import { asReference, isTriageBatch, referenceTriageFile } from "./triage";
+import { asReference, isTriageBatch, plantOf, referenceTriageFiles } from "./triage";
 import { GATE_BATCH_ID, LINE_FOLD_V1_SHA256, referenceOf, routeLine, type CountedVote } from "./resolution";
 import {
   DECISIONS_SCHEMA,
@@ -348,7 +348,11 @@ export const lineVerify: TaskType = {
    */
   exportDecisions(batch: BatchRecord, given: ResolvedProposal[], extra?: ExportExtra): ExportFile {
     // Triage answers as the contract has them (triage.ts): an unfixed "different" is not a reference, so not exported.
-    const all = given.map((r) => ({ ...r, current: r.current.map((d) => asReference(r.proposal, d)).filter((d): d is DecisionRecord => d !== null) }));
+    const plants = new Map((extra?.triagePlants ?? []).map((x) => [x.proposalId, x]));
+    const all = given.map((r) => {
+      const planted = plantOf(r.proposal, plants) !== null;
+      return { ...r, current: r.current.map((d) => asReference(r.proposal, d, planted)).filter((d): d is DecisionRecord => d !== null) };
+    });
     const level = levelOf(batch);
     const v12 = level >= 1;
     const v13 = level >= 2;
@@ -476,8 +480,8 @@ export const lineVerify: TaskType = {
     };
   },
 
-  exportExtraFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string): ExportFile[] {
-    return isTriageBatch(batch) ? [referenceTriageFile(batch, resolved, exportedAt)] : [];
+  exportExtraFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, extra?: ExportExtra): ExportFile[] {
+    return isTriageBatch(batch) ? referenceTriageFiles(batch, resolved, exportedAt, extra?.triagePlants ?? []) : [];
   },
 
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[] {

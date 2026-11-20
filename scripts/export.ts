@@ -13,6 +13,7 @@
  * Then copy the decisions file over hocrgen's docs/reference_audit_decisions.json in a PR, and check it there:
  *   python -m hocrgen.tools.reference_audit --decisions docs/reference_audit_decisions.json
  */
+import { TRIAGE_PLANTS_SQL, toTriagePlant } from "../src/tasks/line_verify/triage";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildExport, formatJson } from "../src/tasks/export";
@@ -36,7 +37,12 @@ function main(): void {
     proposals,
     decisions: one<DecisionRow>(EXPORT_SQL.decisions).map(toDecision),
     credits: one<CreditRow>(EXPORT_SQL.credits).map(toCredit),
-    ...(batchRow.task_type === "line_verify" ? { pointedDrops: one<PointedDropRow>(POINTED_DROPS_SQL).map(toPointedDrop) } : {}),
+    ...(batchRow.task_type === "line_verify"
+      ? {
+          pointedDrops: one<PointedDropRow>(POINTED_DROPS_SQL).map(toPointedDrop),
+          triagePlants: one<{ proposal_id: number; plant_type: string; planted_sha256: string; candidate_sha256: string }>(TRIAGE_PLANTS_SQL).map(toTriagePlant),
+        }
+      : {}),
     ...(batchRow.task_type === "line_consensus"
       ? {
           exclusions: one<{ reviewer_id: string; excluded_at: string }>(CONSENSUS_EXPORT_SQL.exclusions).map((r) => ({ reviewerId: r.reviewer_id, excludedAt: r.excluded_at })),
