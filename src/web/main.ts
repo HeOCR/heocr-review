@@ -25,8 +25,8 @@ let prefs: Prefs = loadPrefs();
 
 /**
  * Screens adopted to the design render in main.doc (general pages) or main.task with body.task (task screens: line
- * verification, volunteer lines, reference audit). Page review renders in main.legacy, styled by css/bridge.css,
- * until its design-adoption step (HeOCR/heocr-review#58); admin stays there (desktop only, not adapted: SPEC §9).
+ * verification, volunteer lines, reference audit, page review). Admin renders in main.legacy, styled by
+ * css/bridge.css: it is desktop only and not adapted (design SPEC §9).
  */
 type Look = "doc" | "task" | "legacy";
 function show(look: Look, ...nodes: Node[]): void {
@@ -171,7 +171,7 @@ async function route(): Promise<void> {
         : batch.taskType === "line_consensus"
           ? lineConsensusView(batch, hooks, startAt)
           : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
-    show(batch.taskType === "page_review" ? "legacy" : "task", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
+    show("task", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
   } catch (err) {

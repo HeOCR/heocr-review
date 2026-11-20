@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiFailure } from "../../src/web/api";
 import { setLang, tRich } from "../../src/web/i18n";
 import {
+  canDecidePage,
   clearDraft,
   dropPending,
   exactNeedsPage,
@@ -45,6 +46,13 @@ describe("a flagged line and its page (maintainer's decision 2026-11-19, SPEC §
 
   it("never holds back a line that is not flagged", () => {
     for (const opened of [false, true]) for (const desktop of [false, true]) expect(exactNeedsPage(false, opened, desktop)).toBe(false);
+  });
+});
+
+describe("page review on a phone (SPEC §9, §14.6)", () => {
+  it("never decides a page on a phone; a desktop can", () => {
+    expect(canDecidePage(false)).toBe(false);
+    expect(canDecidePage(true)).toBe(true);
   });
 });
 

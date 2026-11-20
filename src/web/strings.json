@@ -289,16 +289,16 @@
   "אל המזח · pages"
  ],
  "p_where": [
-  "עמוד 37",
-  "Page 37"
+  "עמוד {page}",
+  "Page {page}"
  ],
  "p_ask": [
   "תקנו כל שורה למה שמודפס בדיוק, לפי סדר הקריאה.",
   "Correct each line to exactly what is printed, in reading order."
  ],
  "p_pending": [
-  "נשארו 2 שורות מסומנות לבדיקה.",
-  "2 flagged lines still to look at."
+  "נשארו {n} שורות מסומנות לבדיקה.",
+  "{n} flagged lines still to look at."
  ],
  "p_confirm": [
   "אישור העמוד",
@@ -787,5 +787,141 @@
  "signin_off": [
   "ההתחברות עדיין לא הוגדרה.",
   "Sign-in is not configured yet."
+ ],
+ "p_all_looked": [
+  "כל השורות המסומנות נבדקו. עברו על השאר ואשרו את העמוד.",
+  "Every flagged line was looked at. Go over the rest and confirm the page."
+ ],
+ "p_draft_failed": [
+  "שמירת הטיוטה נכשלה; מנסה שוב",
+  "Saving the draft failed; retrying"
+ ],
+ "p_stale": [
+  "העמוד השתנה: טענו את הדף מחדש",
+  "The page changed: reload it"
+ ],
+ "p_mismatch": [
+  "קריאה שונה",
+  "Reads differently"
+ ],
+ "p_hidden": [
+  "תו נסתר",
+  "Hidden character"
+ ],
+ "p_hidden_title": [
+  "בשורה יש תו נסתר (סימן כיווניות). אם הוא לא בדפוס, מחקו אותו.",
+  "The line holds an invisible character (a direction mark). If it isn't printed, delete it."
+ ],
+ "p_line": [
+  "שורה {n}",
+  "Line {n}"
+ ],
+ "st_edit": [
+  "תוקן",
+  "Edited"
+ ],
+ "st_merge": [
+  "אוחד",
+  "Merged"
+ ],
+ "st_split": [
+  "פוצל",
+  "Split"
+ ],
+ "st_added": [
+  "נוסף",
+  "Added"
+ ],
+ "p_up": [
+  "הזזה למעלה",
+  "Move up"
+ ],
+ "p_down": [
+  "הזזה למטה",
+  "Move down"
+ ],
+ "p_dash": [
+  "קו מפריד",
+  "Dash"
+ ],
+ "p_delete": [
+  "מחיקת השורה שנוספה",
+  "Delete the added line"
+ ],
+ "p_no_image": [
+  "אין תמונה לעמוד הזה.",
+  "No image for this page."
+ ],
+ "p_no_prefill": [
+  "אין לעמוד הזה טקסט מוכן: הקלידו את שורותיו.",
+  "No pre-fill for this page: type its lines."
+ ],
+ "p_reading_order": [
+  "סדר הקריאה נבדק: הטור הימני קודם, וההערות שבשוליים במקומן (הזיזו שורות עם ↑/↓).",
+  "Reading order checked: right column first, margin notes in place (move lines with ↑/↓)."
+ ],
+ "p_reason": [
+  "סיבה…",
+  "Reason…"
+ ],
+ "p_note_ph": [
+  "הערה (חובה ב״אחר״)",
+  "Note (required for “other”)"
+ ],
+ "p_reject_btn": [
+  "פסילה",
+  "Reject"
+ ],
+ "p_mine": [
+  "ההחלטה שלך: {v} · החלטה חדשה תחליף אותה.",
+  "Your decision: {v} · A new decision replaces it."
+ ],
+ "p_confirmed": [
+  "אושר",
+  "Confirmed"
+ ],
+ "p_rejected": [
+  "נפסל",
+  "Rejected"
+ ],
+ "p_prev": [
+  "העמוד הקודם",
+  "Previous page"
+ ],
+ "p_done": [
+  "אין עוד עמודים בשבילך כרגע",
+  "No pages left for you right now"
+ ],
+ "p_done_set": [
+  "סיימת את הסט הזה",
+  "You have finished this set"
+ ],
+ "p_done_pass2": [
+  "עמודי המעבר השני נפתחים יממה אחרי שאישרת את העמוד במעבר הראשון.",
+  "Second-pass pages open a day after your first-pass confirm."
+ ],
+ "p_done_skips": [
+  "חזרה ל־{n} העמודים שדילגת עליהם",
+  "Go back to the {n} pages you skipped"
+ ],
+ "p_pass2": [
+  "מעבר שני",
+  "Second pass"
+ ],
+ "p_ai_tag": [
+  "רמזים: Claude",
+  "Hints: Claude"
+ ],
+ "p_ai_title": [
+  "רמז בלבד: הקריאה של Claude בסריקה שונה כאן, או שליד השורה יש טקסט שחסר. הקלידו את מה שמודפס.",
+  "A hint only: Claude reads this differently, or sees text next to it that is missing. Type what is printed."
+ ],
+ "pp_copied": [
+  "הקישור הועתק",
+  "Link copied"
+ ],
+ "conv_h_short": [
+  "כללי הקלדה",
+  "Typing conventions"
  ]
 }

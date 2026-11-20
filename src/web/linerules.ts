@@ -15,6 +15,11 @@ export function exactNeedsPage(flagged: boolean, pageOpened: boolean, desktop: b
   return flagged && !desktop && !pageOpened;
 }
 
+/** Page review decides a page only on a desktop; a phone gets the hand-off (SPEC §9, §14.6). */
+export function canDecidePage(desktop: boolean): boolean {
+  return desktop;
+}
+
 /** Why a decision did not save, as the failed notice says it (SPEC §6). */
 export type FailureKind = "offline" | "rate_limited" | "daily_limit" | "server" | "rejected";
 

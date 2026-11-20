@@ -1,7 +1,8 @@
-/* Bridge: the app's previous styles, scoped to the task views not yet adopted to the design (main.legacy).
+/* Bridge: the app's previous styles, scoped to main.legacy, for the one view not adopted to the design (admin).
    Generated once from the old public/styles.css (prefix "main.legacy", breakpoints 999/1000 -> 899/900 per the
-   design). Each design-adoption step (HeOCR/heocr-review#54-#58) removes its view's part; when nothing uses
-   main.legacy, this file goes. The public pages still load public/styles.css until step 5. */
+   design). Steps 2-6 (HeOCR/heocr-review#54-#58) removed their views' parts; what is left styles the admin view,
+   which stays as it was (desktop only, not adapted: design SPEC §9). The public pages load
+   public/styles.css (they are not part of the design set). */
 main.legacy {
   --bg: #f7f6f2;
   --fg: #1c1c1e;
@@ -93,7 +94,6 @@ main.legacy .tag { border: 1px solid var(--line); border-radius: 999px; padding:
 main.legacy .conf-high { border-color: var(--ok); color: var(--ok); }
 main.legacy .conf-medium { border-color: #b08800; color: #b08800; }
 main.legacy .conf-low { border-color: var(--bad); color: var(--bad); }
-main.legacy .viewer { margin: 10px 0; }
 main.legacy .scroller {
   overflow: auto; max-height: 55vh; background: var(--scan-bg); border: 1px solid var(--line); border-radius: 8px;
   -webkit-overflow-scrolling: touch; text-align: center; direction: ltr;
@@ -101,8 +101,6 @@ main.legacy .scroller {
 main.legacy .frame { position: relative; display: inline-block; max-width: none; vertical-align: top; }
 main.legacy .frame img { display: block; width: 100%; height: auto; }
 main.legacy .hl { position: absolute; outline: 2px solid var(--hl); outline-offset: 2px; border-radius: 2px; pointer-events: none; box-shadow: 0 0 0 9999px #0000000f; }
-main.legacy .zoombar { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 6px; }
-main.legacy .zoomlevel { min-width: 3.5em; text-align: center; font-size: 14px; color: var(--muted); }
 main.legacy .texts { display: grid; gap: 6px; }
 main.legacy .texts .row { display: grid; grid-template-columns: 3.6em 1fr; gap: 8px; align-items: baseline; margin: 0; }
 main.legacy .lab { color: var(--muted); font-size: 14px; }
@@ -198,58 +196,7 @@ main.legacy .doc li { margin: 6px 0; }
 main.legacy .doc ul ul { margin-top: 4px; }
 main.legacy .cta { display: inline-block; background: var(--acc); color: #fff; text-decoration: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; }
 main.legacy code { font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
-main.legacy:has(.pagereview) { max-width: 1500px; }
-main.legacy .conventions { margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
-main.legacy .conventions summary { cursor: pointer; font-weight: 600; }
-main.legacy .conventions dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; }
-main.legacy .conventions dt { color: var(--muted); }
-main.legacy .conventions dd { margin: 0; font-weight: 600; text-align: right; unicode-bidi: plaintext; }
-main.legacy .prgrid { display: grid; gap: 14px; }
-@media (min-width: 900px) {
-  main.legacy .prgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-  main.legacy .prgrid .scan { position: sticky; top: 8px; }
-  main.legacy .prgrid .scan .scroller { max-height: calc(100vh - 90px); }
-}
-@media (max-width: 899px) {
-  main.legacy .prgrid .scan { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-bottom: 4px; box-shadow: 0 2px 4px #0002; }
-  main.legacy .prgrid .scan .viewer { margin: 0; }
-  main.legacy .prgrid .scan .scroller { max-height: 34vh; max-height: 34dvh; }
-  main.legacy .prline { scroll-margin-top: calc(34vh + 56px); scroll-margin-top: calc(34dvh + 56px); }
-}
-main.legacy .prlines { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
-main.legacy .prline { display: grid; grid-template-columns: 2.2em 1fr; gap: 6px; align-items: start; padding: 4px 6px; border-radius: 8px; border: 1px solid transparent; }
-main.legacy .prline .num { font-size: 13px; padding-top: 10px; text-align: center; }
-main.legacy .prline .lhead { display: flex; gap: 6px; flex-wrap: wrap; }
-main.legacy .prline .lhead:empty { display: none; }
-main.legacy .prline .flag { font-size: 12px; color: var(--attn-line, #b08800); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
-main.legacy .prline .flag.ai { color: var(--ai-hint); border-style: dashed; }
-main.legacy .prline .state { font-size: 12px; color: var(--edit); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
-main.legacy .prline .state[data-action="not_on_page"], main.legacy .prline .state[data-action="unreadable"] { color: var(--bad); }
-main.legacy .prline .hidden { font-size: 12px; color: var(--bad); }
-main.legacy .prline .hidden[hidden], main.legacy .prline .state[hidden] { display: none; }
 main.legacy .prline input.lt {
   width: 100%; font-size: 21px; line-height: 1.5; padding: 4px 8px;
   font-family: "Frank Ruehl CLM", "Taamey Frank CLM", "David", "Times New Roman", "Noto Serif Hebrew", serif;
-}
-main.legacy .prline.tiera { border-color: var(--attn-line, #b08800); background: var(--attn-bg, #fff6d6); }
-main.legacy .prline.tiera.looked { background: none; border-color: var(--line); }
-main.legacy .prline.excluded input.lt { text-decoration: line-through; color: var(--muted); }
-main.legacy .prline .tools { display: none; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
-main.legacy .prline:focus-within { border-color: var(--acc); }
-main.legacy .prline:focus-within .tools { display: flex; }
-main.legacy .prline .tools button { padding: 2px 8px; font-size: 13px; }
-main.legacy .pending { font-weight: 600; color: var(--attn-line, #b08800); margin: 4px 0; }
-main.legacy .pending.ok { color: var(--ok); }
-main.legacy .decide .confirmbtn { font-size: 17px; padding: 10px 16px; }
-main.legacy .decide .confirmbtn.notyet { opacity: .6; }
-main.legacy .roc { gap: 8px; align-items: center; cursor: pointer; }
-main.legacy .roc input { width: 20px; height: 20px; }
-main.legacy .reject { margin-top: 10px; }
-main.legacy .reject summary { cursor: pointer; color: var(--bad); }
-@media (max-width: 520px) {
-  main.legacy .prline { grid-template-columns: 1.6em 1fr; padding: 4px 2px; }
-  main.legacy .prline input.lt { font-size: 19px; }
-  main.legacy .conventions dl { grid-template-columns: 1fr; }
-}
-@media (max-width: 520px) {
 }
