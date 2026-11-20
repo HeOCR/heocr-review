@@ -150,6 +150,8 @@ export default defineConfig(async () => {
           ],
           test: {
             name: "worker",
+            // Multi-request D1 flows can exceed the default 5 seconds on CI runners.
+            testTimeout: 15_000,
             include: ["test/worker/**/*.test.ts"],
             setupFiles: ["./test/worker/setup.ts"],
           },
