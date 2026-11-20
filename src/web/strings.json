@@ -5,8 +5,8 @@
   "אל המזח · lines"
  ],
  "where": [
-  "שורה 14 · עמ׳ 37",
-  "Line 14 · p. 37"
+  "שורה {line} · עמ׳ {page}",
+  "Line {line} · p. {page}"
  ],
  "left": [
   "נשארו",
@@ -133,8 +133,8 @@
   "Page"
  ],
  "src": [
-  "אל המזח, עמ׳ 37",
-  "אל המזח, p. 37"
+  "{book}, עמ׳ {page}",
+  "{book}, p. {page}"
  ],
  "conv": [
   "כללי ההקלדה",
@@ -161,8 +161,8 @@
   "Close"
  ],
  "flag": [
-  "<strong>בדיקה מוקדמת:</strong> ייתכן שהטקסט שגוי (אות חסרה או מיותרת). בדקו מול העמוד המלא לפני ״מדויק״.",
-  "<strong>Pre-check:</strong> the text may be wrong (a missing or extra letter). Check it against the full page before “Exact”."
+  "<strong>בדיקה מוקדמת:</strong> ייתכן שהטקסט שגוי ({reasons}). בדקו מול העמוד המלא לפני ״מדויק״.",
+  "<strong>Pre-check:</strong> the text may be wrong ({reasons}). Check it against the full page before “Exact”."
  ],
  "flag_phone": [
   "פתחו את העמוד המלא כדי לסמן ״מדויק״.",
@@ -461,12 +461,12 @@
   "No lines left for you right now"
  ],
  "done_p": [
-  "תודה רבה. היום החלטת על 64 שורות.",
-  "Thank you. Today you decided 64 lines."
+  "תודה רבה. היום החלטת על {n} שורות.",
+  "Thank you. Today you decided {n} lines."
  ],
  "done_skips": [
-  "חזרה ל־3 השורות שדילגת עליהן",
-  "Go back to the 3 lines you skipped"
+  "חזרה ל־{n} השורות שדילגת עליהן",
+  "Go back to the {n} lines you skipped"
  ],
  "done_last": [
   "חזרה להחלטה האחרונה",
@@ -659,5 +659,97 @@
  "lang_en": [
   "English",
   "English"
+ ],
+ "fail_rate": [
+  "<strong>ההחלטה לא נשמרה.</strong> נשלחו יותר מדי פעולות בדקה. התשובה שלך שמורה במכשיר; נסו שוב בעוד רגע.",
+  "<strong>The decision wasn't saved.</strong> Too many actions in a minute. Your answer is kept on this device; try again in a moment."
+ ],
+ "fail_srv": [
+  "<strong>ההחלטה לא נשמרה.</strong> השרת לא הצליח לשמור אותה. התשובה שלך שמורה במכשיר.",
+  "<strong>The decision wasn't saved.</strong> The server couldn't save it. Your answer is kept on this device."
+ ],
+ "fail_quota": [
+  "<strong>ההחלטה לא נשמרה.</strong> האתר שומר מספר מוגבל של החלטות ביום, והיום הוא התמלא. התשובה שלך שמורה במכשיר.",
+  "<strong>The decision wasn't saved.</strong> The site saves a limited number of decisions a day, and today's are used up. Your answer is kept on this device."
+ ],
+ "fail_rejected": [
+  "<strong>ההחלטה לא נשמרה.</strong> {reason}",
+  "<strong>The decision wasn't saved.</strong> {reason}"
+ ],
+ "fail_unkept": [
+  "(הדפדפן לא מאפשר לשמור במכשיר.)",
+  "(This browser won't keep it on the device.)"
+ ],
+ "resent": [
+  "ההחלטה שנשמרה במכשיר נשלחה.",
+  "The answer kept on this device was sent."
+ ],
+ "img_loading": [
+  "התמונה עוד נטענת.",
+  "The image is still loading."
+ ],
+ "no_image": [
+  "אין תמונה לשורה הזאת.",
+  "No image for this line."
+ ],
+ "nq_letters": [
+  "עם ״בדפוס יש ניקוד״ מקלידים אותיות בלבד, בלי ניקוד.",
+  "With “Print has niqqud”, type letters only, without niqqud."
+ ],
+ "type_letters": [
+  "מקלידים אותיות בלבד. אם בדפוס יש ניקוד, סמנו זאת.",
+  "Type letters only. If the print has niqqud, tick the box."
+ ],
+ "type_line": [
+  "הקלידו את השורה.",
+  "Type the line."
+ ],
+ "mine": [
+  "ההחלטה שלך: {v}",
+  "Your decision: {v}"
+ ],
+ "mine_replace": [
+  "החלטה חדשה תחליף אותה.",
+  "A new decision replaces it."
+ ],
+ "mine_final": [
+  "ההחלטה שלך (סופית): {v}",
+  "Your decision (final): {v}"
+ ],
+ "type_save_final": [
+  "שמירה (סופית)",
+  "Save (final)"
+ ],
+ "type_ask_more": [
+  "גם כותרת, מספר עמוד או מילת קישור.",
+  "Running heads, page numbers and catchwords too."
+ ],
+ "type_ask_final": [
+  "הטקסט נשמר סופית.",
+  "Saving is final."
+ ],
+ "to_queue": [
+  "לתור",
+  "Back to the queue"
+ ],
+ "keys_h": [
+  "קיצורי מקלדת",
+  "Keyboard shortcuts"
+ ],
+ "keys_hint": [
+  "? מציג את הקיצורים",
+  "? shows the shortcuts"
+ ],
+ "line_on_scan": [
+  "השורה בסריקה",
+  "The line on the scan"
+ ],
+ "line_ctx": [
+  "השורה עם השורות שלפניה ואחריה",
+  "The line with its neighbours"
+ ],
+ "licence": [
+  "רישיון הטקסט",
+  "Text licence"
  ]
 }

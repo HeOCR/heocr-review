@@ -29,4 +29,8 @@ describe("the app's design assets match design/review (HeOCR/heocr-review#51)", 
       expect(readFileSync(`public/fonts/${f}`).equals(readFileSync(`design/review/fonts/${f}`)), f).toBe(true);
     }
   });
+
+  it("has no gold branch in the line screen: a gold line is drawn exactly like any other (SPEC §4.1)", () => {
+    expect(readFileSync("src/web/views/line.ts", "utf8")).not.toMatch(/gold/i);
+  });
 });

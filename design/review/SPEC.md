@@ -109,7 +109,7 @@ Opening the box (`E`, or Correct it):
 - **"You changed":** the removed text struck through in red, the inserted text underlined in green, in one line. It replaces today's three-row comparison on a phone; a desktop may keep the code-point row below it.
 - **"Back to the candidate"** restores the candidate text in one tap.
 - **Niqqud-free typing:** the checkbox "Print has niqqud (type letters only)" turns the answer into `pointed_print`. If niqqud is typed, saving is refused with the reason in the message line, as today.
-- **Drafts.** The text being edited is kept in the browser (session storage) per line, so a reload or a dropped connection does not lose it. Nothing is written to the database until Save.
+- **Drafts.** The text being edited is kept in the browser (session storage) per line, so a reload or a dropped connection does not lose it. Nothing is written to the database until Save. Session storage may be blocked; the box works without it. (Page review is the one exception to "written only on Save": it keeps its per-page drafts on the server, `PUT /api/proposals/:id/draft`; see §6.)
 
 ### 4.3 Consensus (volunteer lines)
 
@@ -164,7 +164,7 @@ States: default / hover / focus / pressed / disabled, and saving / saved / error
 
 ## 6. Saving and bad connections
 
-The database is written only when the user commits a decision; nothing is saved per keystroke.
+The database is written only when the user commits a decision; nothing is saved per keystroke. The one exception is page review's draft (a page is dozens of lines): it is saved to the server per page, explicitly, and is cleared when the page is decided (heocr-lead, 2026-11-19).
 
 1. **On commit** the pressed answer shows "Saving…" and every answer is disabled (`line-08-saving`). A second tap cannot send a second decision.
 2. **On success** the next line appears and the save state reads "Previous decision saved".
@@ -192,15 +192,16 @@ Shortcuts are on physical keys (`e.code`), so they work in a Hebrew layout. Each
 | `M`, `4` | Misaligned | | |
 | `A` / `R` | | | Accept / Reject |
 | `S`, `5` | Skip | Skip | Skip |
-| `B`, `Backspace` | Previous | | Previous |
+| `B` | Previous | | Previous |
 | `+` / `−`, `Z` / `X` | Zoom | Zoom | Zoom |
 | `P` | Enlarge the page | Enlarge the page | Enlarge the page |
 | `Ctrl+Enter` / `Esc` | Save / cancel the edit | same | same |
-| `J`, `T` | (typed line) More than one line, No text | | |
+| `J`, `T`, `K` | (typed line) More than one line, No text, Continued | | |
+| `?` | The key list | | |
 
 Page review keeps its keys: `Enter` looked and next flagged line, `↑`/`↓`, `Alt+Enter` split, `Alt+J` merge, `Alt+N`, `Alt+X`, `Alt+U`, `Alt+↑`/`↓` move, `Alt+A` add, `Alt+-` dash, `Ctrl+Enter` confirm.
 
-Proposed changes:
+Changes the maintainer approved on 2026-11-19 (in the app since line verification's adoption, HeOCR/heocr-review#54):
 
 1. **Drop `Backspace` for Previous.** It is the key a typist reaches for by habit, and one stray press leaves the line. `B` is enough.
 2. **`Esc` closes the enlarged page and the More sheet**, as well as cancelling an edit.

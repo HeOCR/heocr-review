@@ -7,6 +7,8 @@ export interface ReviewHooks {
   /** The server wants the current terms accepted first; resolve once they are. */
   needTerms(): Promise<void>;
   signedOut(): void;
+  /** The top bar's second line under the batch title (e.g. "Line 14 · p. 37"), or null to clear it. */
+  where?(line: string | null): void;
 }
 
 export interface ReviewScreen {
