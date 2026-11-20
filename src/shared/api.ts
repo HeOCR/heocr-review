@@ -198,12 +198,16 @@ export interface BatchSummary {
   progress: Progress;
   /** Subsets the reviewer can filter the queue to (e.g. an interim eval set); size = its number of pages to serve. */
   subsets: { id: string; title: string; size: number }[];
+  /** A triage batch (migrations/0012_triage.sql): how many lines each of my two queues still holds. */
+  triage?: { triage: number; fix: number };
 }
 
 export interface NextResponse {
   proposal: ProposalView | null;
   progress: Progress;
   prefetch: string[];
+  /** A triage batch (migrations/0012_triage.sql): which queue this is, and how many lines each still holds for me. */
+  triage?: { queue: "triage" | "fix"; triage: number; fix: number };
 }
 
 export interface DecisionRequest {

@@ -44,6 +44,8 @@ export interface ExportInput {
 export interface ExportResult {
   decisionsFile: ExportFile;
   ledgerFile: ExportFile;
+  /** Admin-only files beside them (never in the public export). */
+  extraFiles: ExportFile[];
   counts: Record<string, number>;
   problems: string[];
 }
@@ -145,7 +147,8 @@ export function buildExport(input: ExportInput): ExportResult {
       .map((id) => ({ reviewer: id, display_name: creditFor.get(id)!.displayName, consented_at: creditFor.get(id)!.consentedAt })),
   };
   const ledgerName = decisionsFile.fileName.replace(/\.json$/, "") + "_ledger.json";
-  return { decisionsFile, ledgerFile: { fileName: ledgerName, content: ledger }, counts, problems };
+  const extraFiles = type.exportExtraFiles?.(batch, resolved, exportedAt) ?? [];
+  return { decisionsFile, ledgerFile: { fileName: ledgerName, content: ledger }, extraFiles, counts, problems };
 }
 
 /** JSON as hocrgen writes it: one-space indent, UTF-8 (no \u escapes), trailing newline. */

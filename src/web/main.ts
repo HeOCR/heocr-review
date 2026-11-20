@@ -150,8 +150,9 @@ async function route(): Promise<void> {
   try {
     const { batches } = await get<{ batches: BatchSummary[] }>("/api/batches");
     const linked = /^p\/(\d{1,12})$/.exec(hash);
-    // #b/<batch>, or #b/<batch>/s/<subset> to work through one subset of it (a filter on the queue).
-    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100}))?$/.exec(hash);
+    // #b/<batch>, or #b/<batch>/s/<subset> to work through one subset of it (a filter on the queue), or in a triage
+    // batch #b/<batch>/q/fix for the desktop fix queue (the triage queue is the default).
+    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100})|\/q\/(triage|fix))?$/.exec(hash);
     let batch: BatchSummary | undefined;
     if (linked) {
       try {
@@ -175,13 +176,17 @@ async function route(): Promise<void> {
     const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
     const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
     const startAt = linked ? Number(linked[1]) : undefined;
+    const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage") : undefined;
     const view: ReviewScreen =
       batch.taskType === "page_review"
         ? pageReviewView(batch, hooks, startAt, subset?.id)
         : batch.taskType === "line_consensus"
           ? lineConsensusView(batch, hooks, startAt)
-          : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
-    show("task", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
+          : batch.taskType === "line_verify"
+            ? lineVerifyView(batch, hooks, startAt, queue)
+            : reviewView(batch, hooks, startAt);
+    const head = batch.triage ? [queueNav(batch, linked ? undefined : queue)] : batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
+    show("task", ...head.map((n) => h("div", { class: "batchhead" }, n)), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
   } catch (err) {
@@ -211,6 +216,18 @@ function subsetNav(batch: BatchSummary, current: string | undefined): HTMLElemen
     { class: "subsetnav small", "aria-label": t("filter") },
     link("", t("all_pages")),
     ...batch.subsets.map((s) => link(s.id, `${s.title} (${s.size})`)),
+  );
+}
+
+/** A triage batch's two queues: triage (any screen) and the desktop fixes, with what each still holds for me. */
+function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): HTMLElement {
+  const link = (q: "triage" | "fix", label: string) =>
+    h("a", { href: `#b/${encodeURIComponent(batch.id)}${q === "fix" ? "/q/fix" : ""}`, ...(current === q ? { "aria-current": "page", class: "on" } : {}) }, label);
+  return h(
+    "nav",
+    { class: "subsetnav small", "aria-label": t("filter") },
+    link("triage", t("q_triage", { n: batch.triage!.triage })),
+    link("fix", t("q_fix", { n: batch.triage!.fix })),
   );
 }
 

@@ -931,5 +931,33 @@
  "conv_h_short": [
   "כללי הקלדה",
   "Typing conventions"
+ ],
+ "tri_correct": [
+  "נכון",
+  "Correct"
+ ],
+ "tri_different": [
+  "שונה — לתיקון במחשב",
+  "Different — fix on desktop"
+ ],
+ "q_triage": [
+  "סימון ({n})",
+  "Triage ({n})"
+ ],
+ "q_fix": [
+  "לתיקון במחשב ({n})",
+  "Desktop fixes ({n})"
+ ],
+ "fix_phone_h": [
+  "{n} שורות ממתינות לתיקון במחשב",
+  "{n} lines wait for the desktop"
+ ],
+ "fix_phone_p": [
+  "את התיקונים עושים במסך גדול. כאן אפשר להמשיך לסמן.",
+  "Fixes are made on a large screen. Here you can keep triaging."
+ ],
+ "to_triage": [
+  "חזרה לסימון",
+  "Back to triage"
  ]
 }

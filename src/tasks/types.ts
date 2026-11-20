@@ -31,7 +31,7 @@ export interface BatchRecord {
   source: Record<string, unknown>;
   minReviewers: number;
   /** The batch's settings (migrations/0006_batch_settings.sql); absent where a record is built without them. */
-  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null; resolution: "single" | "volunteer_v1" | "volunteer_v1_1"; pointedBooks: "drop" | "keep" };
+  settings?: { pass2Reviewer: "same" | "other"; pass2ReviewerSetAt: string | null; twoTypingsGroups: string[]; twoTypingsSetAt: string | null; resolution: "single" | "volunteer_v1" | "volunteer_v1_1"; pointedBooks: "drop" | "keep"; mode: "standard" | "triage" };
 }
 
 export interface ProposalRecord {
@@ -143,6 +143,8 @@ export interface TaskType {
   normalizeDecision(proposal: ProposalRecord, value: string, text: unknown): NormalizedDecision;
   /** The consumer's decisions file, built from the resolved proposals. */
   exportDecisions(batch: BatchRecord, resolved: ResolvedProposal[], extra?: ExportExtra): ExportFile;
+  /** Further admin export files, beside the decisions and the ledger (line_verify triage: reference_triage.json). */
+  exportExtraFiles?(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string): ExportFile[];
   /** Problems with an exported decisions file (empty when valid), checked against the batch's proposals. */
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[];
 }

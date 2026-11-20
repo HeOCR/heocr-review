@@ -14,7 +14,8 @@ import { exportRows, getBatch, getProposal, getReviewer, listBatches, type Revie
 import type { Env } from "./env";
 import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
-import { isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf } from "./queue";
+import { TRIAGE_QUEUES, isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf, triageCounts, triageFilter, type TriageQueue } from "./queue";
+import { isTriageBatch, isTriageValue, triageable } from "../tasks/line_verify/triage";
 import type { LineRouting } from "../tasks/line_verify/resolution";
 import { dropPointedBook, pointedDropsExtra } from "./pointed_books";
 import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
@@ -181,6 +182,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
       title: b.title,
       progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
       subsets: await subsetsOf(ctx.env.DB, b.id),
+      ...(isTriageBatch(b) ? { triage: (await triageCounts(ctx.env.DB, b, reviewer.id, ctx.now))! } : {}),
     });
   }
   return json({ batches: out });
@@ -199,8 +201,18 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const batch = await openBatch(ctx, batchId);
   if (isConsensus(batch)) return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now));
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
-  const subsetId = new URL(ctx.request.url).searchParams.get("subset");
+  const params = new URL(ctx.request.url).searchParams;
+  const subsetId = params.get("subset");
   let filter = null;
+  // A triage batch serves two queues (migrations/0012_triage.sql): ?queue=triage (the default) or ?queue=fix.
+  if (isTriageBatch(batch)) {
+    const queue = params.get("queue") ?? "triage";
+    if (!(TRIAGE_QUEUES as readonly string[]).includes(queue)) throw new HttpError(404, "not_found");
+    filter = await triageFilter(ctx.env.DB, batch.id, reviewer.id, queue as TriageQueue);
+    const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, isAdmin(ctx.env, reviewer.id));
+    const counts = (await triageCounts(ctx.env.DB, batch, reviewer.id, ctx.now))!;
+    return json({ ...out, triage: { queue: queue as TriageQueue, ...counts } });
+  }
   if (subsetId !== null) {
     if (!/^[A-Za-z0-9._-]{1,100}$/.test(subsetId)) throw new HttpError(404, "not_found");
     filter = await loadSubset(ctx.env.DB, batch.id, subsetId);
@@ -258,7 +270,12 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
-  const normalized = taskType(batch.taskType)!.normalizeDecision(proposal, body.value, body.text);
+  // Triage answers (migrations/0012_triage.sql): only in a triage batch, only on a line with a candidate, never text.
+  const normalized = batch.taskType === "line_verify" && isTriageValue(body.value)
+    ? isTriageBatch(batch) && triageable(proposal) && (body.text === undefined || body.text === null)
+      ? { ok: true as const, value: body.value, text: null }
+      : { ok: false as const, error: "a triage answer is for a line with a candidate in a triage batch, without text" }
+    : taskType(batch.taskType)!.normalizeDecision(proposal, body.value, body.text);
   if (!normalized.ok) throw new HttpError(400, "invalid_decision", normalized.error);
   const db = ctx.env.DB;
   const existing = await db
@@ -434,7 +451,11 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   return json({
     counts: result.counts,
     problems: result.problems,
-    files: { [result.decisionsFile.fileName]: result.decisionsFile.content, [result.ledgerFile.fileName]: result.ledgerFile.content },
+    files: {
+      [result.decisionsFile.fileName]: result.decisionsFile.content,
+      [result.ledgerFile.fileName]: result.ledgerFile.content,
+      ...Object.fromEntries(result.extraFiles.map((f) => [f.fileName, f.content])),
+    },
   });
 }
 

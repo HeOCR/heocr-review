@@ -48,3 +48,13 @@ form.dev input { width: 10em; min-height: 44px; } form.dev button { min-height: 
 /* Wide screens: the task column takes all the width beside the page column (the design's 1000 px cap left a third of
    a wide window empty; the maintainer, 2026-11-20). The line strip and the typing box share that width. */
 @media (min-width: 900px) { .rv .review { max-width: none; } }
+
+/* Triage (migrations/0012_triage.sql): three big answers, side by side on a desktop, stacked on a phone. */
+.rv .lineverify.triage .dock .actions { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.rv .lineverify.triage .dock .act.tri { min-height: 60px; font-size: 1.15rem; justify-content: center; }
+@media (min-width: 900px) {
+  .rv .lineverify.triage .dock .actions { grid-template-columns: repeat(3, 1fr); }
+}
+.rv .lineverify.triage .dock .moregroup { grid-column: 1 / -1; }
+/* A whole-screen state inside a task (done, fixes wait for the desktop) keeps the phone's 16px side gutter. */
+main#app.task .state { padding-inline: 16px; }
