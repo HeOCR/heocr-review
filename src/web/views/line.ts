@@ -183,7 +183,12 @@ const MORE: [string, StringKey, StringKey, IconName, string][] = [
 ];
 
 /** `startAt` opens one line first (link #p/<id>); then the queue continues. */
-export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
+/**
+ * `queue` (a triage batch, migrations/0012_triage.sql): "triage" serves lines with a candidate as three answers and no
+ * editing (correct, different, niqqud_mismatch), on any screen; "fix" serves the reviewer's "different" lines and the
+ * lines without a candidate in the usual screen, on a desktop only (a phone is told how many wait there).
+ */
+export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number, queue?: "triage" | "fix"): ReviewScreen {
   const root = h("div", { class: "taskroot" });
   const desktopMq = matchMedia(DESKTOP_QUERY);
   const history: number[] = [];
@@ -204,6 +209,12 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   let keysOpen = false;
 
   const view = (): LineVerifyView | null => (current && current.view.kind === "line_verify" ? current.view : null);
+  let waiting = batch.triage ?? { triage: 0, fix: 0 };
+  /** This line is answered by triage: the triage queue, pass 1, with a candidate (the server's own test, triage.ts). */
+  const triaging = (): boolean => {
+    const v = view();
+    return queue === "triage" && v !== null && v.pass === 1 && v.candidate !== "";
+  };
   const desktop = () => desktopMq.matches;
   const q = <T extends Element = HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const status = (nodes: string | Node[]) => {
@@ -213,7 +224,13 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   const body = document.body.classList;
 
   async function loadNext(): Promise<void> {
-    const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next`);
+    // The fix queue is the desktop's: a phone is told what waits there instead.
+    if (queue === "fix" && !desktop()) return renderFixOnDesktop();
+    const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next${queue ? `?queue=${queue}` : ""}`);
+    if (res.triage) {
+      waiting = { triage: res.triage.triage, fix: res.triage.fix };
+      paintQueueCounts();
+    }
     progress = res.progress;
     prefetch(res.prefetch);
     current = res.proposal;
@@ -266,8 +283,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   async function act(value: string, text?: string): Promise<void> {
     if (!current || busy) return;
     const v = view();
-    if ((value === "exact" || value === "pointed_print" || value === "typed") && !ready) return status(t("img_loading"));
-    if (value === "exact" && v && exactNeedsPage(Boolean(v.precheck), pageOpened, desktop())) return status(t("flag_phone"));
+    if (["exact", "pointed_print", "typed", "correct", "niqqud_mismatch"].includes(value) && !ready) return status(t("img_loading"));
+    if ((value === "exact" || value === "correct") && v && exactNeedsPage(Boolean(v.precheck), pageOpened, desktop())) return status(t("flag_phone"));
     busy = true;
     const id = current.id;
     setSaving(value);
@@ -609,7 +626,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     ready = false;
     pageOpened = false;
     keysOpen = false;
-    const typing = v.mode === "type";
+    const triage = triaging();
+    const typing = v.mode === "type" && !triage;
     body.toggle("typing", typing);
     const option = (value: string) => p.options.find((o) => o.value === value);
     const mine = p.mine ? option(p.mine.value) : undefined;
@@ -617,13 +635,23 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle;
     page = pageColumn(v.page, where, [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)], () => ((pageOpened = true), updateFlag()), () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
 
-    const answers = typing
+    // Triage: three answers, big, and nothing to edit (the maintainer, 2026-11-20).
+    const answers = triage
+      ? [
+          h("button", { type: "button", class: "act primary tri", "data-value": "correct", onclick: () => void act("correct") }, h("span", {}, t("tri_correct")), h("kbd", {}, "1")),
+          h("button", { type: "button", class: "act tri", "data-value": "different", onclick: () => void act("different") }, h("span", {}, t("tri_different")), h("kbd", {}, "2")),
+          h("button", { type: "button", class: "act tri", "data-value": "niqqud_mismatch", onclick: () => void act("niqqud_mismatch") }, h("span", {}, t("niqqud")), h("kbd", {}, "3")),
+        ]
+      : typing
       ? []
       : [
           h("button", { type: "button", class: "act primary", "data-value": "exact", onclick: () => void act("exact") }, h("span", {}, t("exact")), h("kbd", {}, "Enter")),
           h("button", { type: "button", class: "act", "data-value": "edited", onclick: () => startEdit() }, h("span", {}, t("fix")), h("kbd", {}, "E")),
         ];
-    const rare = typing
+    // Triage has the three answers only (no skip, no rarer answers); Back stays.
+    const rare = triage
+      ? []
+      : typing
       ? [
           ...p.options.filter((o) => !o.withText).map((o) => moreButton(o.value, o.label[lang()], null, o.value === "unreadable" ? "unreadable" : o.value === "misaligned" ? "misaligned" : null, TYPING_KEYS[o.value]?.[0] ?? "", () => (setMore(false), void act(o.value)))),
           moreButton("skip", t("skip"), t("skip_sub"), "skip", "S", () => (setMore(false), void doSkip())),
@@ -637,7 +665,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
     const work = h(
       "div",
-      { class: "review lineverify" },
+      { class: `review lineverify${triage ? " triage" : ""}` },
       h("p", { class: "ask" }, typing ? [t("type_ask"), " ", v.pass === 2 ? t("type_ask_final") : t("type_ask_more")] : t("ask")),
       h(
         "div",
@@ -650,8 +678,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           h("button", { type: "button", "data-mode": "fit", "aria-pressed": String(fitWidth), onclick: () => setFit(true) }, icon("fit", { sm: true }), t("fit")),
         ),
       ),
-      typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes(v.runs, v.precheck ? "precheck" : "ocr")),
-      h("div", { class: "slot" }, ...slotNodes(p, v, mine)),
+      typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...(v.runs.length ? candidateNodes(v.runs, v.precheck ? "precheck" : "ocr") : [v.candidate])),
+      triage ? null : h("div", { class: "slot" }, ...slotNodes(p, v, mine)),
       h("div", { class: "editbox", hidden: true }),
       contextBandFor(v),
       h(
@@ -666,7 +694,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           h("button", { type: "button", class: "act quiet zoom", "aria-label": t("zoom_in"), onclick: () => setZoom(1) }, icon("zoom-in", { sm: true }), h("kbd", {}, "+")),
           revisiting ? h("button", { type: "button", class: "act quiet", onclick: () => void loadNext().catch(failScreen) }, t("to_queue")) : null,
           h("span", { class: "savestate", role: "status" }),
-          h("button", { type: "button", class: "act quiet more-btn", "aria-haspopup": "true", "aria-expanded": "false", onclick: () => setMore(!moreOpen()) }, icon("more", { sm: true }), t("more")),
+          triage ? null : h("button", { type: "button", class: "act quiet more-btn", "aria-haspopup": "true", "aria-expanded": "false", onclick: () => setMore(!moreOpen()) }, icon("more", { sm: true }), t("more")),
         ),
       ),
       h("div", { class: "scrim", onclick: () => setMore(false) }),
@@ -688,6 +716,31 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     return ctxBand(v.crop ? boxedImage(v.crop, t("line_ctx")) : null, Boolean(v.page), () => setPageOpen(true));
   }
 
+  /** The queue links' counts (main.ts draws them above the screen): kept current after every line. */
+  function paintQueueCounts(): void {
+    const links = document.querySelectorAll<HTMLAnchorElement>(".batchhead .subsetnav a");
+    if (links.length === 2) {
+      links[0]!.textContent = t("q_triage", { n: waiting.triage });
+      links[1]!.textContent = t("q_fix", { n: waiting.fix });
+    }
+  }
+
+  /** A phone in the fix queue: the fixes wait for a desktop, and triage goes on here. */
+  function renderFixOnDesktop(): void {
+    hooks.where?.(null);
+    mount(
+      root,
+      h(
+        "section",
+        { class: "state" },
+        h("span", { class: "mark" }, icon("edit")),
+        h("h1", {}, t("fix_phone_h", { n: waiting.fix })),
+        h("p", { class: "muted" }, t("fix_phone_p")),
+        h("div", { class: "stack" }, h("a", { class: "act primary", href: `#b/${encodeURIComponent(batch.id)}` }, t("to_triage"))),
+      ),
+    );
+  }
+
   function renderDone(): void {
     hooks.where?.(null);
     mount(
@@ -704,6 +757,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
             ? h("button", { type: "button", class: "act primary", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(failScreen) }, t("done_skips", { n: progress.skippedByMe }))
             : null,
           history.length ? h("button", { type: "button", class: "act", onclick: back }, icon("previous", { sm: true }), t("done_last")) : null,
+          queue === "triage" && waiting.fix && desktop() ? h("a", { class: "act", href: `#b/${encodeURIComponent(batch.id)}/q/fix` }, t("q_fix", { n: waiting.fix })) : null,
           h("a", { class: "act quiet", href: "#tasks" }, t("all_tasks")),
         ),
       ),
@@ -747,7 +801,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     // A focused button or link handles its own Enter and Space.
     if (target && (target.tagName === "BUTTON" || target.tagName === "A") && (e.key === "Enter" || e.key === " ")) return;
     if (!current || current.view.kind !== "line_verify") return;
-    const typing = current.view.mode === "type";
+    const typing = current.view.mode === "type" && !triaging();
     // Holding a key down must not decide line after line.
     if (e.repeat) return e.preventDefault();
     if (e.key === "?") {
@@ -779,8 +833,21 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       KeyX: () => setZoom(-1),
       KeyP: () => (desktop() ? toggleEnlarged() : setPageOpen(!q(".side.open"))),
     };
+    // Triage: 1 (or Enter) correct, 2 (or D) different, 3 (or N) the print has niqqud; nothing opens an editor.
+    if (triaging()) {
+      for (const k of ["KeyE", "KeyU", "KeyM", "Digit4", "KeyS", "Digit5"]) delete actions[k];
+      Object.assign(actions, {
+        Enter: () => void act("correct"),
+        NumpadEnter: () => void act("correct"),
+        Digit1: () => void act("correct"),
+        Digit2: () => void act("different"),
+        KeyD: () => void act("different"),
+        Digit3: () => void act("niqqud_mismatch"),
+        KeyN: () => void act("niqqud_mismatch"),
+      });
+    }
     // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
-    if (typing) {
+    else if (typing) {
       for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = () => startEdit();
       for (const o of current.options) {
         const key = TYPING_KEYS[o.value];
@@ -799,6 +866,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     resizeTimer = window.setTimeout(renderStrip, 120);
   };
   const onLayout = () => {
+    // The fix queue opens when the window becomes desktop-sized, and closes when it stops being one.
+    if (queue === "fix") return void loadNext().catch(failScreen);
     updateFlag();
     renderStrip();
   };

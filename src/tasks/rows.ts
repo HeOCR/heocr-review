@@ -16,6 +16,7 @@ export interface BatchRow {
   two_typings_set_at?: string | null;
   resolution?: string | null;
   pointed_books?: string | null;
+  mode?: string | null;
 }
 
 export interface ProposalRow {
@@ -61,6 +62,7 @@ export function toBatch(row: BatchRow): BatchRecord & { status: string } {
       twoTypingsSetAt: row.two_typings_set_at ?? null,
       resolution: row.resolution === "volunteer_v1" || row.resolution === "volunteer_v1_1" ? row.resolution : "single",
       pointedBooks: row.pointed_books === "keep" ? "keep" : "drop",
+      mode: row.mode === "triage" ? "triage" : "standard",
     },
   };
 }
@@ -107,7 +109,8 @@ export const BATCH_SQL = `SELECT id, task_type, title, source_json, min_reviewer
   (SELECT s.two_typings_groups FROM batch_settings s WHERE s.batch_id = batches.id) AS two_typings_groups,
   (SELECT s.two_typings_set_at FROM batch_settings s WHERE s.batch_id = batches.id) AS two_typings_set_at,
   (SELECT s.resolution FROM batch_settings s WHERE s.batch_id = batches.id) AS resolution,
-  (SELECT s.pointed_books FROM batch_settings s WHERE s.batch_id = batches.id) AS pointed_books
+  (SELECT s.pointed_books FROM batch_settings s WHERE s.batch_id = batches.id) AS pointed_books,
+  (SELECT s.mode FROM batch_settings s WHERE s.batch_id = batches.id) AS mode
   FROM batches`;
 export const DECISION_SQL = `SELECT id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at,
   decided_on, superseded_at FROM decisions`;

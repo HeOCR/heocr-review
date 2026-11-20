@@ -6,6 +6,7 @@
  *   npm run batch-setting -- --batch <id> --two-typings-groups <group,group|none> --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --resolution single|volunteer_v1|volunteer_v1_1 --by <who> [--target ...]
  *   npm run batch-setting -- --batch <id> --pointed-books drop|keep --by <who> [--target ...]
+ *   npm run batch-setting -- --batch <id> --mode standard|triage --by <who> [--target ...]
  *
  * pass2_reviewer (line_verify only): who gets a line's blind second pass. 'same' (the default): the reviewer who
  * answered pass 1, 24 hours later (intra-rater). 'other': only a reviewer who never decided the line's pass 1, 24
@@ -29,7 +30,8 @@ import { d1Query } from "./lib/wrangler";
 export const READ_SQL = `SELECT b.id, b.task_type, json_extract(b.source_json, '$.schema_version') AS schema_version,
   COALESCE(s.pass2_reviewer, 'same') AS pass2_reviewer, s.updated_at, s.updated_by,
   COALESCE(s.two_typings_groups, '[]') AS two_typings_groups, s.two_typings_set_at,
-  COALESCE(s.pointed_books, 'drop') AS pointed_books
+  COALESCE(s.pointed_books, 'drop') AS pointed_books, COALESCE(s.resolution, 'single') AS resolution,
+  COALESCE(s.mode, 'standard') AS mode
   FROM batches b LEFT JOIN batch_settings s ON s.batch_id = b.id WHERE b.id = ?1`;
 
 /** The batch's book groups (v1.2 pages). */
@@ -50,6 +52,25 @@ export function pointedBooksProblem(row: Row | undefined, value: string, by: str
   if (!row) return "no such batch";
   if (row.task_type !== "line_verify") return `pointed_books applies to line_verify batches only (this one is ${row.task_type})`;
   if (!(POINTED_BOOKS as readonly string[]).includes(value)) return `--pointed-books must be one of ${POINTED_BOOKS.join(", ")}`;
+  if (!by.trim()) return "--by must say who changes it";
+  return null;
+}
+
+/**
+ * mode (line_verify only; migrations/0012_triage.sql): 'triage' serves lines with a candidate as three answers
+ * (correct, different, niqqud_mismatch) and the rest, and every "different", in the desktop fix queue. Only for a
+ * single-resolution batch whose lines are unpointed: a niqqud_mismatch then drops nothing (set pointed_books keep).
+ */
+export const MODES = ["standard", "triage"] as const;
+export const UPSERT_MODE_SQL = `INSERT INTO batch_settings (batch_id, updated_at, updated_by, mode) VALUES (?1, ?2, ?3, ?4)
+  ON CONFLICT (batch_id) DO UPDATE SET mode = excluded.mode, updated_at = excluded.updated_at, updated_by = excluded.updated_by`;
+
+export function modeProblem(row: Row | undefined, value: string, by: string): string | null {
+  if (!row) return "no such batch";
+  if (row.task_type !== "line_verify") return `mode applies to line_verify batches only (this one is ${row.task_type})`;
+  if (!(MODES as readonly string[]).includes(value)) return `--mode must be one of ${MODES.join(", ")}`;
+  if (value === "triage" && (row.resolution ?? "single") !== "single") return "triage is for single-resolution batches only";
+  if (value === "triage" && (row.pointed_books ?? "drop") !== "keep") return "set --pointed-books keep first: a niqqud_mismatch in triage must drop nothing";
   if (!by.trim()) return "--by must say who changes it";
   return null;
 }
@@ -86,6 +107,8 @@ type Row = {
   two_typings_groups?: string;
   two_typings_set_at?: string | null;
   pointed_books?: string;
+  resolution?: string;
+  mode?: string;
 };
 
 /** The groups a --two-typings-groups value names ("none": no group), or why it is refused. */
@@ -123,6 +146,13 @@ function main(): void {
     if (problem) throw new Error(problem);
     d1Query(t, inline(UPSERT_RESOLUTION_SQL, batchId, new Date().toISOString(), str(flags, "by"), flags.resolution));
     console.log(JSON.stringify({ target: t, batch: batchId, resolution: flags.resolution }));
+    return;
+  }
+  if (typeof flags.mode === "string") {
+    const problem = modeProblem(before, flags.mode, str(flags, "by", ""));
+    if (problem) throw new Error(problem);
+    d1Query(t, inline(UPSERT_MODE_SQL, batchId, new Date().toISOString(), str(flags, "by"), flags.mode));
+    console.log(JSON.stringify({ target: t, batch: batchId, before: before!.mode, after: read()?.mode }));
     return;
   }
   if (typeof flags["pointed-books"] === "string") {

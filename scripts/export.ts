@@ -59,7 +59,7 @@ function main(): void {
   });
   if (result.problems.length) throw new Error(`the export does not validate:\n  ${result.problems.slice(0, 20).join("\n  ")}`);
   mkdirSync(out, { recursive: true });
-  const files = flags.public === true ? publicFiles(result.decisionsFile, result.ledgerFile, goldProposalIds(proposals)) : [result.decisionsFile, result.ledgerFile];
+  const files = flags.public === true ? publicFiles(result.decisionsFile, result.ledgerFile, goldProposalIds(proposals)) : [result.decisionsFile, result.ledgerFile, ...result.extraFiles];
   for (const f of files) writeFileSync(join(out, f.fileName), formatJson(f.content));
   console.log(JSON.stringify({ batch: batchId, target: t, out, public: flags.public === true, files: files.map((f) => f.fileName), counts: result.counts }, null, 2));
 }

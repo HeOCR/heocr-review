@@ -17,6 +17,7 @@ import { imageUrl } from "../../shared/media";
 import { sha256Hex } from "../../shared/sha256";
 import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType, VerifyVote } from "../types";
 import { PHIST_GOLD_FILE, PHIST_GOLD_SHA256, type GoldMark } from "./gold";
+import { asReference, isTriageBatch, referenceTriageFile } from "./triage";
 import { GATE_BATCH_ID, LINE_FOLD_V1_SHA256, referenceOf, routeLine, type CountedVote } from "./resolution";
 import {
   DECISIONS_SCHEMA,
@@ -345,7 +346,9 @@ export const lineVerify: TaskType = {
    * also each decision's `kind`, `box_reason` on a typed line's not_on_page, the two-typings switch, and `pages`: per
    * page, how many of its segmenter lines are resolved (enough current pass-1 decisions) and whether it is done.
    */
-  exportDecisions(batch: BatchRecord, all: ResolvedProposal[], extra?: ExportExtra): ExportFile {
+  exportDecisions(batch: BatchRecord, given: ResolvedProposal[], extra?: ExportExtra): ExportFile {
+    // Triage answers as the contract has them (triage.ts): an unfixed "different" is not a reference, so not exported.
+    const all = given.map((r) => ({ ...r, current: r.current.map((d) => asReference(r.proposal, d)).filter((d): d is DecisionRecord => d !== null) }));
     const level = levelOf(batch);
     const v12 = level >= 1;
     const v13 = level >= 2;
@@ -471,6 +474,10 @@ export const lineVerify: TaskType = {
           : {}),
       },
     };
+  },
+
+  exportExtraFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string): ExportFile[] {
+    return isTriageBatch(batch) ? [referenceTriageFile(batch, resolved, exportedAt)] : [];
   },
 
   validateExport(batch: BatchRecord, proposals: ProposalRecord[], content: unknown): string[] {
