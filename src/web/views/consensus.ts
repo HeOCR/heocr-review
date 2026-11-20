@@ -1,45 +1,58 @@
 /**
- * The volunteer line review screen (task type line_consensus), phone first: the printed line large, its pre-fill under
- * it, five actions as big buttons, and the page around the line on request. A volunteer never sees another
- * volunteer's decision or any count of others' work; decisions are final, so there is no "back". The maintainer gets
- * the same screen for the lines that went to them, from the pre-fill only.
- * Keys: Enter correct · E edit · N print has niqqud · S skip · +/− zoom · P page. Unreadable and not on the page have
- * buttons only: decisions are final, and a stray key in a Hebrew layout must not make one.
+ * The volunteer line review screen (task type line_consensus), in the design's layout (design/review SPEC §4.3): the
+ * line verification screen with Correct and Correct it as the main answers; More holds Print has niqqud, Unreadable,
+ * Not on the page and Skip. A volunteer never sees another volunteer's decision or any count of others' work, and a
+ * decision is final, so there is no Previous. Look-here hints are chips in the slot; Help reopens the introduction.
+ * Keys: Enter correct · E edit · N print has niqqud (opens the editor) · S skip · +/− zoom · P page · ? keys · Esc.
+ * Unreadable and Not on the page have buttons only: decisions are final, and a stray key must not make one.
  */
 import type { BatchSummary, LineConsensusView, NextResponse, Progress, ProposalView } from "../../shared/api";
 import type { Box, ImageView } from "../../shared/media";
 import { hasNiqqud } from "../../shared/niqqud";
 import { ApiFailure, get, post } from "../api";
 import { h, mount } from "../dom";
+import { lang, t } from "../i18n";
+import { icon } from "../icons";
+import { DESKTOP_QUERY, clearDraft, dropPending, failureKind, keepPending, keepable, pendingFor, readDraft, writeDraft } from "../linerules";
 import { compare } from "../text";
-import { failureHandler, prefetch, progressBar, type ReviewHooks, type ReviewScreen } from "./common";
+import { prefetch, type ReviewHooks, type ReviewScreen } from "./common";
 import { LINE_CONVENTIONS } from "./conventions";
 import { candidateNodes, lineStrip } from "./line";
-import { viewer } from "./viewer";
+import {
+  answerButton,
+  contextBand,
+  cropBar,
+  dock,
+  failedNotice,
+  keysPanel,
+  markSaving,
+  moreButton,
+  moreIsOpen,
+  pageColumn,
+  progressLine,
+  renderSaveState,
+  setMoreOpen,
+  stateScreen,
+  zoomButtons,
+  type Failure,
+  type PageColumn,
+  type SaveState,
+} from "./taskparts";
 
 const LINE_HEIGHTS = [40, 52, 66, 84, 108, 140];
 
-const KEYS: [string, string, string][] = [
-  ["Enter", "נכון", "correct"],
-  ["E", "תיקון", "edit"],
-  ["N", "בדפוס יש ניקוד", "print has niqqud"],
-  ["S", "דילוג", "skip"],
-  ["+/−", "זום", "zoom"],
-  ["P", "עמוד מלא", "page"],
-];
-
 /**
  * The band around the line, cut from the page image (the image is the page; `region` and the line's box are page
- * fractions), at most the holder's width and 160 px high, with the line outlined.
+ * fractions), at most the holder's width and 160 px high, with the line in the brand box.
  */
-function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
+function bandImage(img: ImageView, region: Box, width: number): HTMLElement {
   const rw = (region[2] - region[0]) * img.width;
   const rh = (region[3] - region[1]) * img.height;
   const scale = Math.min(width / rw, 160 / rh);
-  const image = h("img", { src: img.url, alt: "השורה עם השורות שלפניה ואחריה / the line with its neighbours", decoding: "async", draggable: "false" });
+  const image = h("img", { src: img.url, alt: t("line_ctx"), decoding: "async", draggable: "false" });
   image.style.cssText = `position:absolute;max-width:none;width:${img.width * scale}px;left:${-region[0] * img.width * scale}px;top:${-region[1] * img.height * scale}px`;
-  const band = h("div", { class: "frame ctxband" }, image);
-  band.style.cssText = `position:relative;overflow:hidden;width:${rw * scale}px;height:${rh * scale}px`;
+  const band = h("div", { class: "frame" }, image);
+  band.style.cssText = `position:relative;overflow:hidden;width:${rw * scale}px;height:${rh * scale}px;margin-inline:auto`;
   const b = img.box;
   if (b) {
     const hl = h("div", { class: "hl" });
@@ -49,11 +62,14 @@ function contextBand(img: ImageView, region: Box, width: number): HTMLElement {
   return band;
 }
 
-/** Shown before a volunteer's first line, and on request: what to do, the conventions, and that checks exist. */
+/**
+ * Shown before a volunteer's first line, and on request: what to do, the conventions, and that checks exist. The text
+ * is the volunteer introduction as reviewed for the launch; it stays as written (Hebrew, with an English summary).
+ */
 function onboarding(onStart: () => void): HTMLElement {
   return h(
     "section",
-    { class: "card onboard" },
+    { class: "card onboard", lang: "he", dir: "rtl" },
     h("h2", {}, "ברוכים הבאים לבדיקת שורות"),
     h(
       "ol",
@@ -66,34 +82,42 @@ function onboarding(onStart: () => void): HTMLElement {
     ),
     h("p", { lang: "en", dir: "ltr", class: "muted small" }, "One printed line at a time: mark it correct, or edit it to match the print exactly; print has niqqud (type the letters only), unreadable, or not on the page. Several volunteers check each line independently, and your decision is final. Some lines are checks with a known answer, unmarked."),
     h("h3", {}, "מוסכמות הקלדה / Typing conventions"),
-    h("dl", { class: "small" }, ...LINE_CONVENTIONS.flatMap(([what, type]) => [h("dt", {}, what), h("dd", { dir: "auto" }, type)])),
-    h("button", { type: "button", class: "primary", onclick: onStart }, "מתחילים / Start"),
+    h("dl", { class: "small conventions" }, ...LINE_CONVENTIONS.flatMap(([what, type]) => [h("dt", {}, what), h("dd", { dir: "auto" }, type)])),
+    h("button", { type: "button", class: "act primary", onclick: onStart }, "מתחילים / Start"),
   );
 }
 
 /** `startAt` opens one line first (link #p/<id>), if it is open to this reviewer; then the queue continues. */
 export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number): ReviewScreen {
-  const root = h("div", { class: "review lineverify consensus" });
+  const root = h("div", { class: "taskroot" });
+  const desktopMq = matchMedia(DESKTOP_QUERY);
   let current: ProposalView | null = null;
   let progress: Progress = batch.progress;
   let editing: HTMLTextAreaElement | null = null;
   let busy = false;
   let ready = false;
-  let zoom = matchMedia("(max-width: 520px)").matches ? 0 : 2;
-  let showPage = false;
+  let zoom = 2;
+  let fitWidth = false;
   let introDone = false;
-  const fail = failureHandler(root, hooks);
+  let keysOpen = false;
+  let failure: Failure | null = null;
+  let saveState: SaveState = null;
+  let page: PageColumn | null = null;
   const view = (): LineConsensusView | null => (current && current.view.kind === "line_consensus" ? current.view : null);
+  const q = <T extends Element = HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const status = (text: string) => {
-    const msg = root.querySelector(".msg");
+    const msg = q(".msg");
     if (msg) msg.textContent = text;
   };
+  const body = document.body.classList;
+  const desktop = () => desktopMq.matches;
 
   async function loadNext(): Promise<void> {
     const res = await get<NextResponse>(`/api/batches/${encodeURIComponent(batch.id)}/next`);
     progress = res.progress;
     prefetch(res.prefetch);
     current = res.proposal;
+    failure = null;
     if (!current) return renderDone();
     if (!introDone && progress.decidedByMe === 0) return renderIntro();
     render();
@@ -102,84 +126,159 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
   async function open(id: number): Promise<void> {
     const res = await get<{ proposal: ProposalView }>(`/api/proposals/${id}`);
     current = res.proposal;
+    failure = null;
     render();
+  }
+
+  function failScreen(err: unknown): void {
+    if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
+    const kind = failureKind(err, navigator.onLine);
+    const [title, text] = kind === "offline" ? (["e_off_h", "e_off_p"] as const) : kind === "rate_limited" ? (["e_rate_h", "e_rate_p"] as const) : kind === "daily_limit" ? (["e_quota_h", "e_quota_p"] as const) : (["e_srv_h", "e_srv_hint"] as const);
+    mount(root, stateScreen(kind === "offline" ? "offline" : kind === "rate_limited" ? "clock" : "warning", t(title), t(text), h("button", { type: "button", class: "act primary", onclick: () => void loadNext().catch(failScreen) }, t("retry"))));
+    console.warn(err);
+  }
+
+  async function send(id: number, value: string, text?: string): Promise<void> {
+    const payload = text === undefined ? { value } : { value, text };
+    try {
+      await post(`/api/proposals/${id}/decision`, payload);
+    } catch (err) {
+      if (!(err instanceof ApiFailure && err.code === "terms_required")) throw err;
+      await hooks.needTerms();
+      await post(`/api/proposals/${id}/decision`, payload);
+    }
   }
 
   async function act(value: string, text?: string): Promise<void> {
     if (!current || busy) return;
-    if (current.mine) return status("כבר החלטת על השורה הזאת. / You already decided this line.");
-    if (!ready && value !== "unreadable") return status("התמונה עוד נטענת. / The image is still loading.");
+    if (current.mine) return status(t("mine_final_note"));
+    if (!ready && value !== "unreadable") return status(t("img_loading"));
     busy = true;
     const id = current.id;
+    markSaving(root, value);
+    renderSaveState(q(".savestate"), (saveState = "saving"));
     try {
-      const body = text === undefined ? { value } : { value, text };
-      try {
-        await post(`/api/proposals/${id}/decision`, body);
-      } catch (err) {
-        if (!(err instanceof ApiFailure && err.code === "terms_required")) throw err;
-        await hooks.needTerms();
-        await post(`/api/proposals/${id}/decision`, body);
-      }
+      await send(id, value, text);
+      dropPending(id);
+      clearDraft(id);
+      saveState = "saved";
       await loadNext();
     } catch (err) {
-      if (err instanceof ApiFailure && err.code === "decided") await loadNext().catch(fail);
-      else fail(err);
+      if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
+      if (err instanceof ApiFailure && err.code === "decided") {
+        // Already decided (another tab, or a resend): move on.
+        dropPending(id);
+        await loadNext().catch(failScreen);
+        return;
+      }
+      const kind = failureKind(err, navigator.onLine);
+      const kept = keepable(kind) && keepPending({ proposalId: id, batchId: batch.id, value, ...(text === undefined ? {} : { text }), keptAt: new Date().toISOString() });
+      failure = { kind, kept, value, ...(text === undefined ? {} : { text }), ...(err instanceof ApiFailure && err.message ? { reason: err.message } : {}) };
+      saveState = "failed";
+      render();
+      console.warn(err);
     } finally {
       busy = false;
+    }
+  }
+
+  /** Resend the decisions kept on this device, once. A line already decided is dropped from the store. */
+  async function resendKept(): Promise<void> {
+    if (busy) return;
+    const kept = pendingFor(batch.id);
+    if (!kept.length) return;
+    busy = true;
+    let currentSent = false;
+    try {
+      for (const p of kept) {
+        try {
+          await send(p.proposalId, p.value, p.text);
+          dropPending(p.proposalId);
+          clearDraft(p.proposalId);
+          if (current?.id === p.proposalId) currentSent = true;
+        } catch (err) {
+          if (err instanceof ApiFailure && err.code === "decided") dropPending(p.proposalId);
+          else if (!keepable(failureKind(err, navigator.onLine))) dropPending(p.proposalId);
+          else break;
+        }
+      }
+    } finally {
+      busy = false;
+    }
+    if (currentSent) {
+      saveState = "saved";
+      await loadNext().catch(failScreen);
+    } else if (!pendingFor(batch.id).length && failure) {
+      failure = null;
+      saveState = "saved";
+      render();
     }
   }
 
   async function doSkip(): Promise<void> {
     if (!current || busy) return;
+    setMoreOpen(root, false);
     busy = true;
+    markSaving(root, "skip");
     try {
       await post(`/api/proposals/${current.id}/skip`);
       await loadNext();
     } catch (err) {
-      fail(err);
+      busy = false;
+      if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
+      render();
+      status(t("e_srv_h"));
+      console.warn(err);
     } finally {
       busy = false;
     }
   }
 
-  function startEdit(pointedFirst = false): void {
-    const v = view();
-    if (!v || editing || !current || current.mine) return;
-    const box = root.querySelector(".editbox") as HTMLElement;
-    const area = h("textarea", {
-      dir: "rtl",
-      lang: "he",
-      rows: 2,
-      spellcheck: "false",
-      autocomplete: "off",
-      autocapitalize: "off",
-      maxlength: 1000,
-      "aria-label": "השורה כמו שהיא מודפסת / the line as printed",
-    });
-    area.value = v.prefill;
-    const pointed = h("input", { type: "checkbox", id: "lc-pointed" }) as HTMLInputElement;
-    pointed.checked = pointedFirst;
-    const pointedRow = h("label", { class: "row check", for: "lc-pointed" }, pointed, " בדפוס יש ניקוד: אותיות בלבד, בלי ניקוד / Print has niqqud: letters only");
-    const preview = h("div", { class: "preview texts" });
-    const update = () => {
-      if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
-      const cmp = compare(v.prefill, area.value, "", "");
-      preview.replaceChildren(
-        h("div", { class: "row" }, h("span", { class: "lab" }, "זוהה:"), cmp.current),
-        h("div", { class: "row" }, h("span", { class: "lab" }, "שלך:"), cmp.proposed),
-        h("div", { class: "row" }, h("span", { class: "lab" }, ""), cmp.codes),
-      );
-    };
-    const cancel = () => {
-      editing = null;
+  function closeEditor(): void {
+    editing = null;
+    body.remove("editing");
+    const box = q(".editbox");
+    if (box) {
       box.replaceChildren();
       box.hidden = true;
+    }
+  }
+
+  function startEdit(pointedFirst = false): void {
+    const v = view();
+    setMoreOpen(root, false);
+    if (!v || !current || current.mine) return;
+    if (editing) return editing.focus();
+    const p = current;
+    const box = q(".editbox")!;
+    const area = h("textarea", { dir: "rtl", lang: "he", rows: 3, spellcheck: "false", autocomplete: "off", autocapitalize: "off", maxlength: 1000, "aria-label": t("edit_title") });
+    area.value = readDraft(p.id) ?? v.prefill;
+    const pointed = h("input", { type: "checkbox", id: "lc-pointed" }) as HTMLInputElement;
+    pointed.checked = pointedFirst;
+    const changes = h("p", { class: "changes", role: "status" });
+    const preview = h("div", { class: "preview desktop-only" });
+    const update = () => {
+      if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
+      writeDraft(p.id, area.value);
+      const cmp = compare(v.prefill, area.value, "", "");
+      const del = cmp.current.querySelectorAll("mark.del");
+      const ins = cmp.proposed.querySelectorAll("mark.ins");
+      changes.replaceChildren(
+        ...(del.length || ins.length
+          ? [`${t("changed")} `, h("bdi", { dir: "rtl" }, ...Array.from(del, (m) => h("del", {}, m.textContent ?? "")), del.length && ins.length ? " ← " : "", ...Array.from(ins, (m) => h("ins", {}, m.textContent ?? "")))]
+          : []),
+      );
+      preview.replaceChildren(cmp.codes);
     };
     const save = () => {
       const text = area.value;
-      if (pointed.checked && hasNiqqud(text)) return status("עם \"בדפוס יש ניקוד\" מקלידים אותיות בלבד. / Type letters only.");
-      cancel();
+      if (pointed.checked && hasNiqqud(text)) return status(t("nq_letters"));
       void act(pointed.checked ? "print_has_niqqud" : "edit", text);
+    };
+    const cancel = () => {
+      clearDraft(p.id);
+      closeEditor();
+      q<HTMLButtonElement>(".dock .act")?.focus();
     };
     area.addEventListener("input", update);
     area.addEventListener("keydown", (e) => {
@@ -195,16 +294,23 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
     });
     box.replaceChildren(
       area,
-      pointedRow,
+      changes,
+      h(
+        "div",
+        { class: "edittools" },
+        h("button", { type: "button", class: "act quiet", onclick: () => ((area.value = v.prefill), update(), area.focus()) }, icon("reset", { sm: true }), t("reset")),
+        h("label", { class: "check", for: "lc-pointed" }, pointed, t("nq")),
+      ),
       preview,
       h(
         "div",
-        { class: "row" },
-        h("button", { type: "button", class: "primary", onclick: save }, "שמירה / Save ", h("kbd", { dir: "ltr" }, "Ctrl+Enter")),
-        h("button", { type: "button", onclick: cancel }, "ביטול / Cancel ", h("kbd", { dir: "ltr" }, "Esc")),
+        { class: "savebar" },
+        h("button", { type: "button", class: "act primary", "data-value": "edit", onclick: save }, h("span", {}, t("save")), " ", h("kbd", {}, "Ctrl+Enter")),
+        h("button", { type: "button", class: "act", onclick: cancel }, t("cancel"), " ", h("kbd", {}, "Esc")),
       ),
     );
     box.hidden = false;
+    body.add("editing");
     editing = area;
     update();
     area.focus();
@@ -213,39 +319,18 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
 
   function renderStrip(): void {
     const v = view();
-    const holder = root.querySelector(".linebox") as HTMLElement | null;
+    const holder = q(".linebox .strip");
     if (!v || !holder) return;
     if (!v.crop || !v.crop.box) {
       ready = true;
-      holder.replaceChildren(h("p", { class: "muted" }, "לשורה הזאת אין מיקום בסריקה: חפשו אותה בעמוד המלא. / No box for this line: find it on the full page."));
+      holder.replaceChildren(h("p", { class: "muted" }, t("no_box")));
       return;
     }
     const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
-    holder.replaceChildren(lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true)));
-  }
-
-  function renderContext(): void {
-    const v = view();
-    const holder = root.querySelector(".ctxbox") as HTMLElement | null;
-    if (!v || !holder) return;
-    const toggle = h(
-      "button",
-      { type: "button", class: "small", onclick: togglePage, disabled: !v.page },
-      showPage ? "חזרה להקשר / Back to context " : "העמוד המלא / Full page ",
-      h("kbd", { dir: "ltr" }, "P"),
-    );
-    if (showPage && v.page) {
-      holder.replaceChildren(viewer(null, v.page).el, h("div", { class: "row" }, toggle));
-      return;
-    }
-    const band = v.crop && v.context ? contextBand(v.crop, v.context, Math.max(200, holder.clientWidth || root.clientWidth || 360)) : null;
-    holder.replaceChildren(h("div", { class: "ctxscroll", dir: "ltr" }, band), h("div", { class: "row" }, toggle));
-  }
-
-  function togglePage(): void {
-    if (!view()?.page) return;
-    showPage = !showPage;
-    renderContext();
+    const pieces = !desktop() && fitWidth ? 1 : 2;
+    holder.replaceChildren(lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true), pieces, t("line_on_scan")));
+    const band = q(".ctxbox .bandholder");
+    if (band && v.crop && v.context) band.replaceChildren(bandImage(v.crop, v.context, Math.max(200, band.clientWidth || 360)));
   }
 
   function setZoom(step: number): void {
@@ -253,115 +338,137 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
     renderStrip();
   }
 
-  function hints(v: LineConsensusView): HTMLElement | null {
-    const chips = [
-      v.tierA ? h("span", { class: "tag look", title: "Look here: check this line closely" }, "בדקו היטב") : null,
-      v.bidiRisk ? h("span", { class: "tag look", title: "Digits or brackets: check their order" }, "ספרות/סוגריים") : null,
-      v.aiDisagrees ? h("span", { class: "tag ai", title: "Claude read this line differently (its reading is not shown)" }, "קריאה אחרת (Claude)") : null,
-      v.aiMissingNear ? h("span", { class: "tag ai", title: "Claude saw text near here that is missing" }, "חסר טקסט לידה? (Claude)") : null,
-    ].filter((c): c is HTMLElement => c !== null);
-    return chips.length ? h("div", { class: "chips" }, ...chips) : null;
+  function chips(v: LineConsensusView): HTMLElement | null {
+    // Look-here hints: where to look, never a reading (design CLASSMAP: one .tag.look style for all of them).
+    const list = [
+      v.tierA ? t("look") : null,
+      v.bidiRisk ? t("digits") : null,
+      v.aiDisagrees ? t("ai_differs") : null,
+      v.aiMissingNear ? t("ai_missing") : null,
+    ].filter((c): c is string => c !== null);
+    return list.length ? h("div", { class: "chips" }, ...list.map((c) => h("span", { class: "tag look" }, icon("flag", { sm: true }), c))) : null;
   }
+
+  const KEYS = (): [string, string][] => [
+    ["Enter · 1", t("correct")],
+    ["E · 2", t("fix")],
+    ["N", t("niqqud")],
+    ["S · 5", t("skip")],
+    ["+ / −", t("zoom_in")],
+    ["P", t("page")],
+    ["Esc", t("close")],
+  ];
 
   function render(): void {
     const p = current!;
     const v = view();
     if (!v) throw new Error(`lineConsensusView cannot show ${p.view.kind}`);
-    editing = null;
+    closeEditor();
     ready = false;
-    showPage = false;
+    keysOpen = false;
     const option = (value: string) => p.options.find((o) => o.value === value);
-    const btn = (value: string, key: string, cls: string, onclick: () => void) => {
-      const o = option(value);
-      return h(
-        "button",
-        { type: "button", class: `act ${cls}`, onclick, "data-value": value, title: o?.label.en ?? value, disabled: p.mine !== null },
-        h("span", {}, o?.label.he ?? value),
-        key ? h("kbd", { dir: "ltr" }, key) : null,
-      );
-    };
     const mine = p.mine ? option(p.mine.value) : undefined;
-    mount(
-      root,
-      progressBar(progress),
-      h(
-        "article",
-        { class: "card proposal" },
-        h("header", { class: "meta" }, h("span", { class: "tag", title: v.series.label.en }, v.series.label.he), h("span", { class: "muted small title", dir: "auto" }, p.itemTitle)),
-        h(
-          "p",
-          { class: "ask" },
-          "האם הטקסט זהה בדיוק לשורה המסומנת, אות באות וסימן בסימן?",
-          h("span", { class: "muted small block", lang: "en", dir: "ltr" }, "Is the text exactly the marked line, letter by letter and mark by mark?"),
-        ),
-        h("div", { class: "linebox" }),
-        h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes([{ text: v.prefill, attention: false }])),
-        hints(v),
-        mine ? h("p", { class: "mine" }, `ההחלטה שלך: ${mine.label.he}`, p.mine?.text ? ` («${p.mine.text}»)` : "", " · החלטה סופית.") : null,
-        h("div", { class: "editbox", hidden: true }),
-        h("p", { class: "msg", role: "status" }),
-        h("div", { class: "ctxbox" }),
-        h("p", { class: "attrib muted small" }, h("bdi", { class: "block", dir: "auto" }, v.attribution), h("span", { class: "block" }, "רישיון הטקסט / Text licence: ", h("bdi", { dir: "auto" }, v.textLicense))),
-      ),
-      h(
-        "nav",
-        { class: "actions six" },
-        btn("correct", "Enter", "ok", () => void act("correct")),
-        btn("edit", "E", "edit", () => startEdit()),
-        btn("print_has_niqqud", "N", "ok pointed", () => startEdit(true)),
-        btn("unreadable", "", "bad", () => void act("unreadable")),
-        btn("not_on_page", "", "bad", () => void act("not_on_page")),
-        h("button", { type: "button", class: "act skip", onclick: () => void doSkip(), title: "Skip" }, h("span", {}, "דילוג"), h("kbd", { dir: "ltr" }, "S")),
-      ),
+    hooks.where?.(t("c_where", { n: progress.decidedByMe }));
+    page = pageColumn(v.page, p.itemTitle, [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)], () => undefined, () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
+    const decided = p.mine !== null;
+    const more = [
+      moreButton("print_has_niqqud", t("niqqud"), t("niqqud_sub"), "niqqud", "N", () => startEdit(true)),
+      moreButton("unreadable", t("unread"), t("unread_sub"), "unreadable", "", () => (setMoreOpen(root, false), void act("unreadable"))),
+      moreButton("not_on_page", t("not_on"), t("not_on_sub"), "not-on-page", "", () => (setMoreOpen(root, false), void act("not_on_page"))),
+      moreButton("skip", t("skip"), t("skip_sub"), "skip", "S", () => void doSkip()),
+    ];
+    const work = h(
+      "div",
+      { class: "review lineverify consensus" },
+      h("p", { class: "ask" }, t("ask")),
+      h("div", { class: "linebox" }, h("div", { class: "strip" }), cropBar(fitWidth, (fit) => ((fitWidth = fit), render()))),
+      h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...candidateNodes([{ text: v.prefill, attention: false }])),
       h(
         "div",
-        { class: "subnav" },
-        h("button", { type: "button", class: "small", onclick: () => setZoom(-1), "aria-label": "הקטנה / zoom out" }, "−"),
-        h("button", { type: "button", class: "small", onclick: () => setZoom(1), "aria-label": "הגדלה / zoom in" }, "+"),
-        h("button", { type: "button", class: "small", onclick: renderIntro }, "הסבר ומוסכמות / Help"),
-        p.mine ? h("button", { type: "button", class: "small", onclick: () => void loadNext().catch(fail) }, "לתור ←") : null,
-        h("p", { class: "keys muted small" }, "קיצורים: ", ...KEYS.flatMap(([k, t, en]) => [h("kbd", { dir: "ltr", title: en }, k), ` ${t} · `])),
+        { class: "slot" },
+        chips(v),
+        failure ? failedNotice(failure, () => (failure!.kept ? void resendKept() : void act(failure!.value, failure!.text))) : null,
+        mine ? h("p", { class: "mine" }, t("mine", { v: mine.label[lang()] }), p.mine?.text ? ` («${p.mine.text}»)` : "", ` · ${t("mine_final_note")}`) : null,
+        h("p", { class: "msg", role: "status" }),
+      ),
+      h("div", { class: "editbox", hidden: true }),
+      contextBand(h("div", { class: "bandholder" }), Boolean(v.page), () => page?.open()),
+      ...dock(
+        [answerButton("correct", t("correct"), "Enter", () => void act("correct"), true), answerButton("edit", t("fix"), "E", () => startEdit())],
+        more,
+        [
+          ...zoomButtons(setZoom),
+          h("button", { type: "button", class: "act quiet", onclick: renderIntro }, t("help")),
+          decided ? h("button", { type: "button", class: "act quiet", onclick: () => void loadNext().catch(failScreen) }, t("to_queue")) : null,
+        ],
+        () => root,
       ),
     );
+    mount(root, progressLine(progress), h("div", { class: "deck" }, work, page.el));
+    for (const b of root.querySelectorAll<HTMLButtonElement>(".dock .actions .act")) b.disabled = decided;
+    renderSaveState(q(".savestate"), saveState);
     renderStrip();
-    renderContext();
+    q<HTMLButtonElement>(".dock .act.primary:not(:disabled)")?.focus({ preventScroll: true });
   }
 
   function renderIntro(): void {
+    hooks.where?.(null);
     mount(
       root,
-      onboarding(() => {
-        introDone = true;
-        if (current) render();
-        else void loadNext().catch(fail);
-      }),
+      h(
+        "div",
+        { class: "review" },
+        onboarding(() => {
+          introDone = true;
+          if (current) render();
+          else void loadNext().catch(failScreen);
+        }),
+      ),
     );
   }
 
   function renderDone(): void {
+    hooks.where?.(null);
     mount(
       root,
-      progressBar(progress),
-      h(
-        "section",
-        { class: "card done" },
-        h("h2", {}, "אין עוד שורות בשבילך כרגע. תודה רבה!"),
-        h("p", { lang: "en", dir: "ltr", class: "muted" }, "No lines left for you right now. Thank you!"),
-        progress.skippedByMe
-          ? h("button", { type: "button", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(fail) }, `חזרה ל-${progress.skippedByMe} השורות שדילגת עליהן`)
-          : null,
-        h("p", { class: "msg", role: "status" }),
+      stateScreen(
+        "exact",
+        t("done_h"),
+        null,
+        progress.skippedByMe ? h("button", { type: "button", class: "act primary", onclick: () => void post(`/api/batches/${encodeURIComponent(batch.id)}/skips/clear`).then(loadNext).catch(failScreen) }, t("done_skips", { n: progress.skippedByMe })) : null,
+        h("a", { class: "act quiet", href: "#tasks" }, t("all_tasks")),
       ),
     );
+  }
+
+  function escape(): boolean {
+    if (keysOpen) {
+      keysOpen = false;
+      q(".keys-panel")?.remove();
+      return true;
+    }
+    if (moreIsOpen(root)) {
+      setMoreOpen(root, false);
+      return true;
+    }
+    return page?.escape() ?? false;
   }
 
   const onKey = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const target = e.target as HTMLElement | null;
+    if (e.key === "Escape" && escape()) return e.preventDefault();
     if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return;
     if (target && (target.tagName === "BUTTON" || target.tagName === "A") && (e.key === "Enter" || e.key === " ")) return;
-    if (!current || current.view.kind !== "line_consensus" || !root.querySelector(".proposal")) return;
+    if (!current || current.view.kind !== "line_consensus" || !q(".dock")) return;
     if (e.repeat) return e.preventDefault();
+    if (e.key === "?") {
+      e.preventDefault();
+      keysOpen = !keysOpen;
+      q(".keys-panel")?.remove();
+      if (keysOpen) q(".slot")?.prepend(keysPanel(KEYS()));
+      return;
+    }
     const actions: Record<string, () => void> = {
       Enter: () => void act("correct"),
       NumpadEnter: () => void act("correct"),
@@ -375,7 +482,7 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
       NumpadAdd: () => setZoom(1),
       Minus: () => setZoom(-1),
       NumpadSubtract: () => setZoom(-1),
-      KeyP: togglePage,
+      KeyP: () => (desktop() ? page?.toggleEnlarged() : page?.isOpen() ? page.close() : page?.open()),
     };
     const fn = actions[e.code];
     if (fn) {
@@ -388,15 +495,21 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
     clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(renderStrip, 120);
   };
+  const onOnline = () => void resendKept();
   document.addEventListener("keydown", onKey);
   window.addEventListener("resize", onResize);
-  mount(root, h("p", { class: "muted" }, "טוען… / Loading…"));
-  (startAt === undefined ? loadNext() : open(startAt).catch(() => loadNext())).catch(fail);
+  window.addEventListener("online", onOnline);
+  desktopMq.addEventListener("change", renderStrip);
+  mount(root, h("p", { class: "muted" }, t("loading")));
+  (startAt === undefined ? resendKept().then(loadNext) : open(startAt).catch(() => loadNext())).catch(failScreen);
   return {
     el: root,
     dispose: () => {
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("online", onOnline);
+      desktopMq.removeEventListener("change", renderStrip);
+      body.remove("editing");
     },
   };
 }

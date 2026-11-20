@@ -24,9 +24,9 @@ let dispose: (() => void) | null = null;
 let prefs: Prefs = loadPrefs();
 
 /**
- * Screens adopted to the design render in main.doc (general pages) or main.task with body.task (task screens:
- * line verification). The rest (consensus, audit, page review, sign-in, terms, admin) render in main.legacy, styled
- * by css/bridge.css, until their design-adoption step (HeOCR/heocr-review#56-#58).
+ * Screens adopted to the design render in main.doc (general pages) or main.task with body.task (task screens: line
+ * verification, volunteer lines, reference audit). The rest (page review, sign-in, terms, admin) render in
+ * main.legacy, styled by css/bridge.css, until their design-adoption step (HeOCR/heocr-review#57, #58).
  */
 type Look = "doc" | "task" | "legacy";
 function show(look: Look, ...nodes: Node[]): void {
@@ -165,7 +165,7 @@ async function route(): Promise<void> {
         : batch.taskType === "line_consensus"
           ? lineConsensusView(batch, hooks, startAt)
           : (batch.taskType === "line_verify" ? lineVerifyView : reviewView)(batch, hooks, startAt);
-    show(batch.taskType === "line_verify" ? "task" : "legacy", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
+    show(batch.taskType === "page_review" ? "legacy" : "task", ...(batch.subsets.length ? [h("div", { class: "batchhead" }, subsetNav(batch, linked ? undefined : (subset?.id ?? "")))] : []), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
   } catch (err) {

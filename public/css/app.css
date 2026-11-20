@@ -14,3 +14,13 @@ main#app.task > .batchhead { padding: 8px 16px 0; }
 body.rv.task > #foot { display: none; }
 /* review.css's .rv .act sets display and outranks .desktop-only: keep desktop-only controls off a phone. */
 @media (max-width: 899px) { .rv .act.desktop-only { display: none; } }
+/* The volunteer introduction (consensus): its list and the conventions sheet. */
+.onboard ol { padding-inline-start: 1.2em; line-height: 1.6; display: flex; flex-direction: column; gap: 6px; }
+.onboard dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+.onboard dt { font-weight: 700; }
+.onboard dd { margin: 0; unicode-bidi: plaintext; }
+@media (max-width: 520px) { .onboard dl { grid-template-columns: 1fr; } .onboard dd { margin-bottom: 6px; } }
+/* The audit's crop when it has no line box: the crop image itself. */
+.audit .linebox .frame img { display: block; width: 100%; height: auto; }
+/* The audit's code-point row is desktop-only (SPEC §9); .texts .row sets display and outranks .desktop-only. */
+@media (max-width: 899px) { .rv .texts .row.desktop-only { display: none; } }

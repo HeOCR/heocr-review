@@ -258,15 +258,5 @@ main.legacy .reject summary { cursor: pointer; color: var(--bad); }
   main.legacy .prline input.lt { font-size: 19px; }
   main.legacy .conventions dl { grid-template-columns: 1fr; }
 }
-main.legacy .consensus .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-main.legacy .consensus .tag.look { border-color: var(--attn-line); background: var(--attn-bg); }
-main.legacy .consensus .tag.ai { border-color: var(--ai-hint); border-style: dashed; color: var(--ai-hint); }
-main.legacy .consensus .act[disabled] { opacity: 0.45; }
-main.legacy .onboard ol { padding-inline-start: 1.2em; line-height: 1.6; }
-main.legacy .onboard dt { font-weight: 600; margin-top: 6px; }
-main.legacy .onboard dd { margin: 0 0 4px; }
-main.legacy .onboard .primary { margin-top: 12px; min-height: 48px; width: 100%; font-size: 18px; }
 @media (max-width: 520px) {
-  main.legacy .consensus .txt.cand { font-size: 22px; }
-  main.legacy .consensus .subnav .keys { display: none; }
 }

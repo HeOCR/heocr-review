@@ -30,7 +30,7 @@ describe("the app's design assets match design/review (HeOCR/heocr-review#51)", 
     }
   });
 
-  it("has no gold branch in the line screen: a gold line is drawn exactly like any other (SPEC §4.1)", () => {
-    expect(readFileSync("src/web/views/line.ts", "utf8")).not.toMatch(/gold/i);
+  it("has no gold branch in the line screens: a gold line is drawn exactly like any other (SPEC §4.1)", () => {
+    for (const f of ["src/web/views/line.ts", "src/web/views/consensus.ts", "src/web/views/taskparts.ts"]) expect(readFileSync(f, "utf8"), f).not.toMatch(/gold/i);
   });
 });
