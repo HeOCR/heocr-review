@@ -172,6 +172,10 @@ const kindOf = (p: ProposalRecord): "verify" | "type" => payloadOf(p).kind ?? "v
 const isV12Line = (p: ProposalRecord) => payloadOf(p).kind !== undefined;
 /** Typed from a blank box: a typed line (either pass), or any line's blind second pass. */
 const typedFromBlank = (p: ProposalRecord) => kindOf(p) === "type" || isPass2(p);
+/** A typed line's pass 1 with a model's draft (items v1.3, pre-fill amendment 1): the typing box starts with it. */
+export const hasDraft = (p: ProposalRecord) =>
+  kindOf(p) === "type" && passOf(p) === 1 && payloadOf(p).candidate_text !== "" && payloadOf(p).candidate_provenance.startsWith("llm:");
+const DRAFT_LABEL: Label = { he: "טיוטה של Claude", en: "Claude's draft" };
 /** How many current decisions a line needs: two on a typed line's pass 1 in a group switched to two typings. */
 export function needed(batch: BatchRecord, p: ProposalRecord): number {
   const two = kindOf(p) === "type" && passOf(p) === 1 && (batch.settings?.twoTypingsGroups ?? []).includes(payloadOf(p).page.book_group ?? "");
@@ -300,16 +304,18 @@ export const lineVerify: TaskType = {
   toView(p: ProposalRecord): LineVerifyView {
     const x = payloadOf(p);
     const blind = typedFromBlank(p);
+    const draft = hasDraft(p);
     return {
       kind: "line_verify",
       mode: blind ? "type" : "verify",
       pass: passOf(p),
       lineKind: kindOf(p),
-      // The blind pass never sends the candidate: the reviewer types what the scan shows.
-      candidate: blind ? "" : x.candidate_text,
+      draft,
+      // The blind pass never sends the candidate: the reviewer types what the scan shows (a typed line's draft aside).
+      candidate: blind && !draft ? "" : x.candidate_text,
       runs: blind ? [] : attentionRuns(x.candidate_text, x.attention_spans),
       lineIndex: x.line_index,
-      provenance: { id: x.candidate_provenance, label: label(PROVENANCE_LABELS, x.candidate_provenance) },
+      provenance: { id: x.candidate_provenance, label: draft ? DRAFT_LABEL : label(PROVENANCE_LABELS, x.candidate_provenance) },
       source: { id: x.page.source, label: label(SOURCE_LABELS, x.page.source) },
       bookTitle: x.page.book_title,
       pageLabel: x.page.page_label,
@@ -368,7 +374,8 @@ export const lineVerify: TaskType = {
       .sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order || passOf(a.proposal) - passOf(b.proposal))
       .flatMap((r) => {
         const kind = kindOf(r.proposal);
-        const candidateSha = kind === "type" ? null : sha256Hex(payloadOf(r.proposal).candidate_text);
+        const drafted = hasDraft(r.proposal);
+        const candidateSha = kind === "type" && !drafted ? null : sha256Hex(payloadOf(r.proposal).candidate_text);
         const pass = passOf(r.proposal);
         const itemId = itemIdOf(r.proposal);
         return r.current
@@ -389,6 +396,7 @@ export const lineVerify: TaskType = {
               reviewer: d.reviewerId,
               ...body(d),
               ...(candidateSha ? { candidate_sha256: candidateSha } : {}),
+              ...(drafted ? { prefill_provenance: payloadOf(r.proposal).candidate_provenance } : {}),
               ...(v12 ? { pass } : {}),
               ...(v13 ? { kind } : {}),
               ...(v12 && pass === 2 ? { same_reviewer: pass1By.has(`${itemId}\u0000${d.reviewerId}`) } : {}),
@@ -472,7 +480,8 @@ export const lineVerify: TaskType = {
       .map((p) => ({
         item_id: itemIdOf(p),
         candidate_text: payloadOf(p).candidate_text,
-        ...(kindOf(p) === "type" ? {} : { candidate_sha256: sha256Hex(payloadOf(p).candidate_text) }),
+        ...(kindOf(p) === "type" && !hasDraft(p) ? {} : { candidate_sha256: sha256Hex(payloadOf(p).candidate_text) }),
+        ...(hasDraft(p) ? { prefill_provenance: payloadOf(p).candidate_provenance } : {}),
         blind: payloadOf(p).blind === true,
         kind: kindOf(p),
       }));

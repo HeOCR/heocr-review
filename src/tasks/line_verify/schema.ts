@@ -30,8 +30,16 @@ import { MAX_TEXT_LENGTH } from "../types";
 export const ITEMS_SCHEMA = "line_verify_items.v1";
 export const ITEMS_SCHEMA_V11 = "line_verify_items.v1.1";
 export const ITEMS_SCHEMA_V12 = "line_verify_items.v1.2";
-export const ITEMS_SCHEMAS = [ITEMS_SCHEMA, ITEMS_SCHEMA_V11, ITEMS_SCHEMA_V12] as const;
-/** 0 for v1, 1 for v1.1, 2 for v1.2: each level adds to the one before. */
+/**
+ * v1.3 (heocr-eval's test pre-fill protocol, amendment 1): v1.2 plus an optional draft on a "type" item, a model's
+ * reading shown in the typing box for the reviewer to correct. The draft is one unpointed line (letters only, as a
+ * typed line), and its provenance names the model and the prompt's sha256 (LLM_PROVENANCE). Pass 2 never shows it.
+ */
+export const ITEMS_SCHEMA_V13 = "line_verify_items.v1.3";
+export const ITEMS_SCHEMAS = [ITEMS_SCHEMA, ITEMS_SCHEMA_V11, ITEMS_SCHEMA_V12, ITEMS_SCHEMA_V13] as const;
+/** A draft's provenance: llm:<model>:<sha256 of the prompt>. */
+export const LLM_PROVENANCE = /^llm:[a-z0-9.-]+:[0-9a-f]{64}$/;
+/** 0 for v1, 1 for v1.1, 2 for v1.2, 3 for v1.3: each level adds to the one before. */
 export const itemsLevel = (schema: unknown): number => (ITEMS_SCHEMAS as readonly unknown[]).indexOf(schema);
 export const DECISIONS_SCHEMA = "line_verify_decisions.v1.1";
 /** Decisions on a v1.1 batch: v1.1 plus `pass` on every decision. */
@@ -171,6 +179,8 @@ export interface LvDecision {
   text?: string;
   /** Additive to the v1 contract: SHA-256 of the UTF-8 candidate_text the reviewer judged (see README). */
   candidate_sha256?: string;
+  /** Pass-1 decisions on a typed line with a draft (items v1.3): the draft's provenance; candidate_sha256 is the draft's. */
+  prefill_provenance?: string;
   /** v1.2 only, and required there: 2 for the blind second pass. */
   pass?: 1 | 2;
   /** v1.2, pass-2 decisions only, and required there: the reviewer also decided the line's pass 1. */
@@ -265,7 +275,7 @@ function itemProblems(item: Obj, page: Obj | undefined, level: number): string[]
   const problems: string[] = [];
   if (level >= 2 && !oneOf(KINDS, item.kind)) problems.push(`kind must be one of ${join(KINDS)}`);
   if (level < 2 && "kind" in item) problems.push(`kind is a ${ITEMS_SCHEMA_V12} field`);
-  if (level >= 2 && item.kind === "type") return [...problems, ...typeItemProblems(item, page)];
+  if (level >= 2 && item.kind === "type") return [...problems, ...typeItemProblems(item, page, level)];
   if (typeof item.item_id === "string" && item.item_id.includes(PASS2_SUFFIX)) problems.push(`item_id must not contain ${PASS2_SUFFIX}`);
   if (!(isInt(item.line_index) && item.line_index >= 0)) problems.push("line_index must be a non-negative integer");
   problems.push(...pixelBoxProblems("box", item.box, page), ...pixelBoxProblems("context_box", item.context_box, page));
@@ -294,13 +304,31 @@ function itemProblems(item: Obj, page: Obj | undefined, level: number): string[]
   return problems;
 }
 
-/** A typed line: the segmenter's box, no candidate, nothing to show but the scan. */
-function typeItemProblems(item: Obj, page: Obj | undefined): string[] {
+/** Every problem with a typed line's draft (v1.3): it must be what the reviewer could save as typed, unchanged. */
+export function draftProblems(draft: unknown): string[] {
+  const problems = lineTextProblems(draft);
+  if (problems.length) return problems;
+  const text = draft as string;
+  if (text !== text.normalize("NFC")) return ["must be NFC"];
+  if (text !== text.trim() || /\s{2,}/u.test(text)) return ["must have no edge or repeated whitespace"];
+  if (hasNiqqud(text)) return ["must hold the letters only, without niqqud or marks"];
+  return [];
+}
+
+/** A typed line: the segmenter's box, no candidate (v1.3: or a model's draft), nothing else to show but the scan. */
+function typeItemProblems(item: Obj, page: Obj | undefined, level: number): string[] {
   const problems: string[] = [];
   if (typeof item.item_id === "string" && item.item_id.includes(PASS2_SUFFIX)) problems.push(`item_id must not contain ${PASS2_SUFFIX}`);
   if (!(isInt(item.line_index) && item.line_index >= 0)) problems.push("line_index must be a non-negative integer");
   problems.push(...pixelBoxProblems("box", item.box, page), ...pixelBoxProblems("context_box", item.context_box, page));
-  for (const key of ["candidate_text", "candidate_provenance"]) if (item[key] !== null) problems.push(`${key} must be null on a type item`);
+  if (level >= 3 && item.candidate_text !== null) {
+    problems.push(...draftProblems(item.candidate_text).map((p) => `candidate_text (a draft) ${p}`));
+    if (!(typeof item.candidate_provenance === "string" && LLM_PROVENANCE.test(item.candidate_provenance))) {
+      problems.push("candidate_provenance of a draft must be llm:<model>:<prompt sha256>");
+    }
+  } else if (level >= 3) {
+    if (item.candidate_provenance !== null) problems.push("candidate_provenance must be null without a draft");
+  } else for (const key of ["candidate_text", "candidate_provenance"]) if (item[key] !== null) problems.push(`${key} must be null on a type item`);
   // No candidate, so nothing was aligned: null, or a number (ignored).
   if (!(item.alignment_score === null || (isNum(item.alignment_score) && item.alignment_score >= 0 && item.alignment_score <= 1))) {
     problems.push("alignment_score must be null or a number in [0, 1] on a type item");
@@ -313,7 +341,7 @@ function typeItemProblems(item: Obj, page: Obj | undefined): string[] {
   return problems;
 }
 
-/** Every problem with a line_verify_items.v1, .v1.1 or .v1.2 file (empty when valid). */
+/** Every problem with a line_verify_items.v1, .v1.1, .v1.2 or .v1.3 file (empty when valid). */
 export function itemsFileProblems(payload: unknown): string[] {
   if (!isObj(payload) || !oneOf(ITEMS_SCHEMAS, payload.schema_version)) return [`schema_version must be one of ${join(ITEMS_SCHEMAS)}`];
   const level = itemsLevel(payload.schema_version);
@@ -396,6 +424,8 @@ export interface ItemRef {
   /** v1.3: the item's kind. */
   kind?: (typeof KINDS)[number];
   candidate_sha256?: string;
+  /** A typed line with a draft (items v1.3): its pass-1 decisions carry the draft's candidate_sha256 and this. */
+  prefill_provenance?: string;
   /** The line has a blind second pass (v1.2 decisions may then carry pass 2). */
   blind?: boolean;
 }
@@ -536,7 +566,17 @@ export function decisionsFileProblems(payload: unknown, batchId: string, items: 
         else if (hasNiqqud(d.text as string)) problems.push(`${label}: typed text holds the letters only, without niqqud or marks`);
       } else if ("text" in d) problems.push(`${label}: only a typed or pointed_print decision carries text`);
       if ((d.decision === "not_on_page") !== oneOf(BOX_REASONS, d.box_reason)) problems.push(`${label}: box_reason (${join(BOX_REASONS)}) comes exactly with not_on_page`);
-      if ("candidate_sha256" in d) problems.push(`${label}: a typed line has no candidate_sha256`);
+      // A drafted line's pass-1 decisions say which draft was shown (pre-fill amendment 1); any other typed line has none.
+      const drafted = !pass2 && item?.prefill_provenance !== undefined;
+      if (drafted) {
+        if (d.candidate_sha256 !== item!.candidate_sha256) problems.push(`${label}: candidate_sha256 must be the sha256 of the draft shown`);
+        if (d.prefill_provenance !== item!.prefill_provenance) problems.push(`${label}: prefill_provenance must be the draft's provenance`);
+      } else {
+        if ("candidate_sha256" in d) problems.push(`${label}: a typed line without a draft has no candidate_sha256`);
+        if ("prefill_provenance" in d) problems.push(`${label}: a typed line without a draft has no prefill_provenance`);
+      }
+    } else if ("prefill_provenance" in d) {
+      problems.push(`${label}: prefill_provenance is for typed lines only`);
     } else if (v13 && "box_reason" in d) {
       problems.push(`${label}: box_reason is for typed lines only`);
     }
