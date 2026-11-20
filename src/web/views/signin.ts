@@ -1,6 +1,7 @@
 import type { ConfigResponse, MeResponse } from "../../shared/api";
 import { post } from "../api";
 import { h } from "../dom";
+import { lang, t } from "../i18n";
 
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 
@@ -27,11 +28,12 @@ function loadGis(): Promise<Gis> {
   });
 }
 
-export function signInView(config: ConfigResponse, done: (me: MeResponse) => void): HTMLElement {
+/** Sign-in (design SPEC §4.6): one heading, two sentences, Google's own button (not restyled), the policy links. */
+export function signInView(config: ConfigResponse, done: (me: MeResponse) => void): DocumentFragment {
   const msg = h("p", { class: "msg", role: "status" });
   const button = h("div", { class: "gsi" });
   const fail = (e: unknown) => {
-    msg.textContent = "ההתחברות נכשלה. נסו שוב. / Sign-in failed, please try again.";
+    msg.textContent = t("signin_failed");
     console.warn(e);
   };
   if (config.googleClientId) {
@@ -48,11 +50,11 @@ export function signInView(config: ConfigResponse, done: (me: MeResponse) => voi
             post<MeResponse>("/api/auth/google", { credential: resp.credential }).then(done, fail);
           },
         });
-        google.accounts.id.renderButton(button, { theme: "outline", size: "large", text: "signin_with", shape: "pill", locale: "he" });
+        google.accounts.id.renderButton(button, { theme: "outline", size: "large", text: "signin_with", shape: "pill", locale: lang() });
       })
       .catch(fail);
   } else if (!config.devAuth) {
-    msg.textContent = "ההתחברות עדיין לא הוגדרה. / Sign-in is not configured yet.";
+    msg.textContent = t("signin_off");
   }
   let dev: HTMLElement | null = null;
   if (config.devAuth) {
@@ -71,22 +73,15 @@ export function signInView(config: ConfigResponse, done: (me: MeResponse) => voi
       h("button", { type: "submit" }, "Sign in"),
     );
   }
-  return h(
-    "section",
-    { class: "card intro" },
-    h("h1", {}, "HeOCR Review"),
-    h("p", {}, "עוזרים לשפר זיהוי טקסט עברי: בודקים הצעות לתיקון מול סריקות של דפים מודפסים."),
-    h("p", { dir: "ltr", lang: "en", class: "muted" }, "Help Hebrew OCR: check proposed text corrections against scans of printed pages."),
+  const page = document.createDocumentFragment();
+  page.append(
+    h("h1", {}, t("signin_h")),
+    h("p", {}, t("signin_p")),
     button,
-    dev,
+    ...(dev ? [dev] : []),
     msg,
-    h(
-      "p",
-      { class: "muted small" },
-      "ההתחברות דרך גוגל משמשת רק לזיהוי קבוע. איננו שומרים דוא״ל או שם, ואין באתר אנליטיקה. ",
-      h("a", { href: "/privacy" }, "מדיניות הפרטיות"),
-      " · ",
-      h("a", { href: "/terms" }, "תנאי השימוש"),
-    ),
+    h("p", { class: "small muted" }, t("signin_why")),
+    h("p", { class: "small" }, h("a", { href: "/privacy" }, t("privacy")), " · ", h("a", { href: "/terms" }, t("terms"))),
   );
+  return page;
 }

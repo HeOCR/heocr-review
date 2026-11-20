@@ -129,7 +129,7 @@ The line verification screen with these differences (`consensus`): the main answ
 | Screen | Mockup | Notes |
 |---|---|---|
 | Sign-in | `signin` | One heading, two sentences, Google's button in its own centred box (min height 44, not restyled), the reason for Google sign-in, the two policy links |
-| Terms | `terms` | The existing wording in a card, the pseudonym, the optional credit checkbox and name, one primary button |
+| Terms | `terms` | The existing wording in a card, the pseudonym, the optional credit checkbox and name, one primary button. **Exception to one language at a time** (maintainer, 2026-11-19): the terms screen shows the approved Hebrew and English texts together, word for word, with the credit label and the button in both languages, whatever the interface language. No `TERMS_VERSION` bump and no re-acceptance came with the redesign |
 | Tasks | `tasks` | One card per batch: task name, count left, title, thin progress line. Page-review batches carry an "On a computer" tag |
 | Done, empty | `done`, `empty` | The state layout: icon in a square frame, title, one sentence, actions |
 | Errors | `error-*` | The same layout. Each says what happened, whether the answer is safe, and what to do |

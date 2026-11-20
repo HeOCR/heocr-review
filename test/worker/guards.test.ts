@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { handle } from "../../src/worker/index";
 import type { Env } from "../../src/worker/env";
-import { LIMITS, enforce, resetRateLimits } from "../../src/worker/ratelimit";
+import { LIMITS, enforce, isD1QuotaError, resetRateLimits, secondsToUtcMidnight } from "../../src/worker/ratelimit";
 import { BATCH, Client } from "./helpers";
 
 const exec = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
@@ -117,6 +117,26 @@ describe("request guards", () => {
     ).bind(id, reviewerId, LIMITS.writeDay.max).run();
     const res = await c.req("POST", `/api/proposals/${id}/decision`, { value: "accepted" });
     expect(res.status).toBe(429);
+    // Its own code, so the app can say "today's quota is used up; it resets at midnight UTC" (design SPEC §6).
+    expect(((await res.json()) as { error: string }).error).toBe("daily_limit");
+    const retry = Number(res.headers.get("retry-after"));
+    expect(retry).toBeGreaterThan(0);
+    expect(retry).toBeLessThanOrEqual(86_400);
+  });
+
+  it("answers Cloudflare's D1 quota error as daily_limit, not a bare 500", async () => {
+    const quota = "D1_ERROR: Your account has exceeded D1's free tier daily row write limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue.";
+    expect(isD1QuotaError(quota)).toBe(true);
+    expect(isD1QuotaError("D1_ERROR: no such table: x")).toBe(false);
+    expect(isD1QuotaError("Your account has exceeded something")).toBe(false);
+    const c = new Client();
+    await c.signIn("quota");
+    const failing = { ...env, DB: { prepare: () => { throw new Error(quota); } } as unknown as D1Database };
+    const res = await call(failing, "http://localhost/api/batches", { headers: { cookie: c.cookie } });
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { error: string }).error).toBe("daily_limit");
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(secondsToUtcMidnight(Date.UTC(2026, 10, 20, 23, 59, 30))).toBe(30);
   });
 
   it("limits profile changes per hour from the consent log", async () => {

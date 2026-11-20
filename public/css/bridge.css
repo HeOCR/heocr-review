@@ -82,14 +82,7 @@ main.legacy kbd {
   border-radius: 4px; padding: 0 4px; margin-inline-start: 6px; color: var(--muted);
 }
 main.legacy .row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 8px; }
-main.legacy .intro { text-align: center; }
 main.legacy .gsi { display: flex; justify-content: center; min-height: 44px; margin: 18px 0; }
-main.legacy .dev { display: flex; gap: 8px; justify-content: center; align-items: center; margin: 12px 0; padding: 8px; border: 1px dashed var(--edit); border-radius: 8px; }
-main.legacy .dev input { width: 10em; }
-main.legacy .terms { margin-bottom: 12px; }
-main.legacy .terms[lang="en"] { border-top: 1px solid var(--line); padding-top: 4px; }
-main.legacy .version { margin: 8px 0 0; }
-main.legacy .optin { display: block; margin: 12px 0 6px; }
 main.legacy form.card > input[type="text"] { margin-bottom: 14px; }
 main.legacy .progress { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
 main.legacy .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }

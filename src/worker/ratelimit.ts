@@ -44,8 +44,21 @@ export function resetRateLimits(): void {
   windows.clear();
 }
 
-function refuse(retryS: number): never {
-  throw new HttpError(429, "rate_limited", "too many requests", { "retry-after": String(Math.max(1, Math.ceil(retryS))) });
+function refuse(retryS: number, code: "rate_limited" | "daily_limit" = "rate_limited"): never {
+  throw new HttpError(429, code, code === "daily_limit" ? "daily limit reached" : "too many requests", { "retry-after": String(Math.max(1, Math.ceil(retryS))) });
+}
+
+/** Seconds from `nowMs` to the next 00:00 UTC, when daily limits reset. */
+export function secondsToUtcMidnight(nowMs = Date.now()): number {
+  return Math.max(1, Math.ceil((Math.floor(nowMs / 86_400_000) * 86_400_000 + 86_400_000 - nowMs) / 1000));
+}
+
+/**
+ * Cloudflare's own D1 quota (the account's daily rows read or written; it took production down on 2026-11-19). The
+ * request can't be served, but nothing is wrong with it: the client says so (daily_limit) rather than a bare 500.
+ */
+export function isD1QuotaError(message: string): boolean {
+  return /D1_ERROR/.test(message) && /(daily row (?:read|write) limit|exceeded D1's free tier|limit exceeded)/i.test(message);
 }
 
 /** In-memory fixed-window counter (this isolate). Throws 429 when `subject` is over `limit`. Writes nothing to D1. */
@@ -74,7 +87,7 @@ export async function enforceWriteDay(db: D1Database, reviewerId: string, nowMs 
     )
     .bind(reviewerId, since)
     .first<{ n: number }>();
-  if ((row?.n ?? 0) >= LIMITS.writeDay.max) refuse((Date.parse(since) + 86_400_000 - nowMs) / 1000);
+  if ((row?.n ?? 0) >= LIMITS.writeDay.max) refuse((Date.parse(since) + 86_400_000 - nowMs) / 1000, "daily_limit");
 }
 
 /** The hourly profile limit, from the reviewer's consent log in the last hour (a read, exact). */
