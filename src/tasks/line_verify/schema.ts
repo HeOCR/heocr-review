@@ -61,7 +61,8 @@ export const TYPE_DECISION_VALUES = ["typed", "pointed_print", "unreadable", "no
 export const SOURCES = ["wikisource_he_proofread", "benyehuda_nli_aligned", "reshumot_scanned", "knesset_plenary"] as const;
 export const PROVENANCES = ["wikisource_quality3_single_proofreader", "pby_human_typed_aligned", "publisher_ocr_layer"] as const;
 /** v1.1 adds edition texts: the candidate is a published edition's text, never OCR. */
-export const SOURCES_V11 = [...SOURCES, "sefaria_edition", "gutenberg_edition", "benyehuda_text", "wikisource_he"] as const;
+/** v1.2 adds hash_eval: HASH's handwritten eval pages (h_eval_v1), typed from scratch, no candidate. */
+export const SOURCES_V11 = [...SOURCES, "sefaria_edition", "gutenberg_edition", "benyehuda_text", "wikisource_he", "hash_eval"] as const;
 export const PROVENANCES_V11 = [
   ...PROVENANCES,
   "sefaria_exact_edition",
@@ -71,7 +72,7 @@ export const PROVENANCES_V11 = [
   "wikisource_quality1_unproofread",
 ] as const;
 /** The page's typeface (v1.1): Rashi script is its own stratum. */
-export const SCRIPTS = ["square", "rashi"] as const;
+export const SCRIPTS = ["square", "rashi", "handwriting"] as const;
 /** Why the agent pre-check thinks a candidate is likely wrong (v1.1). */
 export const PRECHECK_REASONS = ["edge_mismatch", "spelling", "digits"] as const;
 /** A line's blind second pass is the proposal `<item_id>@pass2` (as in page_review). */

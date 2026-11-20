@@ -240,15 +240,18 @@ export async function cutLines(
 ): Promise<PageMedia> {
   const input = readFileSync(imagePath);
   const meta = await sharp(input, { failOn: "error" }).metadata();
-  const w = meta.width ?? 0;
-  const h = meta.height ?? 0;
+  // Boxes are in the displayed frame: an EXIF orientation of 5-8 (a quarter turn) swaps width and height, and every
+  // cut below auto-orients first (a no-op for orientation 1). The bundle keeps the original bytes and their sha256.
+  const quarterTurn = (meta.orientation ?? 1) >= 5;
+  const w = (quarterTurn ? meta.height : meta.width) ?? 0;
+  const h = (quarterTurn ? meta.width : meta.height) ?? 0;
   if (!w || !h) throw new Error(`cannot read ${imagePath}`);
   if (Math.abs(w / h - declared.width / declared.height) > 0.01 * (declared.width / declared.height)) {
     throw new Error(`${imagePath} is ${w}x${h}, but items.json says ${declared.width}x${declared.height}`);
   }
   const base = join("media", safeSegment(batchId), safeSegment(pageStem));
   const pageW = Math.min(PAGE_WIDTH, w);
-  const pageBuf = await sharp(input).resize({ width: pageW }).jpeg({ quality: 72, mozjpeg: true }).toBuffer();
+  const pageBuf = await sharp(input).rotate().resize({ width: pageW }).jpeg({ quality: 72, mozjpeg: true }).toBuffer();
   const page: StoredImage = {
     ref: { source: "static", path: write(publicDir, join(base, "page.jpg"), pageBuf) },
     width: pageW,
@@ -260,7 +263,7 @@ export async function cutLines(
   for (const line of lines) {
     const r = lineCropRect(line.box, line.contextBox, w, h);
     const outW = Math.min(r.width, LINE_CROP_MAX_WIDTH);
-    const buf = await sharp(input).extract(r).resize({ width: outW }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    const buf = await sharp(input).rotate().extract(r).resize({ width: outW }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
     crops.set(line.externalId, {
       ref: { source: "static", path: write(publicDir, join(base, `${safeSegment(line.externalId)}.jpg`), buf) },
       width: outW,

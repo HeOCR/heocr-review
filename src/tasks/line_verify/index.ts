@@ -93,6 +93,7 @@ export const SOURCE_LABELS: Record<string, Label> = {
   gutenberg_edition: { he: "פרויקט גוטנברג, נוסח המהדורה", en: "Project Gutenberg, the edition's text" },
   benyehuda_text: { he: "פרויקט בן־יהודה", en: "Project Ben-Yehuda" },
   wikisource_he: { he: "ויקיטקסט", en: "Hebrew Wikisource" },
+  hash_eval: { he: "HASH, כתב יד (סט הערכה)", en: "HASH handwriting (eval set)" },
 };
 
 export const PROVENANCE_LABELS: Record<string, Label> = {
@@ -115,6 +116,7 @@ export const PRECHECK_LABELS: Record<string, Label> = {
 export const SCRIPT_LABELS: Record<string, Label> = {
   square: { he: "אותיות מרובעות", en: "Square script" },
   rashi: { he: "כתב רש״י", en: "Rashi script" },
+  handwriting: { he: "כתב יד", en: "Handwriting" },
 };
 
 const OPTIONS: DecisionOption[] = [
