@@ -113,6 +113,45 @@ describe("line verification: triage mode", () => {
     expect(triage.history).toEqual([expect.objectContaining({ item_id: seen[0]!.ext, value: "different" })]);
   });
 
+  it("shows a plant only in triage, sends it to the desktop whatever the answer, and never makes its triage answer a reference", async () => {
+    const c = await reviewer("planted");
+    const { proposal, view } = await next(c);
+    const original = view!.candidate;
+    const planted = `${original}ו`;
+    await env.DB.prepare(
+      `INSERT INTO triage_plants (batch_id, proposal_id, item_id, plant_type, position, planted_text, planted_sha256, candidate_sha256, plants_sha256, imported_at)
+       VALUES (?1, ?2, ?3, 'insertion', '0', ?4, ?5, ?6, ?7, '2026-11-20T00:00:00.000Z')`,
+    )
+      .bind(V12, proposal!.id, proposal!.externalId, planted, sha256Hex(planted), sha256Hex(original), "f".repeat(64))
+      .run();
+    // Triage shows the planted text, with nothing that marks it (no attention runs on any triage line).
+    const shown = await next(c);
+    expect(shown.proposal!.id).toBe(proposal!.id);
+    expect(shown.view).toMatchObject({ candidate: planted, runs: [] });
+    expect((await c.get<{ proposal: { view: LineVerifyView } }>(`/api/proposals/${proposal!.id}?queue=triage`)).body.proposal.view.candidate).toBe(planted);
+    // "Correct" on the plant: the line goes to the desktop, which shows the true candidate.
+    expect((await c.post(`/api/proposals/${proposal!.id}/decision`, { value: "correct" })).status).toBe(200);
+    expect((await next(c, "triage")).proposal!.id).not.toBe(proposal!.id);
+    const fix = await next(c, "fix");
+    expect(fix.proposal!.id).toBe(proposal!.id);
+    expect(fix.view!.candidate).toBe(original);
+    // Before the desktop answer, the plant's triage answer is not a reference.
+    let { files } = await exportFiles();
+    const decided = (files["line_verify_decisions.json"]!.decisions as Record<string, unknown>[]).filter((d) => d.item_id === proposal!.externalId);
+    expect(decided).toEqual([]);
+    expect((await c.post(`/api/proposals/${proposal!.id}/decision`, { value: "exact" })).status).toBe(200);
+    ({ files } = await exportFiles());
+    const row = (files["reference_triage.json"]!.rows as Record<string, unknown>[]).find((r) => r.item_id === proposal!.externalId)!;
+    expect(row).toMatchObject({
+      candidate_sha256: sha256Hex(planted),
+      plant: { planted_sha256: sha256Hex(planted), type: "insertion" },
+      triage: { decision: "correct" },
+      correction: { value: "kept_candidate", correction_start: "candidate" },
+    });
+    expect((files["line_verify_decisions.json"]!.decisions as Record<string, unknown>[]).find((d) => d.item_id === proposal!.externalId)).toMatchObject({ decision: "exact" });
+    expect(files["reference_triage_history.json"]!.replaced).toEqual([expect.objectContaining({ item_id: proposal!.externalId, triage: expect.objectContaining({ decision: "correct" }) })]);
+  });
+
   it("refuses triage answers outside a triage batch", async () => {
     await setMode("standard");
     const c = await reviewer("standard");

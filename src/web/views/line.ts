@@ -241,7 +241,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   async function open(id: number): Promise<void> {
-    const res = await get<{ proposal: ProposalView }>(`/api/proposals/${id}`);
+    const res = await get<{ proposal: ProposalView }>(`/api/proposals/${id}${queue === "triage" ? "?queue=triage" : ""}`);
     current = res.proposal;
     revisiting = true;
     failure = null;
@@ -640,7 +640,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       ? [
           h("button", { type: "button", class: "act primary tri", "data-value": "correct", onclick: () => void act("correct") }, h("span", {}, t("tri_correct")), h("kbd", {}, "1")),
           h("button", { type: "button", class: "act tri", "data-value": "different", onclick: () => void act("different") }, h("span", {}, t("tri_different")), h("kbd", {}, "2")),
-          h("button", { type: "button", class: "act tri", "data-value": "niqqud_mismatch", onclick: () => void act("niqqud_mismatch") }, h("span", {}, t("niqqud")), h("kbd", {}, "3")),
+          h("button", { type: "button", class: "act tri", "data-value": "niqqud_mismatch", onclick: () => void act("niqqud_mismatch") }, h("span", {}, t(hasNiqqud(v.candidate) ? "tri_no_niqqud" : "niqqud")), h("kbd", {}, "3")),
         ]
       : typing
       ? []

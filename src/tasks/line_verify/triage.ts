@@ -21,6 +21,8 @@ export type TriageValue = (typeof TRIAGE_VALUES)[number];
 export const isTriageValue = (v: string): v is TriageValue => (TRIAGE_VALUES as readonly string[]).includes(v);
 export const REFERENCE_TRIAGE_SCHEMA = "reference_triage.v1";
 export const REFERENCE_TRIAGE_FILE = "reference_triage.json";
+export const REFERENCE_TRIAGE_HISTORY_SCHEMA = "reference_triage_history.v1";
+export const REFERENCE_TRIAGE_HISTORY_FILE = "reference_triage_history.json";
 
 const payloadOf = (p: ProposalRecord) => p.payload as unknown as LineVerifyPayload;
 const passOf = (p: ProposalRecord) => payloadOf(p).pass ?? 1;
@@ -42,6 +44,34 @@ export const TRIAGEABLE_SQL = `(COALESCE(json_extract(p.payload_json, '$.pass'),
   AND (COALESCE(json_extract(p.payload_json, '$.kind'), 'verify') = 'verify'
     OR json_extract(p.payload_json, '$.candidate_provenance') LIKE 'llm:%'))`;
 
+/**
+ * SQL over a decision alias: the answer leaves its line open to the reviewer, for the desktop fix queue: "different",
+ * or any triage answer on a line with a plant (eval's amendment 2: every plant goes to the desktop).
+ */
+export const PENDING_SQL = (d: string) =>
+  `(${d}.value = 'different' OR (${d}.value IN ('correct', 'niqqud_mismatch') AND EXISTS (SELECT 1 FROM triage_plants tp WHERE tp.proposal_id = ${d}.proposal_id)))`;
+
+/** A plant as the export needs it (migrations/0012_triage.sql, triage_plants). */
+export interface TriagePlant {
+  proposalId: number;
+  plantType: string;
+  plantedSha256: string;
+  candidateSha256: string;
+}
+export const TRIAGE_PLANTS_SQL = "SELECT proposal_id, plant_type, planted_sha256, candidate_sha256 FROM triage_plants WHERE batch_id = ?1";
+export const toTriagePlant = (r: { proposal_id: number; plant_type: string; planted_sha256: string; candidate_sha256: string }): TriagePlant => ({
+  proposalId: r.proposal_id,
+  plantType: r.plant_type,
+  plantedSha256: r.planted_sha256,
+  candidateSha256: r.candidate_sha256,
+});
+
+/** The line's plant, if it was made on the line's current candidate (a plant on a since-changed candidate is void). */
+export function plantOf(p: ProposalRecord, plants: Map<number, TriagePlant>): TriagePlant | null {
+  const plant = plants.get(p.id);
+  return plant && plant.candidateSha256 === sha256Hex(candidateOf(p)) ? plant : null;
+}
+
 export const isTriageBatch = (batch: BatchRecord) => batch.taskType === "line_verify" && batch.settings?.mode === "triage";
 
 /**
@@ -49,9 +79,10 @@ export const isTriageBatch = (batch: BatchRecord) => batch.taskType === "line_ve
  * typed line; niqqud_mismatch is pointed_print (on a typed line with the draft's letters, which are unpointed);
  * different is not a reference (null: left out). Any other answer is itself.
  */
-export function asReference(p: ProposalRecord, d: DecisionRecord): DecisionRecord | null {
+export function asReference(p: ProposalRecord, d: DecisionRecord, planted = false): DecisionRecord | null {
   if (!isTriageValue(d.value)) return d;
-  if (d.value === "different") return null;
+  // A plant's triage answer judged the planted text, never the candidate: only the desktop answer is a reference.
+  if (d.value === "different" || planted) return null;
   const typed = kindOf(p) === "type";
   if (d.value === "correct") return typed ? { ...d, value: "typed", text: candidateOf(p) } : { ...d, value: "exact", text: null };
   return { ...d, value: "pointed_print", text: typed ? candidateOf(p) : null };
@@ -61,22 +92,30 @@ interface TriageRow {
   item_id: string;
   reviewer: string;
   candidate_provenance: string | null;
+  /** Of the text triage showed: the planted text on a plant. */
   candidate_sha256: string | null;
+  plant: { planted_sha256: string; type: string } | null;
   queue: "triage" | "desktop_no_candidate";
   triage: { decision: TriageValue; decided_at: string } | null;
   correction: { value: string; text: string | null; correction_start: "candidate" | "blank"; decided_at: string } | null;
 }
 
-/** reference_triage.v1: one row per pass-1 line and answering reviewer, plus every superseded answer in history. */
-export function referenceTriageFile(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string): ExportFile {
+/**
+ * reference_triage.v1: one row per pass-1 line and answering reviewer, plus every superseded answer in history; and
+ * reference_triage_history.json, every replaced triage answer (eval's count source).
+ */
+export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, plantList: TriagePlant[] = []): ExportFile[] {
+  const plants = new Map(plantList.map((x) => [x.proposalId, x]));
   const rows: TriageRow[] = [];
   const history: { item_id: string; reviewer: string; value: string; text: string | null; decided_at: string; superseded_at: string }[] = [];
+  const replaced: { item_id: string; reviewer: string; triage: { decision: string; decided_at: string }; replaced_at: string }[] = [];
   const lines = resolved.filter((r) => passOf(r.proposal) === 1).sort((a, b) => payloadOf(a.proposal).order - payloadOf(b.proposal).order);
   for (const r of lines) {
     const p = r.proposal;
     const itemId = payloadOf(p).item_id ?? p.externalId;
     const candidate = candidateOf(p);
     const provenance = candidate === "" ? null : payloadOf(p).candidate_provenance;
+    const plant = plantOf(p, plants);
     const reviewers = [...new Set(r.current.map((d) => d.reviewerId))].sort();
     for (const reviewer of reviewers) {
       const current = r.current.find((d) => d.reviewerId === reviewer)!;
@@ -89,26 +128,40 @@ export function referenceTriageFile(batch: BatchRecord, resolved: ResolvedPropos
         item_id: itemId,
         reviewer,
         candidate_provenance: provenance,
-        candidate_sha256: candidate === "" ? null : sha256Hex(candidate),
+        candidate_sha256: candidate === "" ? null : plant ? plant.plantedSha256 : sha256Hex(candidate),
+        plant: plant ? { planted_sha256: plant.plantedSha256, type: plant.plantType } : null,
         queue: candidate === "" ? "desktop_no_candidate" : "triage",
         triage: lastTriage ? { decision: lastTriage.value as TriageValue, decided_at: lastTriage.decidedOn } : null,
         correction: isTriageValue(current.value)
           ? null
-          : { value: current.value, text: current.text, correction_start: candidate === "" ? "blank" : "candidate", decided_at: current.decidedOn },
+          : {
+              value: plant ? plantCorrection(p, current) : current.value,
+              text: current.text,
+              correction_start: candidate === "" ? "blank" : "candidate",
+              decided_at: current.decidedOn,
+            },
       });
+      for (const d of mine) {
+        if (d !== current && isTriageValue(d.value)) replaced.push({ item_id: itemId, reviewer, triage: { decision: d.value, decided_at: d.decidedOn }, replaced_at: d.supersededAt!.slice(0, 10) });
+      }
     }
     for (const d of r.superseded) {
       history.push({ item_id: itemId, reviewer: d.reviewerId, value: d.value, text: d.text, decided_at: d.decidedOn, superseded_at: d.supersededAt!.slice(0, 10) });
     }
   }
-  return {
-    fileName: REFERENCE_TRIAGE_FILE,
-    content: {
-      schema: REFERENCE_TRIAGE_SCHEMA,
-      batch_id: (batch.source as { batch_id?: string }).batch_id ?? batch.id,
-      exported_at: exportedAt,
-      rows,
-      history,
-    },
-  };
+  const batchId = (batch.source as { batch_id?: string }).batch_id ?? batch.id;
+  return [
+    { fileName: REFERENCE_TRIAGE_FILE, content: { schema: REFERENCE_TRIAGE_SCHEMA, batch_id: batchId, exported_at: exportedAt, rows, history } },
+    { fileName: REFERENCE_TRIAGE_HISTORY_FILE, content: { schema: REFERENCE_TRIAGE_HISTORY_SCHEMA, batch_id: batchId, exported_at: exportedAt, replaced } },
+  ];
+}
+
+/**
+ * A plant's desktop answer (eval's amendment 2): "kept_candidate" when it leaves the true candidate as it is (exact, or
+ * typed equal to it), "corrected" when it gives another text; any other answer is itself.
+ */
+function plantCorrection(p: ProposalRecord, d: DecisionRecord): string {
+  if (d.value === "exact" || ((d.value === "typed" || d.value === "edited") && d.text === candidateOf(p))) return "kept_candidate";
+  if (d.value === "edited" || d.value === "typed" || (d.value === "pointed_print" && d.text)) return "corrected";
+  return d.value;
 }

@@ -209,7 +209,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
     const queue = params.get("queue") ?? "triage";
     if (!(TRIAGE_QUEUES as readonly string[]).includes(queue)) throw new HttpError(404, "not_found");
     filter = await triageFilter(ctx.env.DB, batch.id, reviewer.id, queue as TriageQueue);
-    const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, isAdmin(ctx.env, reviewer.id));
+    const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, isAdmin(ctx.env, reviewer.id), queue === "triage");
     const counts = (await triageCounts(ctx.env.DB, batch, reviewer.id, ctx.now))!;
     return json({ ...out, triage: { queue: queue as TriageQueue, ...counts } });
   }
@@ -258,7 +258,9 @@ export async function showProposal(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.readMinute, reviewer.id, ctx.now);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
-  return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id) });
+  // ?queue=triage: the line as triage shows it (a plant's text, no attention runs).
+  const triage = new URL(ctx.request.url).searchParams.get("queue") === "triage";
+  return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id, triage) });
 }
 
 export async function decide(ctx: Ctx, id: number): Promise<Response> {

@@ -1,5 +1,5 @@
 {
- "_note": "The app's interface strings, [Hebrew, English], from design/review/strings.json (HeOCR/heocr-review#51). Keys match the design's. {name} is filled in by t(). The maintainer approved all of them on 2026-11-19 (\"all approved\"); new wording goes through his review. He approved draft_note and draft_reset as written on 2026-11-20 (via heocr-lead). tri_correct reuses the approved volunteer answer \"נכון / Correct\"; tri_different, q_triage, q_fix, fix_phone_h, fix_phone_p and to_triage await his review.",
+ "_note": "The app's interface strings, [Hebrew, English], from design/review/strings.json (HeOCR/heocr-review#51). Keys match the design's. {name} is filled in by t(). The maintainer approved all of them on 2026-11-19 (\"all approved\"); new wording goes through his review. He approved draft_note and draft_reset as written on 2026-11-20 (via heocr-lead). He approved the triage strings (tri_correct, tri_different, tri_no_niqqud, q_triage, q_fix, fix_phone_h, fix_phone_p, to_triage) on 2026-11-20 (via heocr-lead).",
  "batch": [
   "אל המזח · שורות",
   "אל המזח · lines"
@@ -939,6 +939,10 @@
  "tri_different": [
   "שונה — לתיקון במחשב",
   "Different — fix on desktop"
+ ],
+ "tri_no_niqqud": [
+  "בדפוס אין ניקוד",
+  "Print has no niqqud"
  ],
  "q_triage": [
   "סימון ({n})",
