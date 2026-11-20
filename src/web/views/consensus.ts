@@ -17,7 +17,7 @@ import { DESKTOP_QUERY, clearDraft, dropPending, failureKind, keepPending, keepa
 import { compare } from "../text";
 import { prefetch, type ReviewHooks, type ReviewScreen } from "./common";
 import { LINE_CONVENTIONS } from "./conventions";
-import { candidateNodes, lineStrip } from "./line";
+import { candidateNodes, lineStrip, stripPieces } from "./line";
 import {
   answerButton,
   contextBand,
@@ -96,7 +96,9 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
   let editing: HTMLTextAreaElement | null = null;
   let busy = false;
   let ready = false;
-  let zoom = 2;
+  // A desktop starts at the largest ink height, so a long line fills the column as one strip (the zoom buttons step
+  // down); a phone starts at its two-piece size.
+  let zoom = desktopMq.matches ? LINE_HEIGHTS.length - 1 : 2;
   let fitWidth = false;
   let introDone = false;
   let keysOpen = false;
@@ -327,7 +329,7 @@ export function lineConsensusView(batch: BatchSummary, hooks: ReviewHooks, start
       return;
     }
     const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
-    const pieces = !desktop() && fitWidth ? 1 : 2;
+    const pieces = stripPieces(v.crop, v.crop.box, width, desktop(), fitWidth);
     holder.replaceChildren(lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true), pieces, t("line_on_scan")));
     const band = q(".ctxbox .bandholder");
     if (band && v.crop && v.context) band.replaceChildren(bandImage(v.crop, v.context, Math.max(200, band.clientWidth || 360)));

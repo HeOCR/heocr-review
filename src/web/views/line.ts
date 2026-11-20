@@ -53,6 +53,28 @@ import {
 const LINE_HEIGHTS = [40, 52, 66, 84, 108, 140];
 const MAX_SEGMENTS = 4;
 
+/** The smallest ink height (CSS px) at which a line is still read comfortably as one continuous strip. */
+export const MIN_LEGIBLE_INK = 18;
+
+/** The line's padded width and ink height in image pixels, as lineStrip cuts it. */
+function stripGeometry(img: ImageView, box: Box): { lw: number; lh: number } {
+  const lh = Math.max(1, (box[3] - box[1]) * img.height);
+  const x0 = Math.max(0, box[0] * img.width - 0.4 * lh);
+  const x1 = Math.min(img.width, box[2] * img.width + 0.4 * lh);
+  return { lw: Math.max(1, x1 - x0), lh };
+}
+
+/**
+ * How many pieces to cut the line into. A desktop shows one continuous strip whenever the whole line fits the column
+ * at a legible ink height (a split line is read in two halves, which is slower); it splits only when it can't. A phone
+ * shows two pieces, or one with "Fit width".
+ */
+export function stripPieces(img: ImageView, box: Box, width: number, desktop: boolean, fitWidth: boolean): number {
+  if (!desktop) return fitWidth ? 1 : 2;
+  const { lw, lh } = stripGeometry(img, box);
+  return (width * lh) / lw >= MIN_LEGIBLE_INK ? 1 : 2;
+}
+
 /**
  * The line, cut from its context crop on the client and shown large. A line too long for the screen at that size
  * is wrapped into stacked pieces (at most `maxPieces`, shrinking the ink height if it must), right piece first
@@ -171,7 +193,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   let editing: HTMLTextAreaElement | null = null;
   let busy = false;
   let ready = false; // the line's image has loaded: confirming a line nobody could see would be a blind "exact"
-  let zoom = 2;
+  // A desktop starts at the largest ink height, so a long line fills the column as one strip (the zoom buttons step
+  // down); a phone starts at its two-piece size.
+  let zoom = desktopMq.matches ? LINE_HEIGHTS.length - 1 : 2;
   let fitWidth = false; // phone: the whole line across the width ("Fit width") instead of two pieces
   let pageOpened = false; // phone: the full page was opened on this line
   let failure: Failure | null = null;
@@ -369,7 +393,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     }
     const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
     // A phone shows two pieces (or one, "Fit width"); a desktop one strip when it fits, else two.
-    const pieces = !desktop() && fitWidth ? 1 : 2;
+    const pieces = stripPieces(v.crop, v.crop.box, width, desktop(), fitWidth);
     const strip = lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true), pieces, t("line_on_scan"));
     holder.replaceChildren(strip);
     fitCandidate(strip.children.length);

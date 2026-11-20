@@ -14,7 +14,7 @@ import { icon } from "../icons";
 import { DESKTOP_QUERY, clearDraft, dropPending, failureKind, keepPending, keepable, pendingFor, readDraft, writeDraft } from "../linerules";
 import { compare, textLine } from "../text";
 import { prefetch, type ReviewHooks, type ReviewScreen } from "./common";
-import { lineStrip } from "./line";
+import { lineStrip, stripPieces } from "./line";
 import {
   answerButton,
   boxedImage,
@@ -49,7 +49,9 @@ export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: nu
   let progress: Progress = batch.progress;
   let editing: HTMLTextAreaElement | null = null;
   let busy = false;
-  let zoom = 2;
+  // A desktop starts at the largest ink height, so a long line fills the column as one strip (the zoom buttons step
+  // down); a phone starts at its two-piece size.
+  let zoom = desktopMq.matches ? LINE_HEIGHTS.length - 1 : 2;
   let fitWidth = false;
   let keysOpen = false;
   let failure: Failure | null = null;
@@ -259,7 +261,7 @@ export function reviewView(batch: BatchSummary, hooks: ReviewHooks, startAt?: nu
       return;
     }
     const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
-    const pieces = !desktop() && fitWidth ? 1 : 2;
+    const pieces = stripPieces(v.crop, v.crop.box, width, desktop(), fitWidth);
     holder.replaceChildren(lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => undefined, pieces, t("line_on_scan")));
   }
 

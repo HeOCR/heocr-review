@@ -45,3 +45,6 @@ form.dev input { width: 10em; min-height: 44px; } form.dev button { min-height: 
 .subsetnav { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 14px; }
 .subsetnav a { display: inline-flex; align-items: center; min-height: 44px; }
 .subsetnav a.on { font-weight: 700; color: var(--text); text-decoration: none; }
+/* Wide screens: the task column takes all the width beside the page column (the design's 1000 px cap left a third of
+   a wide window empty; the maintainer, 2026-11-20). The line strip and the typing box share that width. */
+@media (min-width: 900px) { .rv .review { max-width: none; } }
