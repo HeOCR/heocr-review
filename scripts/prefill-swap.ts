@@ -10,6 +10,7 @@
  * again, so a line answered during the swap keeps no draft. Decisions are never touched. Before writing, it saves an
  * undo file (old payload and content hash per line) to .import/prefill-undo/, and it prints the counts heocr-eval
  * asked for: written, skipped as already decided, rejected by the typed-line rule (with item ids), without a draft.
+ * A batch that already has plants (scripts/import-plants.ts) is refused: a new draft would void them.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -35,6 +36,9 @@ async function main(): Promise<void> {
   const got = sha256File(bundlePath);
   if (got !== want) throw new Error(`${bundlePath}: sha256 ${got} is not the ratified ${want}`);
 
+  // A plant names the candidate it was made on: a batch with plants takes no new drafts (heocr-eval, amendment 2).
+  const [planted] = d1Query<{ n: number }>(t, inline("SELECT COUNT(*) AS n FROM triage_plants WHERE batch_id = ?1", batchId))[0]!;
+  if (planted!.n > 0) throw new Error(`batch ${batchId} has ${planted!.n} plants: a swap would void them; refused`);
   const live = d1Query<LiveProposal>(t, inline(LIVE_SQL, batchId))[0] ?? [];
   if (!live.length) throw new Error(`batch ${batchId} has no proposals on ${t}`);
   const plan = planPrefillSwap(JSON.parse(readFileSync(bundlePath, "utf8")), batchId, live);
