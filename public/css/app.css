@@ -125,3 +125,22 @@ main#app.task .state { padding-inline: 16px; }
   .realism-zoom-grid { grid-template-columns: 1fr; }
   .realism-feedback .act { justify-self: stretch; }
 }
+
+/* Desktop page transcription: independently scroll the full scan at higher zoom. */
+.page-paste { width: min(100%, 1440px); margin-inline: auto; padding-block-end: 20px; }
+.page-paste h1, .page-paste h2 { margin: 0; }
+.page-paste h2 { font-size: 1rem; }
+.page-paste-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.page-paste-media, .page-paste-form { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.page-paste-media label { display: flex; align-items: center; gap: 10px; }
+.page-paste-scan { container-type: size; height: min(70vh, 880px); overflow: auto; border: 1px solid var(--line-strong); background: var(--bg); direction: ltr; }
+.page-paste-scan img {
+  display: block; width: calc(min(100cqw, 100cqh * var(--scan-ratio)) * var(--scan-zoom, 1));
+  height: auto; max-width: none; margin-inline: auto;
+}
+.page-paste-form textarea { display: block; width: 100%; margin-block-start: 6px; padding: 10px; font: inherit; resize: vertical; }
+.page-paste-form p { margin: 0; }
+.page-paste-form .act { align-self: start; }
+
+.page-paste-warning { display: block; color: var(--text); font-weight: 600; }
+.page-paste-warning[hidden] { display: none; }

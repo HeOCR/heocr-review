@@ -1,5 +1,5 @@
 {
- "_note": "The app's interface strings, [Hebrew, English], from design/review/strings.json (HeOCR/heocr-review#51). Keys match the design's. {name} is filled in by t(). The maintainer approved all of them on 2026-11-19 (\"all approved\"); new wording goes through his review. He approved draft_note and draft_reset as written on 2026-11-20 (via heocr-lead). He approved the triage strings (tri_correct, tri_different, tri_no_niqqud, q_triage, q_fix, fix_phone_h, fix_phone_p, to_triage) on 2026-11-20 (via heocr-lead). He approved the page completeness strings (pc_*, pa_*) and the admin's exemption from the daily cap on 2026-11-20 (\"כן, כולל על התקרה\", via heocr-lead). The maintainer approved all synthetic realism interface strings and the HE/EN privacy notice in HeOCR/heocr-review#75 on 2026-11-20 (via heocr-lead): \"strings approved; get this up, especially for mobile, ASAP\".",
+ "_note": "The app's interface strings, [Hebrew, English], from design/review/strings.json (HeOCR/heocr-review#51). Keys match the design's. {name} is filled in by t(). The maintainer approved all of them on 2026-11-19 (\"all approved\"); new wording goes through his review. He approved draft_note and draft_reset as written on 2026-11-20 (via heocr-lead). He approved the triage strings (tri_correct, tri_different, tri_no_niqqud, q_triage, q_fix, fix_phone_h, fix_phone_p, to_triage) on 2026-11-20 (via heocr-lead). He approved the page completeness strings (pc_*, pa_*) and the admin's exemption from the daily cap on 2026-11-20 (\"כן, כולל על התקרה\", via heocr-lead). The maintainer approved all synthetic realism interface strings and the HE/EN privacy notice in HeOCR/heocr-review#75 on 2026-11-20 (via heocr-lead): \"strings approved; get this up, especially for mobile, ASAP\". On 2026-11-20 the maintainer approved all 15 training page transcription strings (train_paste_*) and the HE/EN privacy notice in HeOCR/heocr-review#76, via heocr-lead: \"Strings approved\".",
  "batch": [
   "אל המזח · שורות",
   "אל המזח · lines"
@@ -1131,5 +1131,65 @@
  "sr_rating_pair": [
   "עד כמה סוגי המסמך והסריקה דומים בשתי התמונות?",
   "How similar are these two documents and scans?"
- ]
+ ],
+  "train_paste_title": [
+    "תמלול דפים לאימון",
+    "Training page transcription"
+  ],
+  "train_paste_desktop": [
+    "תמלול דפים זמין במחשב בלבד.",
+    "Page transcription is available on desktop."
+  ],
+  "train_paste_done": [
+    "כל הדפים באצווה תומללו.",
+    "All pages in this batch are transcribed."
+  ],
+  "train_paste_page": [
+    "דף {page}",
+    "Page {page}"
+  ],
+  "train_paste_zoom": [
+    "הגדלת הסריקה",
+    "Scan zoom"
+  ],
+  "train_paste_text": [
+    "תמלול הדף",
+    "Page transcription"
+  ],
+  "train_paste_hint": [
+    "יש לשמור על מעברי השורה שבכתב היד.",
+    "Keep the manuscript’s line breaks."
+  ],
+  "train_paste_counts": [
+    "שורות שזוהו: {detected} · שורות שהוזנו: {entered}",
+    "Detected lines: {detected} · Entered lines: {entered}"
+  ],
+  "train_paste_mismatch": [
+    "ספירות השורות שונות. אפשר לשמור, והדף יסומן ליישור בהמשך.",
+    "The line counts differ. You can save, and the page will be flagged for alignment."
+  ],
+  "train_paste_save": [
+    "שמירה לדף הבא",
+    "Save and next"
+  ],
+  "train_paste_failed": [
+    "השמירה נכשלה. הטקסט שהוזן עדיין כאן.",
+    "Save failed. Your text is still here."
+  ],
+  "train_paste_already_saved": [
+    "כבר נשמר תמלול לדף הזה. אפשר להעתיק את הטקסט לפני רענון הדף.",
+    "This page already has a saved transcription. You can copy your text before reloading."
+  ],
+  "train_paste_invalid": [
+    "הטקסט ארוך מדי או כולל תווי בקרה.",
+    "The text is too long or contains control characters."
+  ],
+  "train_paste_image_failed": [
+    "טעינת הסריקה נכשלה.",
+    "The scan could not be loaded."
+  ],
+  "train_paste_export": [
+    "ייצוא תמלולי אימון",
+    "Export training transcriptions"
+  ]
 }

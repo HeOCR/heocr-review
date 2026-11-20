@@ -1,3 +1,6 @@
+import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
+import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
+import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingProgress } from "./page_paste_train";
 import { SYNTH_REALISM, type Side } from "../shared/synth_realism";
 import { nextRealism, realismAdmin, realismAsset, realismChoice, realismFeedback, realismProgress } from "./synth_realism";
 import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
@@ -175,6 +178,17 @@ export async function batches(ctx: Ctx): Promise<Response> {
   const list = await listBatches(ctx.env.DB, true);
   const out: BatchSummary[] = [];
   for (const b of list) {
+    if (b.taskType === PAGE_PASTE_TRAIN) {
+      if (isAdmin(ctx.env, reviewer.id) && isTrainingPaste(b)) {
+        const { total, completed, own } = await trainingProgress(ctx.env.DB, b.id, reviewer.id);
+        out.push({
+          id: b.id, taskType: PAGE_PASTE_TRAIN, taskLabel: { he: "תמלול דפים לאימון", en: "Training page transcription" },
+          title: b.title, subsets: [],
+          progress: { total, covered: completed, minReviewers: 1, decidedByMe: own, skippedByMe: 0, remainingForMe: total - completed },
+        });
+      }
+      continue;
+    }
     if (b.taskType === SYNTH_REALISM) {
       if (realismEnabled(ctx.env) && isAdmin(ctx.env, reviewer.id)) {
         const { total, completed } = await realismProgress(ctx.env.DB, b.id, reviewer.id);
@@ -475,10 +489,43 @@ export async function synthAsset(ctx: Ctx, batch: string, trial: string, side: S
   return realismAsset(ctx.env.DB, batch, reviewer, trial, side, kind);
 }
 
+async function trainingAccess(ctx: Ctx, batchId: string, write: boolean) {
+  const reviewer = await requireAdmin(ctx);
+  if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  if (write) assertSameOrigin(ctx.request);
+  enforce(write ? LIMITS.writeMinute : LIMITS.readMinute, reviewer.id, ctx.now);
+  const batch = await getBatch(ctx.env.DB, batchId);
+  if (!batch || batch.status !== "open" || !isTrainingPaste(batch)) throw new HttpError(404, "not_found");
+  return reviewer;
+}
+
+export async function trainingNext(ctx: Ctx, batch: string): Promise<Response> {
+  await trainingAccess(ctx, batch, false);
+  return json(await nextTrainingPage(ctx.env.DB, batch));
+}
+
+export async function trainingSave(ctx: Ctx, batch: string, page: number): Promise<Response> {
+  const reviewer = await trainingAccess(ctx, batch, true);
+  const { text } = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
+  return json(await saveTrainingPage(ctx.env.DB, batch, page, reviewer, text, iso(ctx.now)));
+}
+
+export async function trainingImage(ctx: Ctx, batch: string, page: number): Promise<Response> {
+  await trainingAccess(ctx, batch, false);
+  return trainingAsset(ctx.env.DB, batch, page);
+}
+
 export async function adminProgress(ctx: Ctx): Promise<Response> {
   await requireAdmin(ctx);
   const out = [];
   for (const batch of await listBatches(ctx.env.DB, false)) {
+    if (batch.taskType === PAGE_PASTE_TRAIN) {
+      if (isTrainingPaste(batch)) {
+        const { counts, reviewers } = await trainingAdminProgress(ctx.env.DB, batch.id);
+        out.push({ id: batch.id, taskType: batch.taskType, title: batch.title, status: batch.status, minReviewers: 1, counts, reviewers });
+      }
+      continue;
+    }
     if (batch.taskType === SYNTH_REALISM) {
       if (realismEnabled(ctx.env)) {
         const { counts, reviewers } = await realismAdmin(ctx.env.DB, batch, ctx.now);
@@ -510,6 +557,11 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   await requireAdmin(ctx);
   const batch = await getBatch(ctx.env.DB, batchId);
   if (!batch) throw new HttpError(404, "not_found");
+  if (batch.taskType === PAGE_PASTE_TRAIN) {
+    if (!isTrainingPaste(batch)) throw new HttpError(404, "not_found");
+    const { counts, file } = await trainingAdmin(ctx.env.DB, batch, ctx.now);
+    return json({ counts, problems: [], files: { [TRAIN_EXPORT_FILE]: file } });
+  }
   if (batch.taskType === SYNTH_REALISM) {
     if (!realismEnabled(ctx.env)) throw new HttpError(404, "not_found");
     return (await realismAdmin(ctx.env.DB, batch, ctx.now)).export();

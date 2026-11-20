@@ -1,3 +1,5 @@
+import { PAGE_PASTE_TRAIN } from "../src/shared/page_paste_train";
+import { importPagePasteTrain } from "./lib/page-paste-train-import";
 import { SYNTH_REALISM } from "../src/shared/synth_realism";
 import { importSynthRealism } from "./lib/synth-realism-import";
 /**
@@ -67,6 +69,7 @@ function mediaBudget(publicDir: string, media: Map<string, ProposalMedia>, itemI
 async function main(): Promise<void> {
   const { flags } = parseArgs(process.argv.slice(2));
   const taskId = str(flags, "task");
+  if (taskId === PAGE_PASTE_TRAIN) return importPagePasteTrain(ROOT, flags, target(flags));
   if (taskId === SYNTH_REALISM) return importSynthRealism(ROOT, flags, target(flags));
   const task = importer(taskId);
   if (!task) throw new Error(`unknown task type ${taskId}`);
