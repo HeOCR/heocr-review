@@ -320,7 +320,7 @@ function picker(batches: BatchSummary[], reviewerId: string): HTMLElement {
           h("bdi", {}, b.title),
           b.taskType === "page_review" ? h("span", { class: "tag" }, icon("desktop", { sm: true }), t("on_desktop")) : null,
         ),
-        own ? null : h("span", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("i", { style: `width:${pct}%` })),
+        own ? null : h("span", { class: "bar", role: "progressbar", "aria-label": t("progress"), "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("i", { style: `width:${pct}%` })),
       );
     }));
     if (!shown.length) list.append(h("p", { class: "muted", role: "status" }, t("no_tasks_left")));

@@ -1355,5 +1355,9 @@
  "cg_open_shadow": [
   "צילום רשות באור חלש או בצל · {page}",
   "Optional dim-light or shadow photo · {page}"
+ ],
+ "progress": [
+  "התקדמות",
+  "Progress"
  ]
 }
