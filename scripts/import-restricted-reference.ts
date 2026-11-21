@@ -5,7 +5,7 @@ import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
 import { contentSha256 } from "./lib/importsql";
 import { prepareRestrictedReferenceImport, type RestrictedImport, type RestrictedPins } from "./lib/restricted-reference-import";
-import { buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia, type ObjectReadback } from "./lib/restricted-reference-stage";
+import { assertAnonymousR2Denial, buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia, type ObjectReadback } from "./lib/restricted-reference-stage";
 import { lit } from "./lib/sql";
 import { d1File, d1Query, loadCredentials } from "./lib/wrangler";
 import type { StoredImage } from "../src/tasks/types";
@@ -47,7 +47,7 @@ async function readPrivateObjects(batch: string, credentials: Record<string, str
   if (!fixture.ok || await fixture.text() !== accessFixture.text) throw new Error("private R2 access fixture could not be read");
   const anonymous = await fetch(anonymousUrl, { redirect: "error", signal: AbortSignal.timeout(30000) });
   await anonymous.body?.cancel();
-  if (anonymous.status !== 403 && anonymous.status !== 404) throw new Error("anonymous R2 access check did not pass");
+  assertAnonymousR2Denial(anonymous.status);
 
   const objects: ObjectReadback[] = [];
   const cursors = new Set<string>();
