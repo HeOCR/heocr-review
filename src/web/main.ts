@@ -19,6 +19,7 @@ import { settingsView } from "./views/settings";
 import { signInView } from "./views/signin";
 import { pagePasteTrainView } from "./views/page_paste_train";
 import { synthRealismView } from "./views/synth_realism";
+import { realismRankingView } from "./views/realism-ranking";
 import { termsView } from "./views/terms";
 
 const app = document.getElementById("app")!;
@@ -188,7 +189,7 @@ async function route(): Promise<void> {
     const view: ReviewScreen = sweep ? pageSweepView(batch, hooks) :
       batch.taskType === PAGE_PASTE_TRAIN ? pagePasteTrainView(batch, hooks)
         : batch.taskType === SYNTH_REALISM
-        ? synthRealismView(batch, hooks)
+        ? batch.realismMode === "ranking" ? realismRankingView(batch, hooks) : synthRealismView(batch, hooks)
         : batch.taskType === "page_review"
         ? pageReviewView(batch, hooks, startAt, subset?.id)
         : batch.taskType === "line_consensus"

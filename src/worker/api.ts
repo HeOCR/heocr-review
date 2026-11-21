@@ -1,11 +1,13 @@
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
 import { canSweep, pendingSweepPages, usesUnplantedReview } from "./page-sweep";
-import { canReadReference, draftSweepPin, privateReferenceImage } from "./restricted_reference";
+import { canReadReference, draftSweepPin, privateReferenceImage, referenceReviewerAllowed } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
 import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingPage, trainingProgress } from "./page_paste_train";
-import { SYNTH_REALISM, type Side } from "../shared/synth_realism";
+import { RANKING_LABEL, SYNTH_REALISM, type Side } from "../shared/synth_realism";
+import { isRealismRanking } from "../tasks/synth_realism/ranking";
 import { nextRealism, realismAdmin, realismAsset, realismChoice, realismFeedback, realismProgress } from "./synth_realism";
+import { rankAsset, rankChoice, rankingAdmin, rankingProgress, rankingState, rankUndo } from "./realism-ranking";
 import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
 import { cleanDisplayName, displayNameProblem } from "../shared/displayName";
 import { TERMS_STATUS, TERMS_VERSION } from "../shared/terms";
@@ -194,10 +196,13 @@ export async function batches(ctx: Ctx): Promise<Response> {
       continue;
     }
     if (b.taskType === SYNTH_REALISM) {
-      if (realismEnabled(ctx.env) && isAdmin(ctx.env, reviewer.id)) {
-        const { total, completed } = await realismProgress(ctx.env.DB, b.id, reviewer.id);
+      const ranking = isRealismRanking(b);
+      if (isAdmin(ctx.env, reviewer.id) && (ranking ? rankingEnabled(ctx, reviewer.id) : realismEnabled(ctx.env))) {
+        const { total, completed } = await (ranking ? rankingProgress : realismProgress)(ctx.env.DB, b.id, reviewer.id);
         out.push({
-          id: b.id, taskType: SYNTH_REALISM, taskLabel: { he: "סקירת מראה סינתטי", en: "Synthetic realism review" },
+          id: b.id, taskType: SYNTH_REALISM,
+          taskLabel: ranking ? RANKING_LABEL : { he: "סקירת מראה סינתטי", en: "Synthetic realism review" },
+          ...(ranking ? { realismMode: "ranking" as const } : {}),
           title: b.title, subsets: [],
           progress: { total, covered: completed, minReviewers: 1, decidedByMe: completed, skippedByMe: 0, remainingForMe: total - completed },
         });
@@ -509,14 +514,21 @@ function realismEnabled(env: Env): boolean {
   return env.SYNTH_REALISM_ENABLED === "1";
 }
 
-async function realismAccess(ctx: Ctx, id: string, write: boolean) {
-  if (!realismEnabled(ctx.env)) throw new HttpError(404, "not_found");
+function rankingEnabled(ctx: Ctx, reviewer: string): boolean {
+  return ctx.env.REALISM_RANKING_ENABLED === "1" && referenceReviewerAllowed(ctx.env, ctx.url, reviewer);
+}
+
+async function realismAccess(ctx: Ctx, id: string, write: boolean, ranking = false) {
+  if (ranking ? ctx.env.REALISM_RANKING_ENABLED !== "1" : !realismEnabled(ctx.env)) throw new HttpError(404, "not_found");
   const reviewer = await requireAdmin(ctx);
+  if (ranking && !rankingEnabled(ctx, reviewer.id)) throw new HttpError(404, "not_found");
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
   if (write) assertSameOrigin(ctx.request);
-  enforce(write ? LIMITS.realismMinute : LIMITS.readMinute, reviewer.id, ctx.now);
+  enforce(write ? LIMITS.realismMinute : ranking ? LIMITS.rankingReadMinute : LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await getBatch(ctx.env.DB, id);
-  if (batch?.taskType !== SYNTH_REALISM || batch.status !== "open") throw new HttpError(404, "not_found");
+  if (batch?.taskType !== SYNTH_REALISM || batch.status !== "open" || isRealismRanking(batch) !== ranking) {
+    throw new HttpError(404, "not_found");
+  }
   return reviewer.id;
 }
 
@@ -538,6 +550,26 @@ export async function synthFeedback(ctx: Ctx, batch: string, trial: string): Pro
 export async function synthAsset(ctx: Ctx, batch: string, trial: string, side: Side, kind: "page" | "line"): Promise<Response> {
   const reviewer = await realismAccess(ctx, batch, false);
   return realismAsset(ctx.env.DB, batch, reviewer, trial, side, kind);
+}
+
+export async function rankingNext(ctx: Ctx, batch: string): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, false, true);
+  return json(await rankingState(ctx.env.DB, batch, reviewer));
+}
+
+export async function rankingChoice(ctx: Ctx, batch: string, position: number): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, true, true);
+  return json(await rankChoice(ctx.env.DB, batch, reviewer, position, await readJson(ctx.request), ctx.now));
+}
+
+export async function rankingUndo(ctx: Ctx, batch: string, position: number): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, true, true);
+  return json(await rankUndo(ctx.env.DB, batch, reviewer, position, await readJson(ctx.request)));
+}
+
+export async function rankingAsset(ctx: Ctx, batch: string, position: number, side: Side): Promise<Response> {
+  const reviewer = await realismAccess(ctx, batch, false, true);
+  return rankAsset(ctx.env.DB, batch, reviewer, position, side);
 }
 
 async function trainingAccess(ctx: Ctx, batchId: string, write: boolean) {
@@ -587,8 +619,9 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
       continue;
     }
     if (batch.taskType === SYNTH_REALISM) {
-      if (realismEnabled(ctx.env)) {
-        const { counts, reviewers } = await realismAdmin(ctx.env.DB, batch, ctx.now);
+      const ranking = isRealismRanking(batch);
+      if (ranking ? rankingEnabled(ctx, reviewer.id) : realismEnabled(ctx.env)) {
+        const { counts, reviewers } = await (ranking ? rankingAdmin : realismAdmin)(ctx.env.DB, batch, ctx.now);
         out.push({ id: batch.id, taskType: batch.taskType, title: batch.title, status: batch.status, minReviewers: 1, counts, reviewers });
       }
       continue;
@@ -626,6 +659,10 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
     return json({ counts, problems: [], files: { [TRAIN_EXPORT_FILE]: file } });
   }
   if (batch.taskType === SYNTH_REALISM) {
+    if (isRealismRanking(batch)) {
+      if (!rankingEnabled(ctx, reviewer.id)) throw new HttpError(404, "not_found");
+      return (await rankingAdmin(ctx.env.DB, batch, ctx.now)).export();
+    }
     if (!realismEnabled(ctx.env)) throw new HttpError(404, "not_found");
     return (await realismAdmin(ctx.env.DB, batch, ctx.now)).export();
   }

@@ -96,6 +96,10 @@ export async function realismAsset(db: D1Database, batch: string, reviewer: stri
   const sha = side === row.swapped
     ? kind === "page" ? row.synthetic_image : row.synthetic_line_crop
     : kind === "page" ? row.real_ref_image : row.real_ref_line_crop;
+  return realismImage(db, sha);
+}
+
+export async function realismImage(db: D1Database, sha: string): Promise<Response> {
   const { results } = await db.prepare("SELECT base64 FROM synth_realism_assets WHERE sha256 = ?1 ORDER BY part")
     .bind(sha).all<{base64: string}>();
   if (!results.length) throw new HttpError(404, "not_found");

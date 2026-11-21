@@ -18,3 +18,19 @@ export interface RealismQueue {
   completed: number;
   trial: RealismTrial | null;
 }
+
+export const RANKING_LABEL = { he: "דירוג מראה סינתטי", en: "Synthetic realism ranking" };
+
+export interface RankingPair {
+  position: number;
+  revision: number;
+  images: [string, string];
+}
+
+export interface RankingQueue {
+  total: number;
+  completed: number;
+  current: RankingPair | null;
+  next: RankingPair | null;
+  previous: { position: number; revision: number } | null;
+}

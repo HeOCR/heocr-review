@@ -34,11 +34,11 @@ export interface Clearance {
   references: ClearedPair[];
 }
 
-const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
-const token = (x: unknown) => typeof x === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(x);
+export const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+export const token = (x: unknown): x is string => typeof x === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(x);
 export const isSha = (x: unknown) => typeof x === "string" && /^[a-f0-9]{64}$/.test(x);
 export const IMAGE_FIELDS = ["synthetic_image", "synthetic_line_crop", "real_ref_image", "real_ref_line_crop"] as const;
-const validImage = (v: unknown) => object(v) && isSha(v.sha256) && typeof v.path === "string"
+export const validImage = (v: unknown): v is ImageFile => object(v) && isSha(v.sha256) && typeof v.path === "string"
   && /^images\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.(?:png|jpe?g|webp)$/i.test(v.path);
 export const restrictedPath = (path: string) => /(?:^|\/)(?:eval_refs|heocr-restricted-eval|restricted[_-]eval|test|held[_-]?out|preregistration)(?:\/|$)|(?:^|\/)runs\/[^/]*test|(?:^|\/)scans\/(?:ps_v1|nq1)(?:\/|$)/i
   .test(path.replaceAll("\\", "/"));
@@ -77,7 +77,7 @@ export function parseManifest(raw: unknown): Manifest {
   return raw as unknown as Manifest;
 }
 
-export function verifyClearance(raw: unknown, manifest: Manifest): void {
+export function clearanceReferences(raw: unknown) {
   if (!object(raw) || raw.schema !== CLEARANCE_SCHEMA || !Array.isArray(raw.references)) throw new Error("invalid eval clearance");
   const refs = new Map<string, ClearedPair>();
   for (const ref of raw.references as unknown[]) {
@@ -87,6 +87,11 @@ export function verifyClearance(raw: unknown, manifest: Manifest): void {
       !isSha(ref.page_sha256) || !isSha(ref.line_sha256)) throw new Error("invalid or non-train/dev eval clearance record");
     refs.set(String(ref.id), ref as unknown as ClearedPair);
   }
+  return refs;
+}
+
+export function verifyClearance(raw: unknown, manifest: Manifest): void {
+  const refs = clearanceReferences(raw);
   const realAssets = new Set([...refs.values()].flatMap((ref) => [ref.page_sha256, ref.line_sha256]));
   function match(id: string, page: ImageFile, line: ImageFile): void {
     const ref = refs.get(id);

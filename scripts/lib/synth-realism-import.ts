@@ -12,14 +12,14 @@ import { d1File, d1Migrate, d1Query, loadCredentials } from "./wrangler";
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
-function openPath(path: string): string {
+export function openPath(path: string): string {
   if (restrictedPath(resolve(path))) throw new Error("restricted realism input path");
   const real = realpathSync(path);
   if (restrictedPath(real)) throw new Error("restricted realism input path");
   return real;
 }
 
-function readJson(path: string) {
+export function readJson(path: string) {
   const file = openPath(path);
   assertOpenSource(file);
   if (statSync(file).size > 1024 * 1024) throw new Error("realism JSON input is larger than 1 MiB");
@@ -27,7 +27,7 @@ function readJson(path: string) {
   return { bytes, hash: sha256(bytes) };
 }
 
-async function jpeg(bundle: string, image: ImageFile, line: boolean): Promise<Buffer> {
+export async function jpeg(bundle: string, image: ImageFile, line: boolean): Promise<Buffer> {
   const file = openPath(join(bundle, image.path));
   if (!file.startsWith(bundle + sep)) throw new Error("image path leaves the bundle");
   if (statSync(file).size > 20 * 1024 * 1024) throw new Error("realism image is larger than 20 MiB");
@@ -61,7 +61,7 @@ function awaitingBundle(state: BatchState): boolean {
     JSON.parse(state.source_json).awaiting_bundle === true;
 }
 
-async function budget(target: Target, writes: number) {
+export async function budget(target: Target, writes: number) {
   if (target === "production") {
     const credentials = loadCredentials();
     for (const key of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "D1_DAILY_WRITE_BUDGET"]) {

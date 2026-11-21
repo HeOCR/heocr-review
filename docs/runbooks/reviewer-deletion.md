@@ -143,6 +143,9 @@ deletion changes no stored verdict.
 other `synth_realism_trials` rows as unpublished private records: move them to `deleted-N` for unlinking, or
 delete them for the delete choice, before removing the reviewer row. Unlinked realism records remain admin-only.
 
+For pairwise ranking, remove undone rows in `synth_ranking_answers` and apply the same unlink-or-delete
+decision to active choices before removing the reviewer row. Pair definitions and media are independent of the reviewer.
+
 **Training page transcription**: treat the current `page_paste_train_decisions` and prior
 `page_paste_train_history` revisions as unpublished private records. Move both to `deleted-N` for unlinking or
 delete both before removing the reviewer row. Leave scans and detected line boxes in the batch. Deleting a
@@ -163,6 +166,7 @@ SELECT
    + (SELECT COUNT(*) FROM consent_events WHERE reviewer_id = '$RV')
    + (SELECT COUNT(*) FROM rate_limits WHERE key LIKE '%:' || '$RV')
    + (SELECT COUNT(*) FROM synth_realism_trials WHERE reviewer_id = '$RV')
+   + (SELECT COUNT(*) FROM synth_ranking_answers WHERE reviewer_id = '$RV')
    + (SELECT COUNT(*) FROM page_paste_train_decisions WHERE reviewer_id = '$RV')
    + (SELECT COUNT(*) FROM page_paste_train_history WHERE reviewer_id = '$RV') AS other_rows;
 ```
