@@ -1,3 +1,4 @@
+import { restrictedStaticDirectory } from "../src/tasks/restricted_reference";
 /**
  * Deploy HeOCR Review with the credentials in ~/.config/heocr/cloudflare.env.
  *
@@ -11,11 +12,11 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "./lib/args";
-import { loadCredentials, wrangler } from "./lib/wrangler";
+import { d1Query, loadCredentials, wrangler } from "./lib/wrangler";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const CONFIG = join(ROOT, "wrangler.jsonc");
@@ -23,6 +24,13 @@ const CONFIG = join(ROOT, "wrangler.jsonc");
 export function assertNoDevAuth(configText: string): void {
   if (/DEV_AUTH_BYPASS/.test(configText.replace(/\/\/.*$/gm, ""))) throw new Error("wrangler.jsonc must never set DEV_AUTH_BYPASS");
   if (/"ENVIRONMENT"\s*:\s*"development"/.test(configText)) throw new Error("wrangler.jsonc must never set ENVIRONMENT=development");
+}
+
+export function assertNoRestrictedStaticMedia(root: string, restrictedBatchIds: string[] = []): void {
+  const media = join(root, "media");
+  if (existsSync(media) && readdirSync(media).some((name) => restrictedStaticDirectory(name) || restrictedBatchIds.includes(name))) {
+    throw new Error("protected review media must be absent from the Worker static asset bundle");
+  }
 }
 
 function setDatabaseId(configText: string, dbName: string, id: string): string {
@@ -54,6 +62,7 @@ function main(): void {
   }
   let configText = readFileSync(CONFIG, "utf8");
   assertNoDevAuth(configText);
+  assertNoRestrictedStaticMedia(join(ROOT, "public"));
 
   // D1 database
   const list = JSON.parse(wrangler(["d1", "list", "--json"], { remote: true, quiet: true })) as { name: string; uuid: string }[];
@@ -72,6 +81,8 @@ function main(): void {
   }
 
   wrangler(["d1", "migrations", "apply", "DB", "--remote", ...envFlags], { remote: true, input: "y\n" });
+  const privateBatches = d1Query<{ id: string }>("production", "SELECT id FROM batches WHERE restricted_reference=1")[0] ?? [];
+  assertNoRestrictedStaticMedia(join(ROOT, "public"), privateBatches.map((row) => row.id));
 
   // Secrets: generated once, kept outside the repo.
   // One file per Worker, never shared: heocr-review.secrets.json (production).

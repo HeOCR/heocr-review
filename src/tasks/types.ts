@@ -24,6 +24,7 @@ export interface ProposalMedia {
 }
 
 export interface BatchRecord {
+  restrictedReference?: boolean;
   id: string;
   taskType: string;
   title: string;

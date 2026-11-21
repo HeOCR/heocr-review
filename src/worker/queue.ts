@@ -1,3 +1,5 @@
+import { ALLOWED_REFERENCE_PROPOSAL } from "../tasks/restricted_reference";
+import { referenceImage } from "./restricted_reference";
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
@@ -52,7 +54,7 @@ const PASS2_MODE = "COALESCE((SELECT s.pass2_reviewer FROM batch_settings s WHER
  * must have been made.
  */
 function eligible(reserves: number, cutoff: number): string {
-  return `(p.gate_kind IS NULL
+  return `${ALLOWED_REFERENCE_PROPOSAL} AND (p.gate_kind IS NULL
     OR (p.gate_kind = 'reserve' AND p.id IN (SELECT value FROM json_each(?${reserves})))
     OR (p.gate_kind = 'after_confirm' AND ${PASS2_MODE} = 'same'
       AND EXISTS (SELECT 1 FROM proposals q JOIN decisions d ON d.proposal_id = q.id
@@ -74,7 +76,7 @@ async function openReserves(db: D1Database, batchId: string): Promise<number[]> 
     .prepare(
       `SELECT p.id, p.category, p.gate_kind,
         EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.superseded_at IS NULL AND d.value = 'reject') AS rejected
-       FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND (p.gate_kind IS NULL OR p.gate_kind = 'reserve')
+       FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND (p.gate_kind IS NULL OR p.gate_kind = 'reserve')
        ORDER BY p.rank`,
     )
     .bind(batchId)
@@ -97,6 +99,15 @@ export async function isOpenTo(db: D1Database, p: { id: number; batchId: string 
   return row !== null;
 }
 
+export async function pendingBlindReference(db: D1Database, batchId: string, reviewerId: string, nowMs: number) {
+  const [reserves, cutoff] = await gateParams(db, batchId, nowMs);
+  return (await db.prepare(`SELECT 1 AS pending FROM proposals p
+    WHERE p.batch_id=?1 AND p.active=1 AND p.gate_kind='after_confirm' AND ${eligible(3, 4)}
+      AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id=p.id AND d.reviewer_id=?2
+        AND d.superseded_at IS NULL AND d.proposal_sha256=p.content_sha256)
+    LIMIT 1`).bind(batchId, reviewerId, reserves, cutoff).first()) !== null;
+}
+
 /** A subset chosen as a filter on the queue: the proposals its strata serve now, and how many strata it has. */
 export interface SubsetFilter {
   id: string;
@@ -116,7 +127,7 @@ export async function triageFilter(db: D1Database, batchId: string, reviewerId: 
   const mineDifferent = `EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND ${PENDING_SQL("d")})`;
   const where = queue === "triage" ? `${TRIAGEABLE_SQL} AND NOT ${mineDifferent}` : `(NOT ${TRIAGEABLE_SQL} OR ${mineDifferent})`;
   const { results } = await db
-    .prepare(`SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${where}`)
+    .prepare(`SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND ${where}`)
     .bind(batchId, reviewerId)
     .all<{ id: number }>();
   const ids = results.map((r) => r.id);
@@ -234,9 +245,9 @@ export async function progressFor(
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}${g}) AS total,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}${g} AND ${covered}) AS covered,
         (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id = d.proposal_id
-          WHERE p.batch_id = ?1 AND p.active = 1 AND ${f}${g} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
+          WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND ${f}${g} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
-          WHERE p.batch_id = ?1 AND p.active = 1 AND ${f} AND s.reviewer_id = ?2) AS skipped,
+          WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND ${f} AND s.reviewer_id = ?2) AS skipped,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND ${settled})
           AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
@@ -276,12 +287,19 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     .bind(p.id, reviewerId, isTriageBatch(batch) ? p.contentSha256 : null)
     .first<{ value: string; text: string | null; decided_on: string }>();
   const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
+  const rawView = type.toView(batch.restrictedReference ? {
+    ...p, media: {
+      crop: referenceImage(p.media.crop, `/api/proposals/${p.id}/image/crop`),
+      page: referenceImage(p.media.page, `/api/proposals/${p.id}/image/page`),
+    },
+  } : p);
+  const masked = batch.restrictedReference ? !mine : triage;
   return {
     id: p.id,
     batchId: p.batchId,
     externalId: p.externalId,
     itemTitle: p.itemTitle,
-    view: triage ? await asTriaged(db, batch, p, type.toView(p)) : type.toView(p),
+    view: masked ? await asTriaged(db, batch, p, rawView) : rawView,
     options: type.optionsFor?.(p) ?? type.options,
     mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
     ...(batch.taskType === PAGE_REVIEW ? { draft } : {}),
@@ -334,7 +352,7 @@ export async function nextFor(
     .bind(first.id, reviewerId, nowMs)
     .run();
   const kinds = taskType(batch.taskType)?.prefetch ?? ["crop", "page"];
-  const prefetch = rows
+  const prefetch = batch.restrictedReference ? [] : rows
     .slice(1)
     .flatMap((r) => kinds.map((k) => r.media[k]))
     .filter((m) => m !== undefined)

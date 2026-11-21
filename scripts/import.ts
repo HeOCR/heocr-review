@@ -1,3 +1,4 @@
+import { needsRestrictedRoster, restrictedStaticDirectory } from "../src/tasks/restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../src/shared/page_paste_train";
 import { importPagePasteTrain } from "./lib/page-paste-train-import";
 import { SYNTH_REALISM } from "../src/shared/synth_realism";
@@ -114,6 +115,12 @@ async function main(): Promise<void> {
   const problems = task.problems(raw, sidecars);
   if (problems.length) throw new Error(`invalid ${taskId} file:\n  ${problems.slice(0, 20).join("\n  ")}`);
   const bundle = task.bundle(raw, sidecars, fileSha256);
+  const protectedName = needsRestrictedRoster(bundle.batch.id) || (t === "production" && restrictedStaticDirectory(bundle.batch.id));
+  const protectedRow = t === "production" && !protectedName &&
+    (d1Query<{ restricted_reference: number }>(t, inline("SELECT restricted_reference FROM batches WHERE id=?1", bundle.batch.id))[0]?.[0]?.restricted_reference ?? 0) === 1;
+  if (protectedName || protectedRow) {
+    throw new Error("protected reference media cannot use the static importer");
+  }
   // Two batches of one task type need different titles in the app (e.g. unpointed and pointed lines).
   if (typeof flags.title === "string" && flags.title.trim()) bundle.batch.title = flags.title.trim();
 

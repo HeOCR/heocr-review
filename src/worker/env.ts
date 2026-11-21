@@ -1,6 +1,10 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /** The separately provisioned bucket has no public URL or custom domain. */
+  RESTRICTED_REFERENCE_MEDIA?: R2Bucket;
+  /** Secret: exact reviewer pseudonym for the private reference queue. */
+  RESTRICTED_REFERENCE_REVIEWER_ID?: string;
   /** "production" | "development". Only "development" (from .dev.vars) can enable the dev sign-in. */
   ENVIRONMENT: string;
   GOOGLE_CLIENT_ID?: string;

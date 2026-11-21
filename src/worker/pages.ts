@@ -1,3 +1,5 @@
+import { ALLOWED_REFERENCE_PROPOSAL, allowedReferencePage, protectedReferenceBatchSql } from "../tasks/restricted_reference";
+import { referenceImage } from "./restricted_reference";
 /**
  * Page completeness in triage (migrations/0014_page_completeness.sql; heocr-eval's reference_triage_v1 amendment 1).
  *
@@ -21,11 +23,16 @@ const PAGE_ANSWERED = `NOT EXISTS (SELECT 1 FROM proposals p WHERE p.item_id = i
 const CURRENT = (answer: string) =>
   `EXISTS (SELECT 1 FROM page_checks c WHERE c.item_id = i.id AND c.reviewer_id = ?2 AND c.superseded_at IS NULL AND c.answer = '${answer}')`;
 const NO_CHECK = "NOT EXISTS (SELECT 1 FROM page_checks c WHERE c.item_id = i.id AND c.reviewer_id = ?2 AND c.superseded_at IS NULL)";
-const FIRST_RANK = "(SELECT MIN(p.rank) FROM proposals p WHERE p.item_id = i.id AND p.active = 1)";
+const FIRST_RANK = `(SELECT MIN(p.rank) FROM proposals p WHERE p.item_id = i.id AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL})`;
+const pageCoverage = "(SELECT rp.coverage_boxes_json FROM restricted_reference_pages rp WHERE rp.batch_id=i.batch_id AND rp.item_id=i.id)";
+const coverageReady = `(NOT ${protectedReferenceBatchSql("i.batch_id")}
+  OR (json_extract(i.payload_json, '$.page_image.ref.source')='r2' AND ${pageCoverage} IS NOT NULL)
+  OR EXISTS (SELECT 1 FROM proposals p WHERE p.item_id=i.id AND p.batch_id=i.batch_id AND p.active=1
+    AND ${PASS1_SQL} AND json_extract(p.media_json, '$.page.ref.source')='r2'))`;
 
 /** SQL: the pages waiting for the reviewer's check (triage) or for their missing lines (desktop). */
-const TO_CHECK = `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL} AND ${NO_CHECK} AND ${PAGE_ANSWERED}`;
-const TO_ADD = `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL} AND ${CURRENT("missing_lines")}`;
+const TO_CHECK = `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL} AND ${NO_CHECK} AND ${PAGE_ANSWERED} AND ${coverageReady}`;
+const TO_ADD = `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL} AND ${CURRENT("missing_lines")} AND ${coverageReady}`;
 
 export async function pageCounts(db: D1Database, batchId: string, reviewerId: string): Promise<{ check: number; add: number }> {
   const row = await db
@@ -36,27 +43,46 @@ export async function pageCounts(db: D1Database, batchId: string, reviewerId: st
 }
 
 /** The next page for the reviewer in this queue (triage: a check; fix: missing lines to add), or null. */
+type PageRow = { id: number; external_id: string; title: string; page_image: string | null; coverage_boxes: string | null };
+const pageFields = `i.id, i.external_id, i.title, json_extract(i.payload_json, '$.page_image') AS page_image,
+  ${pageCoverage} AS coverage_boxes`;
+
 export async function nextPage(db: D1Database, batch: BatchRecord, reviewerId: string, queue: "triage" | "fix"): Promise<PageCheckView | null> {
   const row = await db
-    .prepare(`SELECT i.id, i.external_id, i.title, json_extract(i.payload_json, '$.page_image') AS page_image ${queue === "triage" ? TO_CHECK : TO_ADD} ORDER BY ${FIRST_RANK}, i.id LIMIT 1`)
+    .prepare(`SELECT ${pageFields} ${queue === "triage" ? TO_CHECK : TO_ADD} ORDER BY ${FIRST_RANK}, i.id LIMIT 1`)
     .bind(batch.id, reviewerId)
-    .first<{ id: number; external_id: string; title: string; page_image: string | null }>();
+    .first<PageRow>();
   return row ? pageView(db, batch, row, reviewerId, queue === "triage" ? "check" : "add") : null;
 }
 
-async function pageView(db: D1Database, batch: BatchRecord, item: { id: number; external_id: string; title: string; page_image: string | null }, reviewerId: string, mode: "check" | "add"): Promise<PageCheckView> {
+async function pageMedia(db: D1Database, item: PageRow) {
   const { results } = await db
-    .prepare(`SELECT p.media_json, json_extract(p.payload_json, '$.line_index') AS line_index FROM proposals p WHERE p.item_id = ?1 AND p.active = 1 AND ${PASS1_SQL} ORDER BY line_index`)
+    .prepare(`SELECT p.media_json, json_extract(p.payload_json, '$.line_index') AS line_index
+      FROM proposals p WHERE p.item_id=?1 AND p.active=1 AND ${PASS1_SQL} AND ${ALLOWED_REFERENCE_PROPOSAL} ORDER BY line_index`)
     .bind(item.id)
     .all<{ media_json: string; line_index: number | null }>();
-  let image: StoredImage | undefined = item.page_image ? JSON.parse(item.page_image) as StoredImage : undefined;
-  const boxes: PageLineBox[] = [];
-  for (const r of results) {
-    const page = (JSON.parse(r.media_json) as { page?: StoredImage }).page;
+  let image = item.page_image ? JSON.parse(item.page_image) as StoredImage : undefined;
+  const boxes: PageLineBox[] = item.coverage_boxes ? JSON.parse(item.coverage_boxes) as PageLineBox[] : [];
+  for (const row of results) {
+    const page = (JSON.parse(row.media_json) as { page?: StoredImage }).page;
     if (!page) continue;
     image ??= page;
-    if (page.box) boxes.push({ box: page.box, lineIndex: r.line_index ?? boxes.length });
+    if (!item.coverage_boxes && page.box) boxes.push({ box: page.box, lineIndex: row.line_index ?? boxes.length });
   }
+  return { image, boxes };
+}
+
+export async function completenessImage(db: D1Database, batch: string, reviewerId: string, itemId: number) {
+  const item = await db.prepare(`SELECT ${pageFields} ${TO_CHECK} AND i.id=?3
+    UNION ALL SELECT ${pageFields} ${TO_ADD} AND i.id=?3 LIMIT 1`).bind(batch, reviewerId, itemId).first<PageRow>();
+  return item ? (await pageMedia(db, item)).image : undefined;
+}
+
+async function pageView(db: D1Database, batch: BatchRecord, item: PageRow, reviewerId: string, mode: "check" | "add"): Promise<PageCheckView> {
+  const media = await pageMedia(db, item);
+  const image = batch.restrictedReference
+    ? referenceImage(media.image, `/api/batches/${batch.id}/pages/${item.id}/image`)
+    : media.image;
   const added = mode === "add" ? await addedLines(db, item.id, reviewerId) : [];
   return {
     batchId: batch.id,
@@ -65,7 +91,7 @@ async function pageView(db: D1Database, batch: BatchRecord, item: { id: number; 
     title: item.title,
     mode,
     image: image ? { url: imageUrl(image.ref), width: image.width, height: image.height, box: null, outlined: false } : null,
-    boxes,
+    boxes: media.boxes,
     added,
   };
 }
@@ -80,7 +106,7 @@ async function addedLines(db: D1Database, itemId: number, reviewerId: string) {
 
 /** The item of a page in this batch, or null. */
 export async function pageItem(db: D1Database, batchId: string, itemId: number): Promise<{ id: number } | null> {
-  return db.prepare("SELECT id FROM items WHERE batch_id = ?1 AND id = ?2").bind(batchId, itemId).first<{ id: number }>();
+  return db.prepare(`SELECT i.id FROM items i WHERE i.batch_id = ?1 AND i.id = ?2 AND ${allowedReferencePage("i.batch_id", "i.id")}`).bind(batchId, itemId).first<{ id: number }>();
 }
 
 /** Record the first check only if the same page-readiness predicate used by the queue still holds. */
@@ -94,13 +120,22 @@ export async function recordInitialPageCheck(db: D1Database, batchId: string, it
 }
 
 /** Complete the missing-lines workflow without changing the timestamp of its original check. */
-export async function recordPageCheck(db: D1Database, batchId: string, itemId: number, reviewerId: string, answer: "complete" | "missing_lines" | "lines_added", nowIso: string): Promise<void> {
-  await db.batch([
-    db.prepare("UPDATE page_checks SET superseded_at = ?3 WHERE item_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL").bind(itemId, reviewerId, nowIso),
-    db
-      .prepare("INSERT INTO page_checks (id, batch_id, item_id, reviewer_id, answer, created_at, decided_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
-      .bind(randomId("pc-"), batchId, itemId, reviewerId, answer, nowIso, nowIso.slice(0, 10)),
+export async function recordPageCheck(db: D1Database, batchId: string, itemId: number, reviewerId: string, nowIso: string): Promise<boolean> {
+  const [ , inserted ] = await db.batch([
+    db.prepare(`UPDATE page_checks SET superseded_at=?4
+      WHERE batch_id=?1 AND item_id=?2 AND reviewer_id=?3 AND superseded_at IS NULL AND answer='missing_lines'
+        AND (NOT ${protectedReferenceBatchSql("?1")} OR EXISTS (SELECT 1 FROM page_added_lines a
+          WHERE a.batch_id=?1 AND a.item_id=?2 AND a.reviewer_id=?3 AND a.removed_at IS NULL))`)
+      .bind(batchId, itemId, reviewerId, nowIso),
+    db.prepare(`INSERT INTO page_checks (id, batch_id, item_id, reviewer_id, answer, created_at, decided_on)
+      SELECT ?6, ?1, ?2, ?3, 'lines_added', ?4, ?5 FROM page_checks prev
+      WHERE prev.batch_id=?1 AND prev.item_id=?2 AND prev.reviewer_id=?3
+        AND prev.answer='missing_lines' AND prev.superseded_at=?4
+        AND NOT EXISTS (SELECT 1 FROM page_checks current
+          WHERE current.item_id=?2 AND current.reviewer_id=?3 AND current.superseded_at IS NULL)
+      LIMIT 1`).bind(batchId, itemId, reviewerId, nowIso, nowIso.slice(0, 10), randomId("pc-")),
   ]);
+  return (inserted?.meta.changes ?? 0) > 0;
 }
 
 export async function currentCheck(db: D1Database, itemId: number, reviewerId: string): Promise<string | null> {
@@ -125,18 +160,25 @@ export function normalizeAdded(value: unknown, text: unknown): { ok: true; value
   return n.ok ? { ok: true, value: "typed", text: n.text } : { ok: false, error: n.error };
 }
 
-export async function addLine(db: D1Database, batchId: string, itemId: number, reviewerId: string, box: number[], value: "typed" | "unreadable", text: string | null, nowIso: string): Promise<string> {
+export async function addLine(db: D1Database, batchId: string, itemId: number, reviewerId: string, box: number[], value: "typed" | "unreadable", text: string | null, nowIso: string): Promise<string | null> {
   const id = randomId("pl-");
-  await db
-    .prepare("INSERT INTO page_added_lines (id, batch_id, item_id, reviewer_id, box_json, text, value, created_at, decided_on) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")
+  const result = await db
+    .prepare(`INSERT INTO page_added_lines (id, batch_id, item_id, reviewer_id, box_json, text, value, created_at, decided_on)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (
+        SELECT 1 FROM page_checks c WHERE c.batch_id=?2 AND c.item_id=?3 AND c.reviewer_id=?4
+          AND c.superseded_at IS NULL AND c.answer='missing_lines')`)
     .bind(id, batchId, itemId, reviewerId, JSON.stringify(box), text, value, nowIso, nowIso.slice(0, 10))
     .run();
-  return id;
+  return (result.meta.changes ?? 0) > 0 ? id : null;
 }
 
 export async function removeLine(db: D1Database, batchId: string, lineId: string, reviewerId: string, nowIso: string): Promise<boolean> {
   const res = await db
-    .prepare("UPDATE page_added_lines SET removed_at = ?4 WHERE id = ?1 AND batch_id = ?2 AND reviewer_id = ?3 AND removed_at IS NULL")
+    .prepare(`UPDATE page_added_lines SET removed_at=?4 WHERE id=?1 AND batch_id=?2 AND reviewer_id=?3 AND removed_at IS NULL
+      AND ${allowedReferencePage("page_added_lines.batch_id", "page_added_lines.item_id")}
+      AND (NOT ${protectedReferenceBatchSql("?2")} OR EXISTS (SELECT 1 FROM page_checks c
+        WHERE c.batch_id=?2 AND c.item_id=page_added_lines.item_id AND c.reviewer_id=?3
+          AND c.superseded_at IS NULL AND c.answer='missing_lines'))`)
     .bind(lineId, batchId, reviewerId, nowIso)
     .run();
   return (res.meta.changes ?? 0) > 0;

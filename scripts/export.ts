@@ -1,3 +1,4 @@
+import { restrictedStaticDirectory } from "../src/tasks/restricted_reference";
 /**
  * Export a batch's decisions from D1 in the consumer's format, plus the full ledger.
  *
@@ -36,6 +37,9 @@ function main(): void {
   const one = <T>(sql: string) => d1Query<T>(t, inline(sql, batchId))[0] ?? [];
   const batchRow = one<BatchRow>(EXPORT_SQL.batch)[0];
   if (!batchRow) throw new Error(`no batch ${batchId} in ${t}`);
+  if (batchRow.restricted_reference === 1 || restrictedStaticDirectory(batchId)) {
+    throw new Error("protected reference exports require the authenticated Admin route");
+  }
   if (batchRow.task_type === PAGE_PASTE_TRAIN) {
     if (flags.public === true) throw new Error("page-paste training exports require the private export path");
     const batch = toBatch(batchRow);
