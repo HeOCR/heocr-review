@@ -6,7 +6,7 @@ import sharp from "sharp";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { lineVerifyImporter } from "../../src/tasks/line_verify/importer";
 import { digest, prepareRestrictedReferenceImport } from "../../scripts/lib/restricted-reference-import";
-import { buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia } from "../../scripts/lib/restricted-reference-stage";
+import { assertAnonymousR2Denial, buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia } from "../../scripts/lib/restricted-reference-stage";
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value));
 const batch = "private-ref-fixture-import";
@@ -18,6 +18,8 @@ it("probes only the disabled managed R2 hostname for anonymous object denial", (
     .toBe("https://pub-fixture.r2.dev/access-check.txt");
   expect(() => disabledR2FixtureUrl({ enabled: true, domain }, "access-check.txt")).toThrow(/disabled/);
   expect(() => disabledR2FixtureUrl({ enabled: false, domain: domain + ".example.com" }, "access-check.txt")).toThrow(/disabled/);
+  for (const status of [401, 403, 404]) expect(() => assertAnonymousR2Denial(status)).not.toThrow();
+  for (const status of [200, 206, 302, 400, 500]) expect(() => assertAnonymousR2Denial(status)).toThrow(/unexpected/);
 });
 let root: string;
 let raster: Buffer;

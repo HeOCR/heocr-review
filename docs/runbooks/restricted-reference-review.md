@@ -9,7 +9,7 @@ path live.
 The Worker binds the dedicated `heocr-review-protected` R2 bucket as `RESTRICTED_REFERENCE_MEDIA`.
 Before deploying, verify that the bucket belongs to the HeOCR account, its `r2.dev` endpoint is disabled,
 and its custom domain list is empty. Confirm an anonymous request for a known fixture at the disabled
-managed hostname is denied with HTTP 403 or 404. Keep access through the authenticated Worker route, without signing URLs.
+managed hostname is denied with HTTP 401, 403 or 404. Keep access through the authenticated Worker route, without signing URLs.
 Set `RESTRICTED_REFERENCE_REVIEWER_ID` in the private Worker secrets file for the existing approved account.
 Use the existing admin permission for export as well. Follow the
 [Cloudflare R2 visibility documentation](https://developers.cloudflare.com/r2/buckets/public-buckets/).

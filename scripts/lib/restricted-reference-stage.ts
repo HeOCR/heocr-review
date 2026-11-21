@@ -21,6 +21,12 @@ export function disabledR2FixtureUrl(managed: { enabled?: boolean; domain?: stri
   return new URL("https://" + managed.domain + "/" + encodeURIComponent(key));
 }
 
+export function assertAnonymousR2Denial(status: number): void {
+  if (status !== 401 && status !== 403 && status !== 404) {
+    throw new Error(`anonymous R2 access check returned unexpected HTTP ${status}`);
+  }
+}
+
 /** Use only the named private object namespace. Images never enter the static tree. */
 export async function prepareRestrictedMedia(
   stage: RestrictedImport,
