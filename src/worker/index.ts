@@ -1,3 +1,4 @@
+import { handwriting, isHandwritingPath } from "./handwriting";
 import { blockedAssetPath, RESTRICTED_MEDIA_PATH } from "./restricted_reference";
 import * as api from "./api";
 import type { Ctx } from "./api";
@@ -47,6 +48,7 @@ const ROUTES: [string, RegExp, Handler][] = [
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  if (isHandwritingPath(url.pathname)) return handwriting(request, env, url.pathname);
   if (!url.pathname.startsWith("/api/")) {
     if (blockedAssetPath(url.pathname)) return json({ error: "not_found" }, 404, {
       "cdn-cache-control": "no-store",

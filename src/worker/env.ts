@@ -21,6 +21,12 @@ export interface Env {
   CONSENSUS_ENABLED?: string;
   /** Enables the admin-only synthetic realism queue. */
   SYNTH_REALISM_ENABLED?: string;
+  /** Dedicated intake bindings. Production configuration is provisioned only at approved launch. */
+  HANDWRITING_INTAKE_ENABLED?: string;
+  HANDWRITING_DB?: D1Database;
+  HANDWRITING_MEDIA?: R2Bucket;
+  HANDWRITING_CONTROL?: R2Bucket;
+  HANDWRITING_KEY?: string;
   /** .dev.vars only. */
   DEV_AUTH_BYPASS?: string;
 }
