@@ -1,6 +1,6 @@
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
-import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingProgress } from "./page_paste_train";
+import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingPage, trainingProgress } from "./page_paste_train";
 import { SYNTH_REALISM, type Side } from "../shared/synth_realism";
 import { nextRealism, realismAdmin, realismAsset, realismChoice, realismFeedback, realismProgress } from "./synth_realism";
 import type { BatchSummary, ConfigResponse, MeResponse } from "../shared/api";
@@ -500,14 +500,22 @@ async function trainingAccess(ctx: Ctx, batchId: string, write: boolean) {
 }
 
 export async function trainingNext(ctx: Ctx, batch: string): Promise<Response> {
-  await trainingAccess(ctx, batch, false);
-  return json(await nextTrainingPage(ctx.env.DB, batch));
+  const reviewer = await trainingAccess(ctx, batch, false);
+  const cursor = ctx.url.searchParams.get("after");
+  const after = cursor === null ? null : Number(cursor);
+  if (cursor !== null && (!/^\d{1,15}$/.test(cursor) || !after)) throw new HttpError(404, "not_found");
+  return json(await nextTrainingPage(ctx.env.DB, batch, reviewer.id, after));
+}
+
+export async function trainingRead(ctx: Ctx, batch: string, page: number): Promise<Response> {
+  const reviewer = await trainingAccess(ctx, batch, false);
+  return json(await trainingPage(ctx.env.DB, batch, reviewer.id, page));
 }
 
 export async function trainingSave(ctx: Ctx, batch: string, page: number): Promise<Response> {
   const reviewer = await trainingAccess(ctx, batch, true);
-  const { text } = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
-  return json(await saveTrainingPage(ctx.env.DB, batch, page, reviewer, text, iso(ctx.now)));
+  const { text, revision } = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
+  return json(await saveTrainingPage(ctx.env.DB, batch, page, reviewer, text, revision, iso(ctx.now)));
 }
 
 export async function trainingImage(ctx: Ctx, batch: string, page: number): Promise<Response> {

@@ -28,6 +28,7 @@ const ROUTES: [string, RegExp, Handler][] = [
   ["PUT", /^\/api\/proposals\/(\d+)\/draft$/, (c, id) => api.saveDraft(c, int(id!))],
   ["DELETE", /^\/api\/proposals\/(\d+)\/draft$/, (c, id) => api.clearDraft(c, int(id!))],
   ["GET", /^\/api\/page-paste-train\/([A-Za-z0-9._-]{1,100})\/next$/, (c, b) => api.trainingNext(c, b!)],
+  ["GET", /^\/api\/page-paste-train\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)$/, (c, b, i) => api.trainingRead(c, b!, int(i!))],
   ["POST", /^\/api\/page-paste-train\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)$/, (c, b, i) => api.trainingSave(c, b!, int(i!))],
   ["GET", /^\/api\/page-paste-train\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)\/image$/, (c, b, i) => api.trainingImage(c, b!, int(i!))],
   ["POST", /^\/api\/synth-realism\/([A-Za-z0-9._-]{1,100})\/next$/, (c, b) => api.synthNext(c, b!)],

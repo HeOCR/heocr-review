@@ -6,10 +6,17 @@ export interface TrainingPage {
   key: string;
   image: { url: string; width: number; height: number };
   detectedCount: number;
+  number: number;
+  total: number;
+  previousId: number | null;
+  nextId: number | null;
+  completed: boolean;
+  saved: { text: string; revision: number } | null;
 }
 
 export interface TrainingQueue {
   page: TrainingPage | null;
+  firstId?: number | null;
 }
 
 export function normalizePageBreaks(text: string): string {

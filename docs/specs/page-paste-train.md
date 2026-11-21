@@ -1,10 +1,15 @@
 # Training page transcription
 
 `page_paste_train` is an admin-only task for transcribing entire pages from a training source. Sign in and open
-`/app/#b/<batch_id>` on a desktop. Zoom the scan and paste the transcription with the manuscript's line breaks.
-The form compares the number of detected boxes with the number of nonblank lines entered. Save and next advances
-in bundle order. A mismatch is saved with an alignment flag. Empty scans can be saved with empty text. The first
-successful save of a page is kept and an exact retry by the same reviewer is safe.
+`/app/#b/<batch_id>` on a phone or desktop. Zoom the scan and paste the transcription with the manuscript's line
+breaks. The page counter and navigation buttons browse every page in bundle order. Skip and Save and next advance to the
+next untranscribed page, wrapping around to earlier pages. Skipping writes no decision. The form compares the
+number of detected boxes with the number of nonblank lines entered. A mismatch is saved with an alignment flag.
+Empty scans can be saved with empty text.
+
+Reopen a page to edit your saved transcription. A changed save archives the previous version in
+`page_paste_train_history` and checks the revision to avoid overwriting edits from another tab. Exact retries
+are safe. Progress and the alignment export use the latest saved version of each page.
 
 ## Datacol bundle contract
 
