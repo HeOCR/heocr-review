@@ -1,4 +1,5 @@
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
+import { canSweep, pendingSweepPages } from "./page-sweep";
 import { canReadReference, privateReferenceImage } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
@@ -213,6 +214,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
       title: b.title,
       progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
       subsets: await subsetsOf(ctx.env.DB, b.id),
+      ...(canSweep(ctx.env, ctx.url, reviewer.id, b) ? { pageSweep: { remainingPages: await pendingSweepPages(ctx.env.DB, b.id, reviewer.id) } } : {}),
       ...(isTriageBatch(b) ? { triage: (await triageCounts(ctx.env.DB, b, reviewer.id, ctx.now))! } : {}),
     });
   }
@@ -224,7 +226,7 @@ async function openBatch(ctx: Ctx, id: string, reviewerId: string) {
   if (!batch || batch.status !== "open" || !taskType(batch.taskType) ||
     !canReadReference(ctx.env, ctx.url, reviewerId, batch)) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
-  return batch;
+  return canSweep(ctx.env, ctx.url, reviewerId, batch) ? { ...batch, unplantedReview: true } : batch;
 }
 
 export async function next(ctx: Ctx, batchId: string): Promise<Response> {
@@ -336,6 +338,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   if (!isAdmin(ctx.env, reviewer.id)) await enforceWriteDay(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (Boolean(batch.unplantedReview) !== (body.pageSweepDraft === true)) throw new HttpError(409, "stale_draft");
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
   if (isRestrictedDraftVerification(batch) && body.value !== "exact" && body.value !== "edited") {
     throw new HttpError(400, "invalid_decision", "a draft verification decision must be exact or edited");
@@ -392,10 +395,11 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
         .bind(proposal.id, reviewer.id, now, proposal.contentSha256),
       db
         .prepare(
-          `INSERT INTO decisions (id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at, decided_on)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9 FROM proposals WHERE id=?2 AND content_sha256=?6`,
+          `INSERT INTO decisions (id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at, decided_on, method)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals WHERE id=?2 AND content_sha256=?6`,
         )
-        .bind(decisionId, proposal.id, reviewer.id, normalized.value, normalized.text, proposal.contentSha256, TERMS_VERSION, now, day(ctx.now)),
+        .bind(decisionId, proposal.id, reviewer.id, normalized.value, normalized.text, proposal.contentSha256, TERMS_VERSION, now, day(ctx.now),
+          batch.unplantedReview ? "line_unplanted" : "line"),
       db.prepare(`DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2
         AND EXISTS (SELECT 1 FROM proposals WHERE id=?2 AND content_sha256=?3)`).bind(reviewer.id, proposal.id, proposal.contentSha256),
     ]);

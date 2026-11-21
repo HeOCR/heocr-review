@@ -24,6 +24,7 @@ export interface Env {
   CONSENSUS_ENABLED?: string;
   /** Enables the admin-only synthetic realism queue. */
   SYNTH_REALISM_ENABLED?: string;
+  PAGE_SWEEP_ENABLED?: string;
   /** Dedicated intake bindings. Production configuration is provisioned only at approved launch. */
   HANDWRITING_INTAKE_ENABLED?: string;
   HANDWRITING_DB?: D1Database;

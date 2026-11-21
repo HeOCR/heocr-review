@@ -274,6 +274,7 @@ export async function progressFor(
  */
 async function asTriaged(db: D1Database, batch: BatchRecord, p: ProposalRecord, view: ProposalView["view"]): Promise<ProposalView["view"]> {
   if (view.kind !== "line_verify" || !isTriageBatch(batch) || !triageable(p)) return view;
+  if (batch.unplantedReview) return { ...view, runs: [] };
   const plant = await db
     .prepare("SELECT planted_text, candidate_sha256 FROM triage_plants WHERE batch_id = ?1 AND proposal_id = ?2")
     .bind(batch.id, p.id)
@@ -301,6 +302,7 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
   const options = type.optionsFor?.(p) ?? type.options;
   return {
     id: p.id,
+    ...(batch.unplantedReview ? { pageSweepDraft: true as const } : {}),
     batchId: p.batchId,
     externalId: p.externalId,
     itemTitle: p.itemTitle,

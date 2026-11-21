@@ -53,7 +53,7 @@ export const CONTENT_MATCH_SQL = "d.proposal_sha256 = p.content_sha256";
  * or any triage answer on a line with a plant (eval's amendment 2: every plant goes to the desktop).
  */
 export const PENDING_SQL = (d: string) =>
-  `(${d}.value = 'different' OR (${d}.value IN ('correct', 'niqqud_mismatch') AND EXISTS (SELECT 1 FROM triage_plants tp WHERE tp.proposal_id = ${d}.proposal_id)))`;
+  `(${d}.value = 'different' OR (${d}.value IN ('correct', 'niqqud_mismatch') AND ${d}.method = 'line' AND EXISTS (SELECT 1 FROM triage_plants tp WHERE tp.proposal_id = ${d}.proposal_id)))`;
 
 /** A plant as the export needs it (migrations/0012_triage.sql, triage_plants). */
 export interface TriagePlant {
@@ -85,9 +85,13 @@ export const isTriageBatch = (batch: BatchRecord) =>
  * different is not a reference (null: left out). Any other answer is itself.
  */
 export function asReference(p: ProposalRecord, d: DecisionRecord, planted = false): DecisionRecord | null {
+  if (d.method === "page_sweep" && d.value === "exact" && kindOf(p) === "type") {
+    const candidate = candidateOf(p);
+    return candidate ? { ...d, value: "typed", text: candidate } : { ...d, value: "no_text", text: null };
+  }
   if (!isTriageValue(d.value)) return d;
   // A plant's triage answer judged the planted text, never the candidate: only the desktop answer is a reference.
-  if (d.value === "different" || planted) return null;
+  if (d.value === "different" || (planted && !d.method)) return null;
   const typed = kindOf(p) === "type";
   if (d.value === "correct") return typed ? { ...d, value: "typed", text: candidateOf(p) } : { ...d, value: "exact", text: null };
   return { ...d, value: "pointed_print", text: typed ? candidateOf(p) : null };
@@ -122,7 +126,7 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
     const itemId = payloadOf(p).item_id ?? p.externalId;
     const candidate = candidateOf(p);
     const provenance = candidate === "" ? null : payloadOf(p).candidate_provenance;
-    const plant = plantOf(p, plants);
+    const registeredPlant = plantOf(p, plants);
     const reviewers = [...new Set(r.current.map((d) => d.reviewerId))].sort();
     for (const reviewer of reviewers) {
       const current = r.current.find((d) => d.reviewerId === reviewer)!;
@@ -131,6 +135,7 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
         a.createdAt.localeCompare(b.createdAt),
       );
       const lastTriage = [...mine].reverse().find((d) => isTriageValue(d.value));
+      const plant = (!current.method || (lastTriage && !lastTriage.method)) ? registeredPlant : null;
       rows.push({
         item_id: itemId,
         reviewer,
@@ -164,7 +169,7 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
     if (!pageSize.has(pageId)) pageSize.set(pageId, width !== null && height !== null ? { width, height } : null);
   }
   const checks = pageRecords?.checks ?? [];
-  type Completeness = { answer: "complete" | "missing_lines"; reviewer: string; decided_at: string; lines_added_at?: string } | null;
+  type Completeness = { answer: "complete" | "missing_lines"; reviewer: string; decided_at: string; lines_added_at?: string; method?: "page_sweep" } | null;
   const pages = [...pageSize.keys()].flatMap((pageId): { page_id: string; completeness: Completeness }[] => {
     const mine = checks.filter((c) => c.pageId === pageId).sort((a, b) => a.reviewerId.localeCompare(b.reviewerId));
     if (!mine.length) return [{ page_id: pageId, completeness: null }];
@@ -173,7 +178,7 @@ export function referenceTriageFiles(batch: BatchRecord, resolved: ResolvedPropo
       completeness:
         c.answer === "lines_added"
           ? { answer: "missing_lines" as const, reviewer: c.reviewerId, decided_at: c.missingAt ?? c.decidedAt, lines_added_at: c.decidedAt }
-          : { answer: c.answer, reviewer: c.reviewerId, decided_at: c.decidedAt },
+          : { answer: c.answer, reviewer: c.reviewerId, decided_at: c.decidedAt, ...(c.method ? { method: c.method } : {}) },
     }));
   });
   for (const a of pageRecords?.added ?? []) {

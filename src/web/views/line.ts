@@ -275,7 +275,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   /** Post one decision; the terms may need accepting first. */
   async function send(id: number, value: string, text?: string): Promise<void> {
-    const payload = text === undefined ? { value } : { value, text };
+    const payload = { value, ...(text === undefined ? {} : { text }), ...(current?.pageSweepDraft ? { pageSweepDraft: true } : {}) };
     try {
       await post(`/api/proposals/${id}/decision`, payload);
     } catch (err) {

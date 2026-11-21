@@ -1,3 +1,5 @@
+import { PAGE_SWEEP_BATCHES } from "../shared/page-sweep";
+import { pageSweepView } from "./views/page-sweep";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { SYNTH_REALISM } from "../shared/synth_realism";
 import type { BatchSummary, ConfigResponse, MeResponse, ProposalView } from "../shared/api";
@@ -181,7 +183,8 @@ async function route(): Promise<void> {
     const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
     const startAt = linked ? Number(linked[1]) : undefined;
     const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage") : undefined;
-    const view: ReviewScreen =
+    const sweep = batch.pageSweep && !linked && !chosen?.[3] && matchMedia("(min-width: 900px) and (pointer: fine)").matches;
+    const view: ReviewScreen = sweep ? pageSweepView(batch, hooks) :
       batch.taskType === PAGE_PASTE_TRAIN ? pagePasteTrainView(batch, hooks)
         : batch.taskType === SYNTH_REALISM
         ? synthRealismView(batch, hooks)
@@ -192,7 +195,7 @@ async function route(): Promise<void> {
           : batch.taskType === "line_verify"
             ? lineVerifyView(batch, hooks, startAt, queue)
             : reviewView(batch, hooks, startAt);
-    const head = batch.triage ? [queueNav(batch, linked ? undefined : queue)] : batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
+    const head = sweep ? [] : batch.triage ? [queueNav(batch, linked ? undefined : queue)] : batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
     show("task", ...head.map((n) => h("div", { class: "batchhead" }, n)), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
@@ -229,10 +232,11 @@ function subsetNav(batch: BatchSummary, current: string | undefined): HTMLElemen
 /** A triage batch's two queues: triage (any screen) and the desktop fixes, with what each still holds for me. */
 function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): HTMLElement {
   const link = (q: "triage" | "fix", label: string) =>
-    h("a", { href: `#b/${encodeURIComponent(batch.id)}${q === "fix" ? "/q/fix" : ""}`, ...(current === q ? { "aria-current": "page", class: "on" } : {}) }, label);
+    h("a", { href: `#b/${encodeURIComponent(batch.id)}${q === "fix" || batch.pageSweep ? `/q/${q}` : ""}`, ...(current === q ? { "aria-current": "page", class: "on" } : {}) }, label);
   return h(
     "nav",
     { class: "subsetnav small", "aria-label": t("filter") },
+    ...(batch.pageSweep && matchMedia("(min-width: 900px) and (pointer: fine)").matches ? [h("a", { href: `#b/${encodeURIComponent(batch.id)}` }, lang() === "he" ? "סקירת דף" : "Page sweep")] : []),
     link("triage", t("q_triage", { n: batch.triage!.triage })),
     link("fix", t("q_fix", { n: batch.triage!.fix })),
   );
@@ -240,13 +244,17 @@ function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): H
 
 /** Every open batch, the ones with work left for this reviewer first. */
 function picker(batches: BatchSummary[]): HTMLElement {
-  const sorted = [...batches].sort((a, b) => Number(b.progress.remainingForMe > 0) - Number(a.progress.remainingForMe > 0));
+  const priority = (b: BatchSummary) => (b.pageSweep?.remainingPages ?? 0) > 0
+    ? PAGE_SWEEP_BATCHES.findIndex(id => id === b.id) : PAGE_SWEEP_BATCHES.length;
+  const sorted = [...batches].sort((a, b) => priority(a) - priority(b) ||
+    Number(b.progress.remainingForMe > 0) - Number(a.progress.remainingForMe > 0));
   return h(
     "div",
     { class: "picker" },
     h("h1", {}, t("pick_h")),
     ...sorted.map((b) => {
       const p = b.progress;
+      const pages = matchMedia("(min-width: 900px) and (pointer: fine)").matches ? b.pageSweep?.remainingPages : undefined;
       // A volunteer batch shows the volunteer's own count only (nothing about other volunteers' work).
       const own = p.ownOnly === true;
       const pct = !own && p.total ? Math.round((p.covered / p.total) * 100) : 0;
@@ -256,7 +264,7 @@ function picker(batches: BatchSummary[]): HTMLElement {
         h("strong", {}, b.taskLabel[lang()]),
         own
           ? h("span", { class: "count" }, h("strong", { class: "num" }, String(p.decidedByMe)), ` ${t("decided")}`)
-          : h("span", { class: "count" }, h("strong", { class: "num" }, String(p.remainingForMe)), ` ${t("remain")}`),
+          : h("span", { class: "count" }, h("strong", { class: "num" }, String(pages ?? p.remainingForMe)), pages === undefined ? ` ${t("remain")}` : lang() === "he" ? " עמודים נותרו" : " pages left"),
         h(
           "span",
           { class: "meta" },
