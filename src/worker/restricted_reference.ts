@@ -7,10 +7,13 @@ import { HttpError } from "./http";
 
 export const RESTRICTED_MEDIA_PATH = "/api/restricted-media/v1";
 
+export const isCaptureDraft = (batch: BatchRecord) =>
+  batch.id.startsWith(CAPTURE_BATCH_PREFIX) && isRestrictedDraftVerification(batch);
+
 export function canReadReference(env: Env, url: URL, reviewerId: string, batch: BatchRecord): boolean {
   if (batch.id.startsWith(CAPTURE_BATCH_PREFIX)) {
     const pin = env.REGISTERED_CAPTURE_ROSTER_SHA256;
-    if (!isRestrictedDraftVerification(batch) || !pin || !CAPTURE_DIGEST.test(pin) || batch.source.capture_roster_sha256 !== pin) return false;
+    if (!isCaptureDraft(batch) || !pin || !CAPTURE_DIGEST.test(pin) || batch.source.capture_roster_sha256 !== pin) return false;
   }
   if (!batch.restrictedReference) {
     // Existing legacy data stays in D1. On deployment it cannot be served until its private roster is installed.

@@ -1,6 +1,6 @@
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
-import { canSweep, pendingSweepPages } from "./page-sweep";
-import { canReadReference, privateReferenceImage } from "./restricted_reference";
+import { canSweep, pendingSweepPages, usesUnplantedReview } from "./page-sweep";
+import { canReadReference, isCaptureDraft, privateReferenceImage } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
 import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingPage, trainingProgress } from "./page_paste_train";
@@ -226,7 +226,7 @@ async function openBatch(ctx: Ctx, id: string, reviewerId: string) {
   if (!batch || batch.status !== "open" || !taskType(batch.taskType) ||
     !canReadReference(ctx.env, ctx.url, reviewerId, batch)) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
-  return canSweep(ctx.env, ctx.url, reviewerId, batch) ? { ...batch, unplantedReview: true } : batch;
+  return usesUnplantedReview(ctx.env, ctx.url, reviewerId, batch) ? { ...batch, unplantedReview: true } : batch;
 }
 
 export async function next(ctx: Ctx, batchId: string): Promise<Response> {
@@ -238,6 +238,11 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const params = new URL(ctx.request.url).searchParams;
   const subsetId = params.get("subset");
   if (isRestrictedDraftVerification(batch)) {
+    if (params.get("queue") === "fix" && isCaptureDraft(batch) && canSweep(ctx.env, ctx.url, reviewer.id, batch)) {
+      const page = await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
+      const progress = await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now);
+      return json({ proposal: null, progress, prefetch: [], page });
+    }
     const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now);
     if (out.proposal) return json(out);
     const page = await nextPage(ctx.env.DB, batch, reviewer.id, "triage") ?? await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
