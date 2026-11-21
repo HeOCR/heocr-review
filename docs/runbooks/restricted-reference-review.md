@@ -42,6 +42,23 @@ completeness entry belongs to the same registered page ID. Before a reviewer che
 
 ## Before activation
 
+### Stage the restricted line projection
+
+Use `npx tsx scripts/import-restricted-reference.ts` with the registered `--batch`, `--items` and `--items-sha256`,
+`--plants` and `--plants-sha256`, original `--media-root`, and the registered counts in `--pages`, `--lines`,
+`--plant-count` and `--separate-blind-pages`. The default run validates pins and source images, maps first-pass
+lines and runs the plant planner. Its output contains counts and digests.
+
+Add `--media-out` with a new private directory outside the checkout and source root to produce the
+content-addressed page and crop objects and a small access fixture. Use the approved private R2 transfer path
+and upload each object as a single part. Keep the prepared directory private. Before running with
+`--target production --yes-production`, follow the private export and cutover approval steps below and deploy
+the restricted Worker and migration from clean main. The production run checks the D1 write budget, bucket
+visibility, anonymous denial on the provisioned fixture, every staged object key, length and single-part ETag.
+It writes the first-pass roster, triage settings and ratified plants as one closed restricted batch. An existing
+batch must already match the completed closed stage to be accepted on retry. Blind and coverage-only
+registrations are staged separately.
+
 Keep these batches closed through staging. Supply a counts-only receipt for the registered roster, active line
 proposals, prior usable decisions, authorized blind passes, and completeness-only pages. Compare those counts to
 the eval pins and verify that the excluded pages have no active queue path. Verify the staged media keys and
