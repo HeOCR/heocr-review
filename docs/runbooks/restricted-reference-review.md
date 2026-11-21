@@ -6,9 +6,12 @@ path live.
 
 ## Worker binding and gate
 
-Bind a dedicated R2 bucket as `RESTRICTED_REFERENCE_MEDIA` only after approval. Disable its `r2.dev` endpoint and
-leave it without a public custom domain or any signing URL. Set `RESTRICTED_REFERENCE_REVIEWER_ID` as a Worker
-secret for the approved account. Use the existing admin permission for export as well. Follow the
+The Worker binds the dedicated `heocr-review-protected` R2 bucket as `RESTRICTED_REFERENCE_MEDIA`.
+Before deploying, verify that the bucket belongs to the HeOCR account, its `r2.dev` endpoint is disabled,
+and its custom domain list is empty. Confirm an anonymous request to the bucket's S3 endpoint is denied
+with HTTP 403 or 404. Keep access through the authenticated Worker route, without signing URLs.
+Set `RESTRICTED_REFERENCE_REVIEWER_ID` in the private Worker secrets file for the existing approved account.
+Use the existing admin permission for export as well. Follow the
 [Cloudflare R2 visibility documentation](https://developers.cloudflare.com/r2/buckets/public-buckets/).
 
 A protected batch has `batches.restricted_reference=1`. Reserved private batch IDs are protected regardless of
