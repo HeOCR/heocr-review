@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
 import { sha256Hex } from "../../src/shared/sha256";
+import { DRAFT_VERIFICATION } from "../../src/tasks/restricted_reference";
 import { handle } from "../../src/worker/index";
 import { Client } from "./helpers";
 import type { Env } from "../../src/worker/env";
@@ -59,6 +60,84 @@ async function fixtureLine() {
   await env.RESTRICTED_REFERENCE_MEDIA!.put(`${batch}/${key}`, "fake jpeg");
   return { batch, front, outside, orig };
 }
+
+it("serves protected draft decisions directly and requires explicit checks after all lines", async () => {
+  const { owner, admin, volunteer, req } = await fixtureUsers();
+  const { batch, front, outside: second } = await fixtureLine();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE batches SET source_json=json_set(source_json,'$.restricted_review',?2) WHERE id=?1").bind(batch, DRAFT_VERIFICATION),
+    env.DB.prepare("UPDATE batch_settings SET mode='standard' WHERE batch_id=?1").bind(batch),
+    env.DB.prepare("DELETE FROM triage_plants WHERE batch_id=?1").bind(batch),
+    env.DB.prepare("INSERT INTO restricted_reference_pages(batch_id,item_id) VALUES (?1,?2)").bind(batch, second.item_id),
+    env.DB.prepare("UPDATE proposals SET active=0 WHERE batch_id=?1 AND id NOT IN (?2,?3)").bind(batch, front.id, second.id),
+    env.DB.prepare("UPDATE proposals SET payload_json=json_set(payload_json,'$.candidate_text','טיוטה','$.attention_spans',json('[[0,5]]')) WHERE id=?1")
+      .bind(front.id),
+  ]);
+  const queue = `/api/batches/${batch}`;
+  const first = `/api/proposals/${front.id}`;
+  const other = `/api/proposals/${second.id}`;
+  const page = `${queue}/pages/${front.item_id}`;
+  const secondPage = `${queue}/pages/${second.item_id}`;
+  const exportPath = `/api/admin/batches/${batch}/export`;
+  for (const [cookie, origin, status] of [
+    ["", host, 401], [admin.cookie, host, 404], [volunteer.cookie, host, 404], [owner.cookie, alternate, 404],
+  ] as const) {
+    const read = await req("GET", `${first}/image/page`, cookie, origin);
+    expect(read.status).toBe(status);
+    expect(read.headers.get("cache-control")).toBe("no-store");
+    expect((await req("GET", `${queue}/next`, cookie, origin)).status).toBe(status);
+    expect((await req("POST", `${page}/check`, cookie, origin, confirm)).status).toBe(status);
+  }
+  expect((await req("GET", exportPath, admin.cookie)).status).toBe(404);
+  expect((await req("GET", `${first}/image/page`)).status).toBe(200);
+  expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
+    proposal: { id: front.id, options: [{ value: "exact" }, { value: "edited" }], view: {
+      draftVerification: true, candidate: "טיוטה", runs: [{ attention: true, text: "טיוטה" }],
+      page: { url: `${first}/image/page` },
+    } }, progress: { total: 4, covered: 0 }, prefetch: [],
+  });
+  expect((await req("POST", `${first}/decision`, owner.cookie, host, { value: "different" })).status).toBe(400);
+  expect((await req("POST", `${first}/decision`, owner.cookie, host, { value: "exact" })).status).toBe(200);
+  expect((await req("POST", `${page}/check`, owner.cookie, host, confirm)).status).toBe(409);
+  expect((await req("GET", `${page}/image`)).status).toBe(404);
+  expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({ proposal: { id: second.id } });
+  expect((await req("POST", `${other}/skip`)).status).toBe(200);
+  expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
+    proposal: null, page: null, progress: { covered: 1, skippedByMe: 1, remainingForMe: 2 },
+  });
+  expect((await req("POST", `${queue}/skips/clear`)).status).toBe(200);
+  expect((await req("POST", `${other}/decision`, owner.cookie, host, { value: "edited", text: "שורה מתוקנת" })).status).toBe(200);
+  expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
+    proposal: null, page: { itemId: front.item_id, mode: "check", image: { url: `${page}/image` } }, progress: { covered: 2 },
+  });
+  expect((await req("GET", `${page}/image`, admin.cookie)).status).toBe(404);
+  expect((await req("GET", `${page}/image`)).status).toBe(200);
+  expect((await req("POST", `${page}/check`, owner.cookie, host, confirm)).status).toBe(200);
+  expect((await req("POST", `${secondPage}/check`, owner.cookie, host, { answer: "missing_lines" })).status).toBe(200);
+  expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
+    page: { itemId: second.item_id, mode: "add" }, progress: { covered: 3, remainingForMe: 1 },
+  });
+  expect((await req("POST", `${secondPage}/done`)).status).toBe(409);
+  expect((await req("POST", `${secondPage}/lines`, owner.cookie, host, { box: [0.1, 0.35, 0.8, 0.4], value: "typed", text: "שורה חסרה" })).status).toBe(200);
+  expect((await req("POST", `${secondPage}/done`)).status).toBe(200);
+  expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
+    page: null, progress: { covered: 4, remainingForMe: 0 },
+  });
+  const exported = await (await req("GET", exportPath)).json();
+  expect(exported).toMatchObject({ files: {
+    "line_verify_decisions.json": { decisions: expect.arrayContaining([
+      expect.objectContaining({ item_id: front.external_id, decision: "exact", candidate_sha256: sha256Hex("טיוטה") }),
+      expect.objectContaining({ item_id: second.external_id, decision: "edited", text: "שורה מתוקנת" }),
+    ]) },
+    "reference_verification_pages.json": {
+      pages: expect.arrayContaining([
+        expect.objectContaining({ completeness: expect.objectContaining({ answer: "complete" }) }),
+        expect.objectContaining({ completeness: expect.objectContaining({ answer: "lines_added" }) }),
+      ]),
+      added_lines: [expect.objectContaining({ text: "שורה חסרה" })],
+    },
+  } });
+});
 
 it("fails closed on listings, deep links, all writes, media, exports and alternative hostnames", async () => {
   const { owner, admin, volunteer, req } = await fixtureUsers();

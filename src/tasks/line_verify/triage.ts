@@ -13,6 +13,7 @@
  * where the correction started, with every earlier answer in `history`.
  */
 import { sha256Hex } from "../../shared/sha256";
+import { isRestrictedDraftVerification } from "../restricted_reference";
 import type { BatchRecord, DecisionRecord, ExportFile, ProposalRecord, ResolvedProposal, TriagePages } from "../types";
 import type { LineVerifyPayload } from "./index";
 
@@ -75,7 +76,8 @@ export function plantOf(p: ProposalRecord, plants: Map<number, TriagePlant>): Tr
   return plant && plant.candidateSha256 === sha256Hex(candidateOf(p)) ? plant : null;
 }
 
-export const isTriageBatch = (batch: BatchRecord) => batch.taskType === "line_verify" && batch.settings?.mode === "triage";
+export const isTriageBatch = (batch: BatchRecord) =>
+  batch.taskType === "line_verify" && batch.settings?.mode === "triage" && !isRestrictedDraftVerification(batch);
 
 /**
  * A triage answer as line_verify_decisions has it: correct is exact on an edition line and the draft as typed on a

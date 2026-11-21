@@ -60,6 +60,21 @@ It writes the first-pass roster, triage settings and ratified plants as one clos
 batch must already match the completed closed stage to be accepted on retry. Blind and coverage-only
 registrations are staged separately.
 
+### Draft verification
+
+For a registered draft projection, pass `--verify-drafts` with the pinned `--items`, `--items-sha256`,
+`--media-root` and registered counts in `--pages` and `--lines`. Use a `private-ref-` batch ID and the same
+restricted staging and R2 checks. The projection uses `line_verify_items.v1.2` and an empty
+`blind_second_pass` list. Each line is a first-pass `verify` item with an NFC candidate, an explicit
+`uncertain` boolean, and provenance of `reference_draft` or `llm:<model>:<prompt sha256>`. The writer orders
+uncertain lines first, preserving the registered rank order within each group. It stages a closed batch.
+
+The allowlisted reviewer uses the line comparison screen and its correction diff. Completeness checks unlock
+after every line has an Exact or edited decision on the current content. Skipped lines still need review.
+Use the authenticated Admin export to retrieve `line_verify_decisions.json` for the line answers and
+`reference_verification_pages.json` for explicit page answers and any added lines. A null `completeness`
+value means the page is pending. Added-line boxes use page fractions.
+
 Keep these batches closed through staging. Supply a counts-only receipt for the registered roster, active line
 proposals, prior usable decisions, authorized blind passes, and completeness-only pages. Compare those counts to
 the eval pins and verify that the excluded pages have no active queue path. Verify the staged media keys and

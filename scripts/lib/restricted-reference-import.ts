@@ -3,8 +3,8 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import sharp from "sharp";
 import { lineVerifyImporter } from "../../src/tasks/line_verify/importer";
-import { ITEMS_SCHEMA_V12, type PixelBox } from "../../src/tasks/line_verify/schema";
-import { needsRestrictedRoster } from "../../src/tasks/restricted_reference";
+import { ITEMS_SCHEMA_V12, LLM_PROVENANCE, lineTextProblems, type PixelBox } from "../../src/tasks/line_verify/schema";
+import { DRAFT_VERIFICATION, needsRestrictedRoster, RESTRICTED_BATCH_PREFIX } from "../../src/tasks/restricted_reference";
 import type { ImportBundle } from "../../src/tasks/import";
 import type { ProposalRecord } from "../../src/tasks/types";
 import { planPlants } from "./plants";
@@ -18,7 +18,7 @@ const provenance = new Set(["pdf_text_layer", "stock_tesseract_heb"]);
 export interface RestrictedPins {
   batch: string;
   itemsSha: string;
-  plantsSha: string;
+  plantsSha: string | null;
   pages: number;
   lines: number;
   plants: number;
@@ -45,6 +45,7 @@ interface Line {
   line_index: number;
   pass?: number;
   kind: "verify" | "type";
+  uncertain?: boolean;
   candidate_text: string | null;
   candidate_provenance: string | null;
   box: PixelBox;
@@ -84,16 +85,23 @@ function byUnique<T>(records: T[], id: (record: T) => string, kind: string): Map
   return keyed;
 }
 
-export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plantsBytes: Buffer, mediaRoot: string, pins: RestrictedPins) {
+export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plantsBytes: Buffer | null, mediaRoot: string, pins: RestrictedPins) {
   requireScope(batchKey.test(pins.batch) && needsRestrictedRoster(pins.batch), "batch is outside the restricted writer's scope");
   requireScope(sha.test(pins.itemsSha) && digest(itemsBytes) === pins.itemsSha, "items checksum differs");
-  requireScope(sha.test(pins.plantsSha) && digest(plantsBytes) === pins.plantsSha, "plants checksum differs");
+  const { plantsSha } = pins;
+  const verification = plantsSha === null;
+  if (verification) {
+    requireScope(pins.batch.startsWith(RESTRICTED_BATCH_PREFIX), "draft verification needs a private-ref batch ID");
+    requireScope(plantsBytes === null && pins.plants === 0 && pins.separateBlindPages === 0, "draft verification has neither plants nor blind passes");
+  } else {
+    requireScope(plantsBytes !== null && sha.test(plantsSha) && digest(plantsBytes) === plantsSha, "plants checksum differs");
+  }
   const input = JSON.parse(itemsBytes.toString("utf8")) as Projection;
-  const plants = JSON.parse(plantsBytes.toString("utf8")) as { bundle_sha256: string; plants: unknown[] };
+  const plants = plantsBytes === null ? null : JSON.parse(plantsBytes.toString("utf8")) as { bundle_sha256: string; plants: unknown[] };
   requireScope(input?.schema_version === ITEMS_SCHEMA_V12 && input.batch_id === pins.batch, "schema or batch differs");
   requireScope(Array.isArray(input.pages) && input.pages.length === pins.pages && pins.pages > 0 &&
     Array.isArray(input.items) && input.items.length === pins.lines && pins.lines > 0, "registered roster counts differ");
-  requireScope(plants?.bundle_sha256 === pins.itemsSha && Array.isArray(plants.plants) && plants.plants.length === pins.plants,
+  requireScope(verification || (plants?.bundle_sha256 === pins.itemsSha && Array.isArray(plants.plants) && plants.plants.length === pins.plants),
     "plant count or binding to the items pin differs");
 
   const pages = byUnique(input.pages, (page) => page.page_id, "page");
@@ -120,8 +128,14 @@ export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plant
     requireScope(within(line.box, page) && within(line.context_box, page) &&
       line.context_box[0] <= line.box[0] && line.context_box[1] <= line.box[1] &&
       line.context_box[2] >= line.box[2] && line.context_box[3] >= line.box[3], "invalid line/context geometry");
-    requireScope(line.kind === "verify" ? name(line.candidate_text) && provenance.has(line.candidate_provenance ?? "") :
-      line.kind === "type" && line.candidate_text === null && line.candidate_provenance === null, "invalid first-pass candidate provenance");
+    if (verification) {
+      requireScope(line.kind === "verify" && typeof line.candidate_text === "string" && lineTextProblems(line.candidate_text).length === 0 &&
+        (line.candidate_provenance === "reference_draft" || LLM_PROVENANCE.test(line.candidate_provenance ?? "")) &&
+        typeof line.uncertain === "boolean", "draft verification needs a valid candidate, provenance and uncertainty flag");
+    } else {
+      requireScope(line.kind === "verify" ? name(line.candidate_text) && provenance.has(line.candidate_provenance ?? "") :
+        line.kind === "type" && line.candidate_text === null && line.candidate_provenance === null, "invalid first-pass candidate provenance");
+    }
   }
   requireScope([...seenLineIndices.values()].every((indices) => indices.size > 0), "a registered page has no lines");
 
@@ -141,8 +155,12 @@ export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plant
     paths.set(page.page_id, path);
   }
 
-  const bundle: ImportBundle = lineVerifyImporter.bundle({ ...input, blind_second_pass: [] });
+  const bundle: ImportBundle = lineVerifyImporter.bundle({
+    ...input, blind_second_pass: [],
+    items: verification ? input.items.map((line) => ({ ...line, precheck: undefined })) : input.items,
+  });
   bundle.batch.source = { ...bundle.batch.source, restricted_partition: "test", items_sha256: pins.itemsSha, plants_sha256: pins.plantsSha };
+  if (verification) bundle.batch.source.restricted_review = DRAFT_VERIFICATION;
   for (const item of bundle.items) {
     const page = pages.get(item.externalId)!;
     Object.assign(item.payload, { booklet: page.booklet, book_group: page.book_group, restricted_partition: "test" });
@@ -151,12 +169,21 @@ export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plant
     const line = lines.get(proposal.externalId)!;
     const page = pages.get(proposal.itemExternalId)!;
     proposal.rank = line.rank;
+    if (verification) {
+      const uncertain = line.uncertain === true;
+      proposal.payload.uncertain = uncertain;
+      proposal.payload.attention_spans = uncertain ? [[0, Array.from(line.candidate_text!).length]] : [];
+    }
     const source = proposal.payload.page as Record<string, unknown>;
     Object.assign(source, { booklet: page.booklet, book_group: page.book_group, restricted_partition: "test" });
     if (!("script" in page)) delete source.script;
   }
+  if (verification) {
+    bundle.proposals.sort((a, b) => Number(b.payload.uncertain) - Number(a.payload.uncertain) || a.rank - b.rank);
+    bundle.proposals.forEach((proposal, rank) => { proposal.rank = rank; });
+  }
 
-  const plan = planPlants(plants, bundle.proposals.map((proposal, i) => {
+  const plan = plants === null ? { rows: [], refused: [], skipped_decided: [] } : planPlants(plants, bundle.proposals.map((proposal, i) => {
     const record: ProposalRecord = { ...proposal, id: i + 1, batchId: bundle.batch.id, itemTitle: "", active: true, media: {}, contentSha256: "" };
     return { proposal: record, decisions: 0 };
   }));

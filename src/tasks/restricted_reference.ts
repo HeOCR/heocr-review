@@ -1,5 +1,11 @@
+import type { BatchRecord } from "./types";
+
 /** Restricted rosters are separate from import metadata and survive a re-import. */
 export const RESTRICTED_BATCH_PREFIX = "private-ref-";
+export const DRAFT_VERIFICATION = "draft_verification";
+export const isRestrictedDraftVerification = (batch: BatchRecord): boolean =>
+  batch.restrictedReference === true && batch.taskType === "line_verify" && batch.source.restricted_review === DRAFT_VERIFICATION;
+
 export const RESTRICTED_ASSET_PREFIXES = [
   "private-ref-",
   "midcentury_triage_v1",

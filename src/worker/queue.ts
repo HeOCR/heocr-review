@@ -1,9 +1,9 @@
-import { ALLOWED_REFERENCE_PROPOSAL } from "../tasks/restricted_reference";
+import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
 import { referenceImage } from "./restricted_reference";
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
-import { pageCounts } from "./pages";
+import { pageCounts, verificationPageProgress } from "./pages";
 import { sha256Hex } from "../shared/sha256";
 import { TASK_TYPE_ID as PAGE_REVIEW, payloadOf } from "../tasks/page_review";
 import { PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
@@ -235,7 +235,8 @@ export async function progressFor(
   // A volunteer_v1 line is covered once it is resolved or unresolved.
   // Gold lines (volunteer_v1_1) are never counted in progress: they are not the batch's lines.
   const g = volunteer ? ` AND ${NOT_GOLD}` : "";
-  const settled = settledDecision(isTriageBatch(batch));
+  const verification = isRestrictedDraftVerification(batch);
+  const settled = settledDecision(isTriageBatch(batch) || verification);
   const covered = volunteer
     ? VOLUNTEER_DONE
     : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND ${settled}) >= ${needed(3)}`;
@@ -245,7 +246,8 @@ export async function progressFor(
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}${g}) AS total,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}${g} AND ${covered}) AS covered,
         (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id = d.proposal_id
-          WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND ${f}${g} AND d.reviewer_id = ?2 AND d.superseded_at IS NULL) AS mine,
+          WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND ${f}${g} AND d.reviewer_id = ?2
+            AND d.superseded_at IS NULL${verification ? ` AND ${CONTENT_MATCH_SQL}` : ""}) AS mine,
         (SELECT COUNT(*) FROM skips s JOIN proposals p ON p.id = s.proposal_id
           WHERE p.batch_id = ?1 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL} AND ${f} AND s.reviewer_id = ?2) AS skipped,
         (SELECT COUNT(*) FROM proposals p WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(4, 5)} AND ${f}
@@ -255,13 +257,14 @@ export async function progressFor(
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();
+  const pages = verification ? await verificationPageProgress(db, batch.id, reviewerId) : { total: 0, done: 0 };
   return {
-    total: filter ? filter.strata : (row?.total ?? 0),
-    covered: row?.covered ?? 0,
+    total: (filter ? filter.strata : (row?.total ?? 0)) + pages.total,
+    covered: (row?.covered ?? 0) + pages.done,
     minReviewers: batch.minReviewers,
-    decidedByMe: row?.mine ?? 0,
+    decidedByMe: (row?.mine ?? 0) + pages.done,
     skippedByMe: row?.skipped ?? 0,
-    remainingForMe: row?.remaining ?? 0,
+    remainingForMe: (row?.remaining ?? 0) + pages.total - pages.done,
   };
 }
 
@@ -282,9 +285,10 @@ async function asTriaged(db: D1Database, batch: BatchRecord, p: ProposalRecord, 
 export async function proposalView(db: D1Database, batch: BatchRecord, p: ProposalRecord, reviewerId: string, triage = false): Promise<ProposalView> {
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
+  const verification = isRestrictedDraftVerification(batch);
   const mine = await db
     .prepare("SELECT value, text, decided_on FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL AND (?3 IS NULL OR proposal_sha256 = ?3)")
-    .bind(p.id, reviewerId, isTriageBatch(batch) ? p.contentSha256 : null)
+    .bind(p.id, reviewerId, isTriageBatch(batch) || verification ? p.contentSha256 : null)
     .first<{ value: string; text: string | null; decided_on: string }>();
   const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
   const rawView = type.toView(batch.restrictedReference ? {
@@ -294,13 +298,16 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     },
   } : p);
   const masked = batch.restrictedReference ? !mine : triage;
+  const options = type.optionsFor?.(p) ?? type.options;
   return {
     id: p.id,
     batchId: p.batchId,
     externalId: p.externalId,
     itemTitle: p.itemTitle,
-    view: masked ? await asTriaged(db, batch, p, rawView) : rawView,
-    options: type.optionsFor?.(p) ?? type.options,
+    view: verification && rawView.kind === "line_verify"
+      ? { ...rawView, draftVerification: true }
+      : masked ? await asTriaged(db, batch, p, rawView) : rawView,
+    options: verification ? options.filter((option) => option.value === "exact" || option.value === "edited") : options,
     mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
     ...(batch.taskType === PAGE_REVIEW ? { draft } : {}),
   };
@@ -333,7 +340,8 @@ export async function nextFor(
 ): Promise<NextResponse> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
-    .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null, settledDecision(isTriageBatch(batch))))
+    .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null,
+      settledDecision(isTriageBatch(batch) || isRestrictedDraftVerification(batch))))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const open = results.map(toProposal);

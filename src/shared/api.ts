@@ -54,6 +54,8 @@ export interface LineVerifyView {
    * v1.3, pass 1 only), for the reviewer to check letter by letter. Otherwise "type" mode sends no candidate.
    */
   draft: boolean;
+  /** Restricted review of a pinned draft using the normal correction diff. */
+  draftVerification?: boolean;
   candidate: string;
   /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
   runs: AttentionRun[];
@@ -208,7 +210,7 @@ export interface NextResponse {
   prefetch: string[];
   /** A triage batch (migrations/0012_triage.sql): which queue this is, and how many lines each still holds for me. */
   triage?: { queue: "triage" | "fix"; triage: number; fix: number };
-  /** A triage batch: a page to check (triage) or to add missing lines to (fix), in place of a line (0014). */
+  /** A completeness check or missing-line task served in place of a line (0014). */
   page?: PageCheckView | null;
 }
 

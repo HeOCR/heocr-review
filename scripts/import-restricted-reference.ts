@@ -9,6 +9,7 @@ import { assertAnonymousR2Denial, buildRestrictedStageSql, disabledR2FixtureUrl,
 import { lit } from "./lib/sql";
 import { d1File, d1Query, loadCredentials } from "./lib/wrangler";
 import type { StoredImage } from "../src/tasks/types";
+import { DRAFT_VERIFICATION } from "../src/tasks/restricted_reference";
 
 const bucket = "heocr-review-protected";
 const accessFixture = { key: "access-check.txt", text: "HeOCR private object access fixture\n" };
@@ -73,21 +74,23 @@ function readback(pins: RestrictedPins) {
       AND json_extract(payload_json,'$.pass')=1) AS lines,
     (SELECT COUNT(*) FROM restricted_reference_pages r JOIN items i ON i.id=r.item_id AND i.batch_id=b.id
       WHERE r.batch_id=b.id AND r.first_allowed=1 AND r.blind_allowed=0 AND r.coverage_boxes_json IS NULL) AS roster,
-    (SELECT COUNT(*) FROM triage_plants WHERE batch_id=b.id AND plants_sha256=${lit(pins.plantsSha)}) AS plants,
+    (SELECT COUNT(*) FROM triage_plants WHERE batch_id=b.id AND plants_sha256 IS ${lit(pins.plantsSha)}) AS plants,
     (SELECT COUNT(*) FROM decisions d JOIN proposals p ON p.id=d.proposal_id WHERE p.batch_id=b.id) AS decisions,
     ((SELECT COUNT(*) FROM proposals WHERE batch_id=b.id AND
         (active<>1 OR json_extract(payload_json,'$.pass') IS NOT 1 OR gate_kind IS NOT NULL
         OR json_extract(media_json,'$.crop.ref.source') IS NOT 'r2' OR json_extract(media_json,'$.page.ref.source') IS NOT 'r2'))
       + (SELECT COUNT(*) FROM items WHERE batch_id=b.id AND json_extract(payload_json,'$.page_image.ref.source') IS NOT 'r2')
-      + (SELECT COUNT(*) FROM triage_plants WHERE batch_id=b.id AND plants_sha256<>${lit(pins.plantsSha)})
+      + (SELECT COUNT(*) FROM triage_plants WHERE batch_id=b.id AND plants_sha256 IS NOT ${lit(pins.plantsSha)})
       + (SELECT COUNT(*) FROM restricted_reference_pages WHERE batch_id=b.id AND (first_allowed<>1 OR blind_allowed<>0 OR coverage_boxes_json IS NOT NULL))
     ) AS bad_media,
-    (json_extract(b.source_json,'$.items_sha256')=${lit(pins.itemsSha)} AND json_extract(b.source_json,'$.plants_sha256')=${lit(pins.plantsSha)}) AS pins_match
+    (json_extract(b.source_json,'$.items_sha256')=${lit(pins.itemsSha)}
+      AND json_extract(b.source_json,'$.plants_sha256') IS ${lit(pins.plantsSha)}
+      AND json_extract(b.source_json,'$.restricted_review') IS ${lit(pins.plantsSha === null ? DRAFT_VERIFICATION : null)}) AS pins_match
     FROM batches b LEFT JOIN batch_settings s ON s.batch_id=b.id WHERE b.id=${lit(pins.batch)};`)[0]?.[0];
 }
 
 function stageMatches(pins: RestrictedPins, row: ReturnType<typeof readback>) {
-  return row?.status === "closed" && row.restricted_reference === 1 && row.mode === "triage" && row.pointed_books === "keep" &&
+  return row?.status === "closed" && row.restricted_reference === 1 && row.mode === (pins.plantsSha === null ? "standard" : "triage") && row.pointed_books === "keep" &&
     row.pages === pins.pages && row.roster === pins.pages && row.lines === pins.lines && row.plants === pins.plants &&
     row.decisions === 0 && row.bad_media === 0 && row.pins_match === 1;
 }
@@ -128,6 +131,10 @@ function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<
 async function main() {
   const { flags } = parseArgs(process.argv.slice(2));
   const destination = target(flags);
+  const verification = flags["verify-drafts"] === true;
+  if (verification && ["plants", "plants-sha256", "plant-count", "separate-blind-pages"].some((key) => key in flags)) {
+    throw new Error("draft verification takes neither plant arguments nor a separate blind roster");
+  }
   const mediaOut = typeof flags["media-out"] === "string" ? flags["media-out"] : undefined;
   if (destination === "production" && mediaOut) throw new Error("prepare offline media before production staging");
   const count = (key: string) => {
@@ -137,12 +144,13 @@ async function main() {
   };
   const pins: RestrictedPins = {
     batch: str(flags, "batch"),
-    itemsSha: str(flags, "items-sha256"), plantsSha: str(flags, "plants-sha256"),
-    pages: count("pages"), lines: count("lines"), plants: count("plant-count"), separateBlindPages: count("separate-blind-pages"),
+    itemsSha: str(flags, "items-sha256"), plantsSha: verification ? null : str(flags, "plants-sha256"),
+    pages: count("pages"), lines: count("lines"), plants: verification ? 0 : count("plant-count"),
+    separateBlindPages: verification ? 0 : count("separate-blind-pages"),
   };
   const root = realpathSync(str(flags, "media-root"));
   const stage = await prepareRestrictedReferenceImport(
-    readFileSync(str(flags, "items")), readFileSync(str(flags, "plants")), root, pins,
+    readFileSync(str(flags, "items")), verification ? null : readFileSync(str(flags, "plants")), root, pins,
   );
   const counts = {
     pages: pins.pages, lines: pins.lines, separate_blind_page_checks: stage.separateBlindPages, items_sha256: pins.itemsSha,

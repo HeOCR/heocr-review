@@ -565,7 +565,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         (typing && !drafted) || asMisaligned
           ? null
           : h("button", { type: "button", class: "act quiet", onclick: () => ((area.value = v.candidate), update(), area.focus()) }, icon("reset", { sm: true }), t(drafted ? "draft_reset" : "reset")),
-        asMisaligned ? null : h("label", { class: "check", for: "lv-pointed" }, pointed, t("nq")),
+        asMisaligned || v.draftVerification ? null : h("label", { class: "check", for: "lv-pointed" }, pointed, t("nq")),
       ),
       ...(typing || asMisaligned ? [] : [preview]),
       h(
@@ -610,12 +610,13 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       out.push(h("p", { class: "mine" }, t(final ? "mine_final" : "mine", { v: mine.label[lang()] }), p.mine?.text ? ` («${p.mine.text}»)` : "", final ? "" : ` · ${t("mine_replace")}`));
     }
     if (keysOpen) {
+      const keys = v.draftVerification ? KEY_LIST.filter(([, key]) => key !== "niqqud" && key !== "unread" && key !== "misal") : KEY_LIST;
       out.push(
         h(
           "div",
           { class: "notice keys-panel", role: "dialog", "aria-label": t("keys_h") },
           icon("conventions"),
-          h("div", {}, h("strong", {}, t("keys_h")), h("dl", {}, ...KEY_LIST.flatMap(([k, s]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, t(s))]))),
+          h("div", {}, h("strong", {}, t("keys_h")), h("dl", {}, ...keys.flatMap(([k, s]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, t(s))]))),
         ),
       );
     }
@@ -637,8 +638,10 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const option = (value: string) => p.options.find((o) => o.value === value);
     const mine = p.mine ? option(p.mine.value) : undefined;
     hooks.where?.(t("where", { line: v.lineIndex, page: v.pageLabel || "–" }));
-    const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle;
-    page = pageColumn(v.page, where, [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)], () => ((pageOpened = true), updateFlag()), () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
+    const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle || p.itemTitle;
+    const credit = v.draftVerification && !v.attribution && !v.textLicense
+      ? [] : [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)];
+    page = pageColumn(v.page, where, credit, () => ((pageOpened = true), updateFlag()), () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
 
     // Triage: three answers, big, and nothing to edit (the maintainer, 2026-11-20).
     const answers = triage
@@ -683,7 +686,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           h("button", { type: "button", "data-mode": "fit", "aria-pressed": String(fitWidth), onclick: () => setFit(true) }, icon("fit", { sm: true }), t("fit")),
         ),
       ),
-      typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...(v.runs.length ? candidateNodes(v.runs, v.precheck ? "precheck" : "ocr") : [v.candidate])),
+      typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...(v.runs.length ? candidateNodes(v.runs, v.precheck || v.draftVerification ? "precheck" : "ocr") : [v.candidate])),
       triage ? null : h("div", { class: "slot" }, ...slotNodes(p, v, mine)),
       h("div", { class: "editbox", hidden: true }),
       contextBandFor(v),
@@ -886,7 +889,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       });
     }
     // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
-    else if (typing) {
+    else if (current.view.draftVerification) {
+      for (const key of ["KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) delete actions[key];
+    } else if (typing) {
       for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = () => startEdit();
       for (const o of current.options) {
         const key = TYPING_KEYS[o.value];

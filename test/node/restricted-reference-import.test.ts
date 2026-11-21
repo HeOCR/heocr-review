@@ -187,3 +187,42 @@ it("installs only a closed restricted first-pass roster and plants after verifyi
     db.close();
   }
 });
+
+it("stages flagged drafts before lower-ranked unflagged drafts, with the same private roster and no plants", async () => {
+  const input = projection();
+  const drafts = {
+    ...input,
+    blind_second_pass: [],
+    items: input.items.map((item, i) => ({
+      ...item, kind: "verify", candidate_text: i === 0 ? "טיוטה" : "שורה",
+      candidate_provenance: "reference_draft", uncertain: i === 0,
+    })),
+  };
+  const bytes = encode(drafts);
+  const pins = {
+    batch, itemsSha: digest(bytes), plantsSha: null, pages: 1, lines: 2, plants: 0, separateBlindPages: 0,
+  };
+  const stage = await prepareRestrictedReferenceImport(bytes, null, root, pins);
+  expect(stage.bundle.batch.source.restricted_review).toBe("draft_verification");
+  expect(stage.bundle.proposals.map((p) => [p.externalId, p.rank, p.payload.bundle_rank]))
+    .toEqual([["typed-line", 0, 41], ["verify-line", 1, 7]]);
+  expect(stage.bundle.proposals[0]!.payload.attention_spans).toEqual([[0, 5]]);
+  expect(stage.bundle.proposals[1]!.payload.attention_spans).toEqual([]);
+  await expect(prepareRestrictedReferenceImport(bytes, null, root, { ...pins, separateBlindPages: 1 }))
+    .rejects.toThrow(/neither plants nor blind/);
+  const unmarked = encode({ ...drafts, items: [{ ...drafts.items[0], uncertain: null }, drafts.items[1]] });
+  await expect(prepareRestrictedReferenceImport(unmarked, null, root, { ...pins, itemsSha: digest(unmarked) }))
+    .rejects.toThrow(/uncertainty flag/);
+  const media = await prepareRestrictedMedia(stage);
+  const db = new DatabaseSync(":memory:");
+  try {
+    for (const file of readdirSync("migrations").sort()) db.exec(readFileSync(join("migrations", file), "utf8"));
+    db.exec(buildRestrictedStageSql(stage, media, media.objects.values(), new Date().toISOString()));
+    expect(db.prepare("SELECT status, restricted_reference FROM batches").get()).toEqual({ status: "closed", restricted_reference: 1 });
+    expect(db.prepare("SELECT mode FROM batch_settings").get()).toEqual({ mode: "standard" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM restricted_reference_pages").get()).toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM triage_plants").get()).toEqual({ count: 0 });
+  } finally {
+    db.close();
+  }
+});
