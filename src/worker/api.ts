@@ -1,4 +1,4 @@
-import { ALLOWED_REFERENCE_PROPOSAL } from "../tasks/restricted_reference";
+import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
 import { canReadReference, privateReferenceImage } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
@@ -235,6 +235,12 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
   const params = new URL(ctx.request.url).searchParams;
   const subsetId = params.get("subset");
+  if (isRestrictedDraftVerification(batch)) {
+    const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now);
+    if (out.proposal) return json(out);
+    const page = await nextPage(ctx.env.DB, batch, reviewer.id, "triage") ?? await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
+    return json({ ...out, page });
+  }
   let filter = null;
   // A triage batch serves two queues (migrations/0012_triage.sql): ?queue=triage (the default) or ?queue=fix.
   if (isTriageBatch(batch)) {
@@ -316,8 +322,8 @@ export async function restrictedCompletenessImage(ctx: Ctx, batchId: string, ite
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.readMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId, reviewer.id);
-  if (!batch.restrictedReference || !isTriageBatch(batch)) throw new HttpError(404, "not_found");
-  const image = await completenessImage(ctx.env.DB, batch.id, reviewer.id, itemId);
+  if (!batch.restrictedReference || !(isTriageBatch(batch) || isRestrictedDraftVerification(batch))) throw new HttpError(404, "not_found");
+  const image = await completenessImage(ctx.env.DB, batch, reviewer.id, itemId);
   return privateReferenceImage(ctx.env, batch.id, image);
 }
 
@@ -331,6 +337,9 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
+  if (isRestrictedDraftVerification(batch) && body.value !== "exact" && body.value !== "edited") {
+    throw new HttpError(400, "invalid_decision", "a draft verification decision must be exact or edited");
+  }
   // Triage answers (migrations/0012_triage.sql): only in a triage batch, only on a line with a candidate, never text.
   const normalized = batch.taskType === "line_verify" && isTriageValue(body.value)
     ? isTriageBatch(batch) && triageable(proposal) && (body.text === undefined || body.text === null)
@@ -668,24 +677,24 @@ export async function adminPhistGoldPull(ctx: Ctx, goldId: string): Promise<Resp
 
 // ---------- page completeness (migrations/0014_page_completeness.sql) ----------
 
-/** A triage batch's page, for a signed-in reviewer who accepted the current terms (a write). */
-async function triagePage(ctx: Ctx, batchId: string, itemId: number) {
+/** A page-completeness write for a signed-in reviewer who accepted the current terms. */
+async function reviewPage(ctx: Ctx, batchId: string, itemId: number) {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
   const batch = await openBatch(ctx, batchId, reviewer.id);
-  if (!isTriageBatch(batch)) throw new HttpError(404, "not_found");
+  if (!(isTriageBatch(batch) || isRestrictedDraftVerification(batch))) throw new HttpError(404, "not_found");
   if (!(await pageItem(ctx.env.DB, batch.id, itemId))) throw new HttpError(404, "not_found");
   return { reviewer, batch };
 }
 
 /** POST {answer: "complete" | "missing_lines"}: is every printed line of the page boxed? */
 export async function checkPage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
-  const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
+  const { reviewer, batch } = await reviewPage(ctx, batchId, itemId);
   const body = await readJson(ctx.request);
   if (!(PAGE_ANSWERS as readonly unknown[]).includes(body.answer)) throw new HttpError(400, "invalid_answer", `answer must be one of ${PAGE_ANSWERS.join(", ")}`);
-  if (!(await recordInitialPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, body.answer as "complete" | "missing_lines", iso(ctx.now)))) {
+  if (!(await recordInitialPageCheck(ctx.env.DB, batch, itemId, reviewer.id, body.answer as "complete" | "missing_lines", iso(ctx.now)))) {
     throw new HttpError(409, "not_open", "this page is not ready for a completeness check");
   }
   return json({ ok: true });
@@ -693,7 +702,7 @@ export async function checkPage(ctx: Ctx, batchId: string, itemId: number): Prom
 
 /** POST {box, value: "typed" | "unreadable", text}: a missing line, boxed and typed on the desktop. */
 export async function addPageLine(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
-  const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
+  const { reviewer, batch } = await reviewPage(ctx, batchId, itemId);
   if ((await currentCheck(ctx.env.DB, itemId, reviewer.id)) !== "missing_lines") throw new HttpError(409, "not_open", "add lines to a page marked as missing lines");
   const body = await readJson(ctx.request);
   const problem = boxProblem(body.box);
@@ -716,7 +725,7 @@ export async function removePageLine(ctx: Ctx, batchId: string, lineId: string):
 
 /** POST: the page's missing lines are all added. */
 export async function finishPage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
-  const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
+  const { reviewer, batch } = await reviewPage(ctx, batchId, itemId);
   if ((await currentCheck(ctx.env.DB, itemId, reviewer.id)) !== "missing_lines") throw new HttpError(409, "not_open", "this page is not waiting for missing lines");
   if (!(await recordPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, iso(ctx.now)))) {
     throw new HttpError(409, "not_open");

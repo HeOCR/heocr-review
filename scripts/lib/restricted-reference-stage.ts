@@ -127,7 +127,7 @@ export function buildRestrictedStageSql(stage: RestrictedImport, prepared: Restr
   statements.push(`INSERT INTO restricted_reference_pages (batch_id, item_id, first_allowed, blind_allowed)
     SELECT batch_id, id, 1, 0 FROM items WHERE batch_id=${b};`);
   statements.push(`INSERT INTO batch_settings (batch_id, updated_at, updated_by, mode, pointed_books)
-    VALUES (${b}, ${importedAt}, 'restricted-import', 'triage', 'keep');`);
+    VALUES (${b}, ${importedAt}, 'restricted-import', ${lit(pins.plantsSha === null ? "standard" : "triage")}, 'keep');`);
   for (const row of stage.plants.rows) {
     const item = lit(row.item_id);
     statements.push(`INSERT INTO triage_plants (batch_id, proposal_id, item_id, plant_type, position, planted_text, planted_sha256, candidate_sha256, plants_sha256, imported_at)

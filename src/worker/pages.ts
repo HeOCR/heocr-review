@@ -1,4 +1,4 @@
-import { ALLOWED_REFERENCE_PROPOSAL, allowedReferencePage, protectedReferenceBatchSql } from "../tasks/restricted_reference";
+import { ALLOWED_REFERENCE_PROPOSAL, allowedReferencePage, isRestrictedDraftVerification, protectedReferenceBatchSql } from "../tasks/restricted_reference";
 import { referenceImage } from "./restricted_reference";
 /**
  * Page completeness in triage (migrations/0014_page_completeness.sql; heocr-eval's reference_triage_v1 amendment 1).
@@ -20,6 +20,10 @@ export const PAGE_ANSWERS = ["complete", "missing_lines"] as const;
 const PAGE_ANSWERED = `NOT EXISTS (SELECT 1 FROM proposals p WHERE p.item_id = i.id AND p.active = 1 AND ${PASS1_SQL}
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2
     AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND NOT ${PENDING_SQL("d")}))`;
+const DRAFTS_ANSWERED = `NOT EXISTS (SELECT 1 FROM proposals p WHERE p.batch_id = i.batch_id
+  AND p.active = 1 AND ${PASS1_SQL} AND ${ALLOWED_REFERENCE_PROPOSAL}
+  AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2
+    AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND d.value IN ('exact','edited')))`;
 const CURRENT = (answer: string) =>
   `EXISTS (SELECT 1 FROM page_checks c WHERE c.item_id = i.id AND c.reviewer_id = ?2 AND c.superseded_at IS NULL AND c.answer = '${answer}')`;
 const NO_CHECK = "NOT EXISTS (SELECT 1 FROM page_checks c WHERE c.item_id = i.id AND c.reviewer_id = ?2 AND c.superseded_at IS NULL)";
@@ -31,15 +35,25 @@ const coverageReady = `(NOT ${protectedReferenceBatchSql("i.batch_id")}
     AND ${PASS1_SQL} AND json_extract(p.media_json, '$.page.ref.source')='r2'))`;
 
 /** SQL: the pages waiting for the reviewer's check (triage) or for their missing lines (desktop). */
-const TO_CHECK = `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL} AND ${NO_CHECK} AND ${PAGE_ANSWERED} AND ${coverageReady}`;
+const toCheck = (verification = false) => `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL}
+  AND ${NO_CHECK} AND ${verification ? DRAFTS_ANSWERED : PAGE_ANSWERED} AND ${coverageReady}`;
 const TO_ADD = `FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL} AND ${CURRENT("missing_lines")} AND ${coverageReady}`;
 
 export async function pageCounts(db: D1Database, batchId: string, reviewerId: string): Promise<{ check: number; add: number }> {
   const row = await db
-    .prepare(`SELECT (SELECT COUNT(*) ${TO_CHECK}) AS c, (SELECT COUNT(*) ${TO_ADD}) AS a`)
+    .prepare(`SELECT (SELECT COUNT(*) ${toCheck()}) AS c, (SELECT COUNT(*) ${TO_ADD}) AS a`)
     .bind(batchId, reviewerId)
     .first<{ c: number; a: number }>();
   return { check: row?.c ?? 0, add: row?.a ?? 0 };
+}
+
+export async function verificationPageProgress(db: D1Database, batchId: string, reviewerId: string): Promise<{ total: number; done: number }> {
+  const row = await db.prepare(`SELECT COUNT(*) AS total,
+    COALESCE(SUM(${CURRENT("complete")} OR ${CURRENT("lines_added")}),0) AS done
+    FROM items i WHERE i.batch_id = ?1 AND ${REGISTERED_PAGE_SQL}`)
+    .bind(batchId, reviewerId)
+    .first<{ total: number; done: number }>();
+  return row ?? { total: 0, done: 0 };
 }
 
 /** The next page for the reviewer in this queue (triage: a check; fix: missing lines to add), or null. */
@@ -49,7 +63,7 @@ const pageFields = `i.id, i.external_id, i.title, json_extract(i.payload_json, '
 
 export async function nextPage(db: D1Database, batch: BatchRecord, reviewerId: string, queue: "triage" | "fix"): Promise<PageCheckView | null> {
   const row = await db
-    .prepare(`SELECT ${pageFields} ${queue === "triage" ? TO_CHECK : TO_ADD} ORDER BY ${FIRST_RANK}, i.id LIMIT 1`)
+    .prepare(`SELECT ${pageFields} ${queue === "triage" ? toCheck(isRestrictedDraftVerification(batch)) : TO_ADD} ORDER BY ${FIRST_RANK}, i.id LIMIT 1`)
     .bind(batch.id, reviewerId)
     .first<PageRow>();
   return row ? pageView(db, batch, row, reviewerId, queue === "triage" ? "check" : "add") : null;
@@ -72,9 +86,9 @@ async function pageMedia(db: D1Database, item: PageRow) {
   return { image, boxes };
 }
 
-export async function completenessImage(db: D1Database, batch: string, reviewerId: string, itemId: number) {
-  const item = await db.prepare(`SELECT ${pageFields} ${TO_CHECK} AND i.id=?3
-    UNION ALL SELECT ${pageFields} ${TO_ADD} AND i.id=?3 LIMIT 1`).bind(batch, reviewerId, itemId).first<PageRow>();
+export async function completenessImage(db: D1Database, batch: BatchRecord, reviewerId: string, itemId: number) {
+  const item = await db.prepare(`SELECT ${pageFields} ${toCheck(isRestrictedDraftVerification(batch))} AND i.id=?3
+    UNION ALL SELECT ${pageFields} ${TO_ADD} AND i.id=?3 LIMIT 1`).bind(batch.id, reviewerId, itemId).first<PageRow>();
   return item ? (await pageMedia(db, item)).image : undefined;
 }
 
@@ -110,11 +124,11 @@ export async function pageItem(db: D1Database, batchId: string, itemId: number):
 }
 
 /** Record the first check only if the same page-readiness predicate used by the queue still holds. */
-export async function recordInitialPageCheck(db: D1Database, batchId: string, itemId: number, reviewerId: string, answer: "complete" | "missing_lines", nowIso: string): Promise<boolean> {
+export async function recordInitialPageCheck(db: D1Database, batch: BatchRecord, itemId: number, reviewerId: string, answer: "complete" | "missing_lines", nowIso: string): Promise<boolean> {
   const res = await db
     .prepare(`INSERT INTO page_checks (id, batch_id, item_id, reviewer_id, answer, created_at, decided_on)
-      SELECT ?4, ?1, i.id, ?2, ?5, ?6, ?7 ${TO_CHECK} AND i.id = ?3`)
-    .bind(batchId, reviewerId, itemId, randomId("pc-"), answer, nowIso, nowIso.slice(0, 10))
+      SELECT ?4, ?1, i.id, ?2, ?5, ?6, ?7 ${toCheck(isRestrictedDraftVerification(batch))} AND i.id = ?3`)
+    .bind(batch.id, reviewerId, itemId, randomId("pc-"), answer, nowIso, nowIso.slice(0, 10))
     .run();
   return (res.meta.changes ?? 0) > 0;
 }

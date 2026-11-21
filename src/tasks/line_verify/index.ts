@@ -15,6 +15,7 @@ import type { DecisionOption, Label, LineVerifyView } from "../../shared/api";
 import type { Box } from "../../shared/media";
 import { imageUrl } from "../../shared/media";
 import { sha256Hex } from "../../shared/sha256";
+import { isRestrictedDraftVerification } from "../restricted_reference";
 import type { BatchRecord, DecisionRecord, ExportExtra, ExportFile, NormalizedDecision, ProposalRecord, ResolvedProposal, StoredImage, TaskType, VerifyVote } from "../types";
 import { PHIST_GOLD_FILE, PHIST_GOLD_SHA256, type GoldMark } from "./gold";
 import { asReference, isTriageBatch, plantOf, referenceTriageFiles } from "./triage";
@@ -481,6 +482,23 @@ export const lineVerify: TaskType = {
   },
 
   exportExtraFiles(batch: BatchRecord, resolved: ResolvedProposal[], exportedAt: string, extra?: ExportExtra): ExportFile[] {
+    if (isRestrictedDraftVerification(batch)) {
+      const records = extra?.triagePages;
+      const checks = new Map(records?.checks.map((check) => [check.pageId, check]));
+      return [{
+        fileName: "reference_verification_pages.json",
+        content: {
+          schema: "reference_verification_pages.v1",
+          batch_id: batch.id,
+          items_sha256: batch.source.items_sha256,
+          exported_at: exportedAt,
+          pages: (records?.pages ?? []).map(({ pageId, width, height }) => ({
+            page_id: pageId, width, height, completeness: checks.get(pageId) ?? null,
+          })),
+          added_lines: records?.added ?? [],
+        },
+      }];
+    }
     return isTriageBatch(batch) ? referenceTriageFiles(batch, resolved, exportedAt, extra?.triagePlants ?? [], extra?.triagePages) : [];
   },
 
