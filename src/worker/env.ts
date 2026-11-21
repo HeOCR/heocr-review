@@ -8,6 +8,10 @@ export interface Env {
   /** Set only after lead approval and private eval registration. */
   REGISTERED_CAPTURE_ENABLED?: string;
   REGISTERED_CAPTURE_ROSTER_SHA256?: string;
+  /** Private TRAIN capture storage. Never bind this to the restricted eval bucket. */
+  TRAIN_CAPTURE_MEDIA?: R2Bucket;
+  TRAIN_CAPTURE_ENABLED?: string;
+  TRAIN_CAPTURE_ROSTER_SHA256?: string;
   /** "production" | "development". Only "development" (from .dev.vars) can enable the dev sign-in. */
   ENVIRONMENT: string;
   GOOGLE_CLIENT_ID?: string;
