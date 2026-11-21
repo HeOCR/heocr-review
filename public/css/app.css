@@ -121,6 +121,22 @@ main#app.task .state { padding-inline: 16px; }
 .realism-comment textarea { width: 100%; padding: 8px; border: 1px solid var(--control-line); border-radius: 5px; background: var(--bg); color: var(--text); font: inherit; resize: vertical; }
 .realism-feedback .act { justify-self: start; }
 .realism-status:empty { display: none; }
+.ranking-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ranking-undo { min-height: 44px; }
+.ranking-panel { display: grid; gap: 6px; min-width: 0; }
+.ranking-image { cursor: zoom-in; }
+.ranking-image img { display: block; }
+.ranking-choice { min-height: 44px; padding-inline: 4px; }
+.ranking-keys { color: var(--muted); font-size: .875rem; }
+.ranking-dialog { max-width: min(95vw, 1000px); max-height: 94vh; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
+.ranking-dialog::backdrop { background: rgb(0 0 0 / .65); }
+.ranking-dialog img { display: block; max-width: 100%; height: auto; margin-inline: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .ranking-image:hover img { transform: scale(1.35); }
+}
+@media (hover: none) {
+  .ranking-keys { display: none; }
+}
 @media (max-width: 540px) {
   .realism-zoom-grid { grid-template-columns: 1fr; }
   .realism-feedback .act { justify-self: stretch; }

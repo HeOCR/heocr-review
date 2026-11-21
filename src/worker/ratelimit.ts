@@ -25,6 +25,7 @@ export const LIMITS = {
   writeMinute: { bucket: "write-m", max: 60, windowS: 60 },
   /** Three requests per pair in an admin-only realism session of up to 50 pairs. */
   realismMinute: { bucket: "realism-m", max: 180, windowS: 60 },
+  rankingReadMinute: { bucket: "ranking-read-m", max: 480, windowS: 60 },
   writeDay: { bucket: "write-d", max: 3000, windowS: 86400 },
   /** Draft saves per reviewer (page_review autosave, debounced in the browser): their own bucket, not decisions'. */
   draftMinute: { bucket: "draft-m", max: 120, windowS: 60 },

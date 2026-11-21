@@ -28,6 +28,8 @@ export interface Env {
   CONSENSUS_ENABLED?: string;
   /** Enables the admin-only synthetic realism queue. */
   SYNTH_REALISM_ENABLED?: string;
+  /** Explicit activation of private pairwise realism ranking. */
+  REALISM_RANKING_ENABLED?: string;
   PAGE_SWEEP_ENABLED?: string;
   /** JSON map of private issuer draft batch IDs to ratified projection SHA-256 pins. */
   RATIFIED_ISSUER_SWEEP_PINS?: string;

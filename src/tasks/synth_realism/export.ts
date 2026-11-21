@@ -15,7 +15,7 @@ export interface RealismRow {
 }
 
 /** Two-sided 95% Wilson score interval. */
-function wilson(successes: number, n: number): [number, number] {
+export function wilson(successes: number, n: number): [number, number] {
   const z = 1.959963984540054;
   const p = successes / n;
   const denom = 1 + z * z / n;

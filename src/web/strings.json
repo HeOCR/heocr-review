@@ -1008,6 +1008,34 @@
   "סיימתי — אין עוד שורות חסרות",
   "Done — no more missing lines"
  ],
+ "rr_question": [
+  "איזו תמונה נראית אמיתית יותר?",
+  "Which image looks more real?"
+ ],
+ "rr_choose_left": [
+  "השמאלי אמיתי יותר",
+  "Left looks more real"
+ ],
+ "rr_choose_right": [
+  "הימני אמיתי יותר",
+  "Right looks more real"
+ ],
+ "rr_undo": [
+  "ביטול הבחירה האחרונה",
+  "Undo last choice"
+ ],
+ "rr_keys": [
+  "אפשר לבחור גם עם מקשי החיצים.",
+  "You can also choose with the arrow keys."
+ ],
+ "rr_zoom_left": [
+  "הגדלת התמונה השמאלית",
+  "Zoom left image"
+ ],
+ "rr_zoom_right": [
+  "הגדלת התמונה הימנית",
+  "Zoom right image"
+ ],
  "sr_counter": [
   "זוג {current} מתוך {total}",
   "Pair {current} of {total}"
