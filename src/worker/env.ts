@@ -25,6 +25,8 @@ export interface Env {
   /** Enables the admin-only synthetic realism queue. */
   SYNTH_REALISM_ENABLED?: string;
   PAGE_SWEEP_ENABLED?: string;
+  /** JSON map of private issuer draft batch IDs to ratified projection SHA-256 pins. */
+  RATIFIED_ISSUER_SWEEP_PINS?: string;
   /** Dedicated intake bindings. Production configuration is provisioned only at approved launch. */
   HANDWRITING_INTAKE_ENABLED?: string;
   HANDWRITING_DB?: D1Database;
