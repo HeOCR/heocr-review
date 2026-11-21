@@ -1,6 +1,6 @@
 import { ALLOWED_REFERENCE_PROPOSAL } from "../../src/tasks/restricted_reference";
 import { TRIAGEABLE_SQL } from "../../src/tasks/line_verify/triage";
-import { COMMA_AUDIT, PUNCTUATION_AUDIT, commaSpacingRevision, draftTexts, normalizeDraftCommas, normalizeDraftPunctuation,
+import { COMMA_AUDIT, PUNCTUATION_AUDIT, commaSpacingRevision, draftSpacingEffects, draftTexts,
   punctuationSpacingRevision, type PunctuationMark } from "./draft-comma-spacing";
 import { lit } from "./sql";
 
@@ -36,11 +36,13 @@ interface Update {
   row: CommaDraftRow;
   payload: Record<string, unknown>;
   contentSha256: string;
+  changedByMark: Record<PunctuationMark, number>;
 }
 
+export const newMarkCounts = (): Record<PunctuationMark, number> => ({ ".": 0, ";": 0, ":": 0, "?": 0, "!": 0 });
 const newCounts = () => ({
   changes: 0, changed_lines: 0, reviewed: 0, already_served: 0, registered_plant: 0,
-  other_punctuation: { ".": 0, ";": 0, ":": 0, "?": 0, "!": 0 },
+  other_punctuation: newMarkCounts(), changed_by_mark: newMarkCounts(),
 });
 type Counts = ReturnType<typeof newCounts>;
 
@@ -67,8 +69,10 @@ export function planCommaBackfill(rows: CommaDraftRow[], marks: readonly Punctua
     else if (row.served) counts.already_served++;
     else {
       counts.changes++;
-      counts.changed_lines += texts.filter(text => text !== (marks.length ? normalizeDraftPunctuation(text, marks) : normalizeDraftCommas(text))).length;
-      updates.push({ row, ...correction });
+      const { lines, byMark } = draftSpacingEffects(texts, marks);
+      counts.changed_lines += lines;
+      for (const mark of marks) counts.changed_by_mark[mark] += byMark[mark];
+      updates.push({ row, ...correction, changedByMark: byMark });
     }
   }
   return { queues: Object.fromEntries(queues), updates };

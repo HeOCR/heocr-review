@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget } from "./lib/d1budget";
-import { commaDraftsSql, commaReadbackSql, guardedCommaUpdate, planCommaBackfill, queueKey, type CommaDraftRow } from "./lib/draft-comma-backfill";
+import { commaDraftsSql, commaReadbackSql, guardedCommaUpdate, newMarkCounts, planCommaBackfill, queueKey, type CommaDraftRow } from "./lib/draft-comma-backfill";
 import { punctuationSwitches } from "./lib/draft-comma-spacing";
 import { d1File, d1Query, loadCredentials } from "./lib/wrangler";
 
@@ -40,6 +40,7 @@ async function main() {
   await checkWriteBudget(destination, estimate, {});
   if (!apply) return;
   const actual = Object.fromEntries(Object.keys(queues).map(key => [key, 0]));
+  const actualByMark = Object.fromEntries(Object.keys(queues).map(key => [key, newMarkCounts()]));
   if (updates.length) {
     const dir = mkdtempSync(join(tmpdir(), "heocr-comma-spacing-"));
     const sql = join(dir, "apply.sql");
@@ -61,11 +62,13 @@ async function main() {
         if (row?.content_sha256 === update.contentSha256 && row.original_sha === update.row.content_sha256) {
           const key = queueKey(update.row);
           actual[key] = (actual[key] ?? 0) + 1;
+          for (const mark of marks) actualByMark[key]![mark] += update.changedByMark[mark];
         }
       }
     }
   }
-  console.log(JSON.stringify({ applied: actual, guarded_or_changed: estimate - Object.values(actual).reduce((a, b) => a + b, 0) }));
+  console.log(JSON.stringify({ applied: actual, applied_by_mark: actualByMark,
+    guarded_or_changed: estimate - Object.values(actual).reduce((a, b) => a + b, 0) }));
 }
 
 main().catch(error => {
