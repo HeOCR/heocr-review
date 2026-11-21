@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
 import { importProposalContent } from "./lib/importsql";
+import { punctuationSwitches, type PunctuationMark } from "./lib/draft-comma-spacing";
 import { prepareRestrictedReferenceImport, type RestrictedImport, type RestrictedPins } from "./lib/restricted-reference-import";
 import { assertAnonymousR2Denial, buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia, type ObjectReadback } from "./lib/restricted-reference-stage";
 import { lit } from "./lib/sql";
@@ -95,7 +96,7 @@ function stageMatches(pins: RestrictedPins, row: ReturnType<typeof readback>) {
     row.decisions === 0 && row.bad_media === 0 && row.pins_match === 1;
 }
 
-function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<typeof prepareRestrictedMedia>>): void {
+function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<typeof prepareRestrictedMedia>>, punctuation: readonly PunctuationMark[]): void {
   const batch = lit(stage.pins.batch);
   const [pages, lines, plants] = d1Query<{
     id: string; page_key: string; parent: string; crop_key: string; content_sha: string; rank: number;
@@ -117,7 +118,7 @@ function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<
     !stage.bundle.proposals.every((line) => {
       const stored = lineKeys.get(line.externalId);
       const media = prepared.media.get(line.externalId);
-      const { originalSha, correction } = importProposalContent(stage.bundle.batch.taskType, line, pinnedPlants.has(line.externalId));
+      const { originalSha, correction } = importProposalContent(stage.bundle.batch.taskType, line, pinnedPlants.has(line.externalId), punctuation);
       return stored && stored.parent === line.itemExternalId && stored.rank === line.rank &&
         stored.content_sha === (correction?.contentSha256 ?? originalSha) && stored.page_key === key(media?.page) && stored.crop_key === key(media?.crop);
     }) ||
@@ -132,6 +133,7 @@ function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<
 
 async function main() {
   const { flags } = parseArgs(process.argv.slice(2));
+  const punctuation = punctuationSwitches(flags);
   const destination = target(flags);
   const verification = flags["verify-drafts"] === true;
   if (verification && ["plants", "plants-sha256", "plant-count", "separate-blind-pages"].some((key) => key in flags)) {
@@ -187,7 +189,7 @@ async function main() {
   if (!existing) await checkWriteBudget(destination, estimate, {});
   const prepared = await prepareRestrictedMedia(stage);
   const { objects, anonymousProbes } = await readPrivateObjects(pins.batch, credentials);
-  const sql = buildRestrictedStageSql(stage, prepared, objects, new Date().toISOString());
+  const sql = buildRestrictedStageSql(stage, prepared, objects, new Date().toISOString(), punctuation);
   if (!existing) {
     const dir = mkdtempSync(join(tmpdir(), "restricted-review-stage-"));
     const path = join(dir, "stage.sql");
@@ -201,7 +203,7 @@ async function main() {
     }
   }
   if (!stageMatches(pins, readback(pins))) throw new Error("production closed-stage readback differs; hold activation");
-  verifyStoredRefs(stage, prepared);
+  verifyStoredRefs(stage, prepared, punctuation);
   console.log(JSON.stringify({
     ...counts, private_media_objects_verified: prepared.objects.size, anonymous_probes: anonymousProbes,
     status: "closed", already_staged: !!existing,

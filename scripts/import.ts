@@ -34,6 +34,7 @@ import { parseArgs, str, target } from "./lib/args";
 import { assertOpenSource } from "./lib/guard";
 import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
 import { buildImportSql } from "./lib/importsql";
+import { punctuationSwitches } from "./lib/draft-comma-spacing";
 import {
   bundleImageProblems,
   bundleProblems,
@@ -69,6 +70,7 @@ function mediaBudget(publicDir: string, media: Map<string, ProposalMedia>, itemI
 
 async function main(): Promise<void> {
   const { flags } = parseArgs(process.argv.slice(2));
+  const punctuation = punctuationSwitches(flags);
   const taskId = str(flags, "task");
   if (taskId === PAGE_PASTE_TRAIN) return importPagePasteTrain(ROOT, flags, target(flags));
   if (taskId === SYNTH_REALISM) return importSynthRealism(ROOT, flags, target(flags));
@@ -186,7 +188,7 @@ async function main(): Promise<void> {
   if (missing.length) throw new Error(`no crop or page image for ${missing.length} item(s)/proposal(s): ${missing.slice(0, 5).join(", ")}`);
 
   const importedAt = new Date().toISOString();
-  const sql = buildImportSql(bundle, media, { minReviewers, importedAt, itemImages, after: task.afterImportSql?.(bundle.batch.id, importedAt) });
+  const sql = buildImportSql(bundle, media, { minReviewers, importedAt, itemImages, punctuation, after: task.afterImportSql?.(bundle.batch.id, importedAt) });
   mkdirSync(join(ROOT, ".import"), { recursive: true });
   const sqlPath = join(ROOT, ".import", `${safeSegment(bundle.batch.id)}.sql`);
   writeFileSync(sqlPath, sql);

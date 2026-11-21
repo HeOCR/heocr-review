@@ -1,6 +1,7 @@
 import { ALLOWED_REFERENCE_PROPOSAL } from "../../src/tasks/restricted_reference";
 import { TRIAGEABLE_SQL } from "../../src/tasks/line_verify/triage";
-import { COMMA_AUDIT, commaSpacingRevision, draftTexts, normalizeDraftCommas } from "./draft-comma-spacing";
+import { COMMA_AUDIT, PUNCTUATION_AUDIT, commaSpacingRevision, draftTexts, normalizeDraftCommas, normalizeDraftPunctuation,
+  punctuationSpacingRevision, type PunctuationMark } from "./draft-comma-spacing";
 import { lit } from "./sql";
 
 const decided = "EXISTS (SELECT 1 FROM decisions WHERE proposal_id=p.id)";
@@ -43,7 +44,7 @@ const newCounts = () => ({
 });
 type Counts = ReturnType<typeof newCounts>;
 
-export function planCommaBackfill(rows: CommaDraftRow[]) {
+export function planCommaBackfill(rows: CommaDraftRow[], marks: readonly PunctuationMark[] = []) {
   const queues = new Map<string, Counts>();
   const updates: Update[] = [];
   for (const row of rows) {
@@ -58,14 +59,15 @@ export function planCommaBackfill(rows: CommaDraftRow[]) {
         for (const mark of marks) counts.other_punctuation[mark]++;
       }
     }
-    const correction = commaSpacingRevision(row.task_type, payload, row.content_sha256);
+    const correction = marks.length ? punctuationSpacingRevision(row.task_type, payload, row.content_sha256, marks) :
+      commaSpacingRevision(row.task_type, payload, row.content_sha256);
     if (!correction) continue;
     if (row.reviewed) counts.reviewed++;
     else if (row.planted) counts.registered_plant++;
     else if (row.served) counts.already_served++;
     else {
       counts.changes++;
-      counts.changed_lines += texts.filter(text => text !== normalizeDraftCommas(text)).length;
+      counts.changed_lines += texts.filter(text => text !== (marks.length ? normalizeDraftPunctuation(text, marks) : normalizeDraftCommas(text))).length;
       updates.push({ row, ...correction });
     }
   }
@@ -81,6 +83,6 @@ export function guardedCommaUpdate({ row, payload, contentSha256 }: Update): str
       AND NOT (${decided} OR ${edited} OR ${assigned} OR ${planted});`;
 }
 
-export const commaReadbackSql = (ids: number[]) => `SELECT id, content_sha256,
-  json_extract(payload_json,'$.${COMMA_AUDIT}.content_sha256') original_sha
+export const commaReadbackSql = (ids: number[], punctuation = false) => `SELECT id, content_sha256,
+  json_extract(payload_json,'$.${punctuation ? PUNCTUATION_AUDIT + "[#-1]" : COMMA_AUDIT}.content_sha256') original_sha
   FROM proposals WHERE id IN (${ids.join(",")})`;

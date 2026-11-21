@@ -18,6 +18,7 @@ import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget } from "./lib/d1budget";
 import { sha256File } from "./lib/media";
 import { planPrefillSwap, type LiveProposal } from "./lib/prefill";
+import { punctuationSwitches } from "./lib/draft-comma-spacing";
 import { inline, lit } from "./lib/sql";
 import { d1File, d1Query } from "./lib/wrangler";
 
@@ -29,6 +30,7 @@ export const LIVE_SQL = `SELECT p.id, p.external_id, p.payload_json, p.content_s
 
 async function main(): Promise<void> {
   const { flags } = parseArgs(process.argv.slice(2));
+  const punctuation = punctuationSwitches(flags);
   const t = target(flags);
   const batchId = str(flags, "batch");
   const bundlePath = resolve(str(flags, "bundle"));
@@ -41,7 +43,7 @@ async function main(): Promise<void> {
   if (planted!.n > 0) throw new Error(`batch ${batchId} has ${planted!.n} plants: a swap would void them; refused`);
   const live = d1Query<LiveProposal>(t, inline(LIVE_SQL, batchId))[0] ?? [];
   if (!live.length) throw new Error(`batch ${batchId} has no proposals on ${t}`);
-  const plan = planPrefillSwap(JSON.parse(readFileSync(bundlePath, "utf8")), batchId, live);
+  const plan = planPrefillSwap(JSON.parse(readFileSync(bundlePath, "utf8")), batchId, live, punctuation);
   const counts = {
     batch: batchId,
     bundle_sha256: got,

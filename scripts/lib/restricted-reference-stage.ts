@@ -4,6 +4,7 @@ import type { Box } from "../../src/shared/media";
 import type { ImportProposal } from "../../src/tasks/import";
 import type { ProposalMedia, StoredImage } from "../../src/tasks/types";
 import { buildImportStatements } from "./importsql";
+import type { PunctuationMark } from "./draft-comma-spacing";
 import { LINE_CROP_MAX_WIDTH, lineCropRect } from "./media";
 import { digest, type RestrictedImport } from "./restricted-reference-import";
 import { lit } from "./sql";
@@ -95,7 +96,8 @@ export async function prepareRestrictedMedia(
 type RestrictedMedia = Awaited<ReturnType<typeof prepareRestrictedMedia>>;
 
 /** Compare single-part R2 ETags and byte lengths to the locally SHA-addressed objects. */
-export function buildRestrictedStageSql(stage: RestrictedImport, prepared: RestrictedMedia, readback: Iterable<ObjectReadback>, now: string): string {
+export function buildRestrictedStageSql(stage: RestrictedImport, prepared: RestrictedMedia, readback: Iterable<ObjectReadback>, now: string,
+  punctuation: readonly PunctuationMark[] = []): string {
   const { bundle, pins } = stage;
   const live = new Map<string, ObjectReadback>();
   for (const row of readback) {
@@ -124,6 +126,7 @@ export function buildRestrictedStageSql(stage: RestrictedImport, prepared: Restr
   statements.push(...buildImportStatements(bundle, prepared.media, {
     minReviewers: 1, importedAt: now, itemImages: prepared.itemImages,
     planted: new Set(stage.plants.rows.map(row => row.item_id)),
+    punctuation,
   }).slice(1));
   statements.push(`INSERT INTO restricted_reference_pages (batch_id, item_id, first_allowed, blind_allowed)
     SELECT batch_id, id, 1, 0 FROM items WHERE batch_id=${b};`);
