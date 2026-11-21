@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { sha256Hex } from "../../src/shared/sha256";
 import { DRAFT_VERIFICATION } from "../../src/tasks/restricted_reference";
 import { handle } from "../../src/worker/index";
@@ -15,6 +15,8 @@ const key = `${"a".repeat(64)}.jpg`;
 const image = { ref: { source: "r2", key }, width: 1200, height: 1800, box: [0.1, 0.2, 0.9, 0.3] };
 const images = JSON.stringify({ crop: image, page: image });
 const confirm = { answer: "complete" };
+const proposalMedia = (id: number, kind: "crop" | "page") => `/api/restricted-media/v1/proposals/${id}/${kind}`;
+const pageMedia = (batch: string, id: number) => `/api/restricted-media/v1/batches/${batch}/pages/${id}`;
 
 async function fixtureUsers() {
   async function user(name: string) {
@@ -82,24 +84,24 @@ it("serves protected draft decisions directly and requires explicit checks after
   for (const [cookie, origin, status] of [
     ["", host, 401], [admin.cookie, host, 404], [volunteer.cookie, host, 404], [owner.cookie, alternate, 404],
   ] as const) {
-    const read = await req("GET", `${first}/image/page`, cookie, origin);
+    const read = await req("GET", proposalMedia(front.id, "page"), cookie, origin);
     expect(read.status).toBe(status);
     expect(read.headers.get("cache-control")).toBe("no-store");
     expect((await req("GET", `${queue}/next`, cookie, origin)).status).toBe(status);
     expect((await req("POST", `${page}/check`, cookie, origin, confirm)).status).toBe(status);
   }
   expect((await req("GET", exportPath, admin.cookie)).status).toBe(404);
-  expect((await req("GET", `${first}/image/page`)).status).toBe(200);
+  expect((await req("GET", proposalMedia(front.id, "page"))).status).toBe(200);
   expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
     proposal: { id: front.id, options: [{ value: "exact" }, { value: "edited" }], view: {
       draftVerification: true, candidate: "טיוטה", runs: [{ attention: true, text: "טיוטה" }],
-      page: { url: `${first}/image/page` },
+      page: { url: proposalMedia(front.id, "page") },
     } }, progress: { total: 4, covered: 0 }, prefetch: [],
   });
   expect((await req("POST", `${first}/decision`, owner.cookie, host, { value: "different" })).status).toBe(400);
   expect((await req("POST", `${first}/decision`, owner.cookie, host, { value: "exact" })).status).toBe(200);
   expect((await req("POST", `${page}/check`, owner.cookie, host, confirm)).status).toBe(409);
-  expect((await req("GET", `${page}/image`)).status).toBe(404);
+  expect((await req("GET", pageMedia(batch, front.item_id))).status).toBe(404);
   expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({ proposal: { id: second.id } });
   expect((await req("POST", `${other}/skip`)).status).toBe(200);
   expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
@@ -108,10 +110,10 @@ it("serves protected draft decisions directly and requires explicit checks after
   expect((await req("POST", `${queue}/skips/clear`)).status).toBe(200);
   expect((await req("POST", `${other}/decision`, owner.cookie, host, { value: "edited", text: "שורה מתוקנת" })).status).toBe(200);
   expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
-    proposal: null, page: { itemId: front.item_id, mode: "check", image: { url: `${page}/image` } }, progress: { covered: 2 },
+    proposal: null, page: { itemId: front.item_id, mode: "check", image: { url: pageMedia(batch, front.item_id) } }, progress: { covered: 2 },
   });
-  expect((await req("GET", `${page}/image`, admin.cookie)).status).toBe(404);
-  expect((await req("GET", `${page}/image`)).status).toBe(200);
+  expect((await req("GET", pageMedia(batch, front.item_id), admin.cookie)).status).toBe(404);
+  expect((await req("GET", pageMedia(batch, front.item_id))).status).toBe(200);
   expect((await req("POST", `${page}/check`, owner.cookie, host, confirm)).status).toBe(200);
   expect((await req("POST", `${secondPage}/check`, owner.cookie, host, { answer: "missing_lines" })).status).toBe(200);
   expect(await (await req("GET", `${queue}/next`)).json()).toMatchObject({
@@ -163,10 +165,10 @@ it("fails closed on listings, deep links, all writes, media, exports and alterna
     expect(res.status).toBe(cookie ? 200 : 401);
     expect(await res.text()).not.toContain(title);
     for (const [method, path, body] of [
-      ["GET", `${queue}/next`], ["GET", deep], ["GET", `${deep}/image/crop`], ["GET", `${deep}/image/page`],
+      ["GET", `${queue}/next`], ["GET", deep], ["GET", proposalMedia(front.id, "crop")], ["GET", proposalMedia(front.id, "page")],
       ["POST", `${deep}/decision`, { value: "correct" }], ["POST", `${deep}/skip`], ["PUT", `${deep}/draft`, {}],
       ["DELETE", `${deep}/draft`], ["POST", `${queue}/skips/clear`], ["POST", `${checks}/check`, confirm],
-      ["GET", `${checks}/image`], ["POST", `${checks}/lines`, {}], ["POST", `${checks}/done`],
+      ["GET", pageMedia(batch, front.item_id)], ["POST", `${checks}/lines`, {}], ["POST", `${checks}/done`],
       ["DELETE", `${queue}/added-lines/pl-1234567812345678`],
     ] as const) {
       const response = await req(method, path, cookie, origin, body);
@@ -185,14 +187,17 @@ it("fails closed on listings, deep links, all writes, media, exports and alterna
     const detail = await req("GET", deep + mode);
     expect(detail.headers.get("cache-control")).toBe("no-store");
     expect(await detail.json()).toMatchObject({ proposal: { view: { candidate: "בדיקה", runs: [],
-      crop: { url: `${deep}/image/crop` }, page: { url: `${deep}/image/page` } } } });
+      crop: { url: proposalMedia(front.id, "crop") }, page: { url: proposalMedia(front.id, "page") } } } });
   }
   expect((await req("POST", `${deep}/decision`, owner.cookie, host, { value: "exact" })).status).toBe(409);
-  const media = await req("GET", `${deep}/image/crop`);
+  const media = await req("GET", proposalMedia(front.id, "crop"));
   expect(media.status).toBe(200);
   expect(media.headers.get("cache-control")).toBe("private, no-store");
+  expect(media.headers.get("cdn-cache-control")).toBe("no-store");
+  expect(media.headers.get("cloudflare-cdn-cache-control")).toBe("no-store");
+  expect(media.headers.has("etag")).toBe(false);
   expect(new TextDecoder().decode(await media.arrayBuffer())).toBe("fake jpeg");
-  expect((await req("GET", `/api/proposals/${outside.id}/image/page`)).status).toBe(404);
+  expect((await req("GET", proposalMedia(outside.id, "page"))).status).toBe(404);
   expect((await req("GET", `/api/proposals/${outside.id}`)).status).toBe(404);
   expect((await req("POST", `${queue}/pages/${outside.item_id}/check`, owner.cookie, host, confirm)).status).toBe(404);
   expect(await (await req("GET", expiry)).text()).not.toContain(outside.external_id);
@@ -210,6 +215,46 @@ it("fails closed on listings, deep links, all writes, media, exports and alterna
     }
   }
   expect(await (await req("GET", "/media/some-public-fixture/page.jpg")).text()).toBe("static fixture");
+});
+
+it("denies retired URLs before reading assets, the database or the bucket", async () => {
+  const { owner } = await fixtureUsers();
+  const assets = vi.fn(() => new Response("cached fixture", { headers: { etag: '"old"' } }));
+  const prepare = vi.fn();
+  const get = vi.fn();
+  const bindings = {
+    ...env,
+    ASSETS: { fetch: assets }, DB: { prepare }, RESTRICTED_REFERENCE_MEDIA: { get },
+  } as unknown as Env;
+  for (const origin of [host, alternate]) {
+    for (const path of [
+      "/media/private-ref-fixture/page.jpg",
+      "/Media/private-ref-fixture/page.jpg",
+      "/%6dedia/private-ref-fixture/page.jpg",
+      "/media/private-ref-fixture/page.jpg?ignored=1",
+      "/api/proposals/12/image/crop",
+      "/api/proposals/12/image/page",
+      "/api/batches/private-ref-fixture/pages/34/image",
+      "/%61pi/restricted-media/v1/proposals/12/page",
+      "/api/restricted-media/v0/proposals/12/page",
+    ]) {
+      for (const method of ["GET", "HEAD"]) {
+        const res = await handle(new Request(origin + path, {
+          method, headers: { cookie: owner.cookie, "if-none-match": '"old"' },
+        }), bindings, exec);
+        expect(res.status, `${method} ${origin}${path}`).toBe(404);
+        expect(res.headers.get("cache-control")).toBe("no-store");
+        expect(res.headers.has("location")).toBe(false);
+        expect(res.headers.has("etag")).toBe(false);
+      }
+    }
+  }
+  expect(assets).not.toHaveBeenCalled();
+  expect(prepare).not.toHaveBeenCalled();
+  expect(get).not.toHaveBeenCalled();
+  const publicAsset = await handle(new Request(`${host}/media/public-fixture/page.jpg`), bindings, exec);
+  expect(await publicAsset.text()).toBe("cached fixture");
+  expect(assets).toHaveBeenCalledTimes(1);
 });
 
 it("keeps protected blind pages gated and closes first-pass reads, images, drafts and exports during the blind pass", async () => {
@@ -232,27 +277,27 @@ it("keeps protected blind pages gated and closes first-pass reads, images, draft
   await env.RESTRICTED_REFERENCE_MEDIA!.put(`${batch}/${key}`, "fake scan");
 
   expect((await req("GET", pass)).status).toBe(409);
-  expect((await req("GET", `${pass}/image/page`)).status).toBe(409);
+  expect((await req("GET", proposalMedia(blind.id, "page"))).status).toBe(409);
   expect((await req("POST", `${pass}/decision`, owner.cookie, host, { value: "confirm", text: "{}" })).status).toBe(409);
-  expect((await req("GET", `${first}/image/page`)).status).toBe(200);
+  expect((await req("GET", proposalMedia(anchor.id, "page"))).status).toBe(200);
   const prior = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
   await env.DB.prepare(`INSERT INTO decisions (id,proposal_id,reviewer_id,value,text,proposal_sha256,terms_version,created_at,decided_on)
       SELECT 'fixture-first', ?1, id, 'confirm', '{"page_action":"confirm","lines":[]}', ?2, terms_version, ?3, substr(?3,1,10)
       FROM reviewers WHERE id=?4`).bind(anchor.id, anchor.content_sha256, prior, owner.id).run();
   expect((await req("GET", pass, admin.cookie)).status).toBe(404);
-  expect((await req("GET", `${pass}/image/page`, owner.cookie, alternate)).status).toBe(404);
-  expect((await req("GET", `${pass}/image/page`)).status).toBe(200);
+  expect((await req("GET", proposalMedia(blind.id, "page"), owner.cookie, alternate)).status).toBe(404);
+  expect((await req("GET", proposalMedia(blind.id, "page"))).status).toBe(200);
   expect(await (await req("GET", `/api/batches/${batch}/next`)).json()).toMatchObject({ proposal: { id: blind.id, mine: null }, prefetch: [] });
   expect((await req("GET", first)).status).toBe(409);
-  expect((await req("GET", `${first}/image/page`)).status).toBe(409);
+  expect((await req("GET", proposalMedia(anchor.id, "page"))).status).toBe(409);
   expect((await req("PUT", `${first}/draft`, owner.cookie, host, {})).status).toBe(409);
   expect((await req("GET", `/api/admin/batches/${batch}/export`)).status).toBe(409);
   await env.DB.prepare("UPDATE restricted_reference_pages SET first_allowed=0 WHERE batch_id=?1").bind(batch).run();
   expect((await req("GET", first)).status).toBe(404);
-  expect((await req("GET", `${pass}/image/page`)).status).toBe(200);
+  expect((await req("GET", proposalMedia(blind.id, "page"))).status).toBe(200);
   await env.DB.prepare("UPDATE restricted_reference_pages SET blind_allowed=0 WHERE batch_id=?1").bind(batch).run();
   expect((await req("GET", pass)).status).toBe(404);
-  expect((await req("GET", `${pass}/image/page`)).status).toBe(404);
+  expect((await req("GET", proposalMedia(blind.id, "page"))).status).toBe(404);
 });
 
 it("serves a completeness-only page only with pinned coverage and requires a real check and recorded additions", async () => {
@@ -261,7 +306,7 @@ it("serves a completeness-only page only with pinned coverage and requires a rea
   const page = 6401;
   const queue = `/api/batches/${batch}`;
   const item = `${queue}/pages/${page}`;
-  const img = `${item}/image`;
+  const img = pageMedia(batch, page);
   const now = "2026-11-21T00:00:00.000Z";
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO batches (id,task_type,title,source_json,status,imported_at)

@@ -1,5 +1,5 @@
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
-import { referenceImage } from "./restricted_reference";
+import { referenceImage, RESTRICTED_MEDIA_PATH } from "./restricted_reference";
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
 import { imageUrl } from "../shared/media";
@@ -293,8 +293,8 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
   const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
   const rawView = type.toView(batch.restrictedReference ? {
     ...p, media: {
-      crop: referenceImage(p.media.crop, `/api/proposals/${p.id}/image/crop`),
-      page: referenceImage(p.media.page, `/api/proposals/${p.id}/image/page`),
+      crop: referenceImage(p.media.crop, `${RESTRICTED_MEDIA_PATH}/proposals/${p.id}/crop`),
+      page: referenceImage(p.media.page, `${RESTRICTED_MEDIA_PATH}/proposals/${p.id}/page`),
     },
   } : p);
   const masked = batch.restrictedReference ? !mine : triage;
