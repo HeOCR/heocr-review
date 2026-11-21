@@ -26,7 +26,14 @@
     // Public OAuth client id (not a secret); set by scripts/deploy.ts from ~/.config/heocr/cloudflare.env.
     "GOOGLE_CLIENT_ID": ""
   },
-  // Secrets (wrangler secret put): SESSION_SECRET, REVIEWER_ID_SECRET, ADMIN_REVIEWER_IDS.
+  // Secrets are read by scripts/deploy.ts from the private Worker secrets file.
+  // SESSION_SECRET, REVIEWER_ID_SECRET, ADMIN_REVIEWER_IDS, RESTRICTED_REFERENCE_REVIEWER_ID.
+  "r2_buckets": [
+    {
+      "binding": "RESTRICTED_REFERENCE_MEDIA",
+      "bucket_name": "heocr-review-protected"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
