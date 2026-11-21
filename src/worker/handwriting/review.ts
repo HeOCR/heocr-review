@@ -52,11 +52,14 @@ const hasWork = `((?=1 AND ${n}<2) OR (?=1 AND ${n}=2))`;
 async function findLine(c: Intake, id: string, lineId?: string, allowOwn = false) {
   const access = await reader(c, id);
   const own = "EXISTS(SELECT 1 FROM hw_reads WHERE line=l.id AND reviewer=?)";
+  const resume = !lineId && access.adjudicator;
+  const pending = `${unresolved} AND EXISTS(SELECT 1 FROM hw_reads WHERE line=l.id AND reviewer=? AND pass=3)`;
+  const extra = allowOwn ? ` OR ${own}` : resume ? ` OR (${pending})` : "";
   const sql = `SELECT l.*,${n} AS n FROM hw_active_lines l WHERE l.writer_account<>?
-    AND ((${unresolved} AND NOT ${own} AND ${hasWork})${allowOwn ? ` OR ${own}` : ""})
-    ${lineId ? "AND l.id=?" : ""} ORDER BY l.version,l.position`;
+    AND ((${unresolved} AND NOT ${own} AND ${hasWork})${extra})
+    ${lineId ? "AND l.id=?" : ""} ORDER BY n DESC,l.version,l.position`;
   const args: (string | number)[] = [access.account, id, Number(access.reader), Number(access.adjudicator)];
-  if (allowOwn) args.push(id);
+  if (allowOwn || resume) args.push(id);
   if (lineId) args.push(lineId);
   const { results } = await c.db.prepare(sql).bind(...args).all<Line>();
   for (const row of results) if (!await withdrawn(c, row.page)) return row;

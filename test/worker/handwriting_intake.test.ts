@@ -218,6 +218,7 @@ it("isolates blind reads and adjudication, exports only cleared crops, and makes
   expect((await f.route(adjudicate, f.third)).status).toBe(404);
   expect(await next(f.third)).toEqual({ ...line, input: "", own: null });
   await json(read(line.id, f.third, "ניסוי 3"), 201);
+  expect(await next(f.third)).toEqual({ ...line, own: { raw: "ניסוי 3", issue: "none" } });
   expect((await f.route(adjudicate, f.first)).status).toBe(404);
   expect(await json(f.route(adjudicate, f.third))).toEqual({ reads: [
     { text: "ניסוי 1", issue: "none" }, { text: "ניסוי 2", issue: "none" }, { text: "ניסוי 3", issue: "none" },

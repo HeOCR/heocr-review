@@ -45,8 +45,18 @@ async function next(){
   try{
     task=(await request('/review/next')).task;
     if(!task){out.textContent='אין משימות זמינות / No items available.';return;}
-    screen.hidden=false;image.src=task.image;form.reset();form.hidden=false;
+    screen.hidden=false;image.src=task.image;form.reset();
+    if(task.own)await showAdjudication();else form.hidden=false;
   }catch{failure()}
+}
+async function showAdjudication(){
+  const r=await fetch(api+'/review/'+task.id+'/adjudicate');
+  if(r.status===404)return false;
+  if(!r.ok)throw Error();
+  const details=await r.json();
+  text('#reads',details.reads.map(x=>x.issue+': '+x.text).join('\\n'));
+  adjudication.hidden=false;
+  return true;
 }
 const consent=document.querySelector('#agreement');
 async function showAgreement(){
@@ -68,12 +78,7 @@ form.addEventListener('submit',async e=>{
   try {
     await send('/review/'+task.id,{text:document.querySelector('#transcription').value,issue:document.querySelector('#issue').value});
     form.hidden=true;
-    const r=await fetch(api+'/review/'+task.id+'/adjudicate');
-    if(r.ok){
-      const details=await r.json();
-      text('#reads',details.reads.map(x=>x.issue+': '+x.text).join('\\n'));
-      adjudication.hidden=false;
-    } else await next();
+    if(!await showAdjudication())await next();
   }catch{failure()}
 });
 adjudication.addEventListener('submit',async e=>{
