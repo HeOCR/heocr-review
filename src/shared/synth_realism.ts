@@ -5,6 +5,8 @@ export const TAGS = [
 ] as const;
 export type RealismTag = (typeof TAGS)[number];
 export type Side = 0 | 1;
+export const RANKING_TIE = 2;
+export type RankingChoice = Side | typeof RANKING_TIE;
 
 export interface RealismTrial {
   id: string;

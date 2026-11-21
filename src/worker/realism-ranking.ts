@@ -1,4 +1,4 @@
-import type { RankingPair, RankingQueue, Side } from "../shared/synth_realism";
+import { RANKING_TIE, type RankingPair, type RankingQueue, type Side } from "../shared/synth_realism";
 import { RANKING_EXPORT_FILE, RANKING_EXPORT_SQL, rankingExport, type RankingRow } from "../tasks/synth_realism/ranking-export";
 import type { BatchRecord } from "../tasks/types";
 import { HttpError, json } from "./http";
@@ -49,24 +49,25 @@ function version(value: unknown): number {
 export async function rankChoice(db: D1Database, batch: string, reviewer: string, position: number, body: Record<string, unknown>, now: number) {
   const revision = version(body.revision);
   const { choice, latency_ms } = body;
-  if ((choice !== 0 && choice !== 1) || typeof latency_ms !== "number" || !Number.isSafeInteger(latency_ms) ||
+  if ((choice !== 0 && choice !== 1 && choice !== RANKING_TIE) || typeof latency_ms !== "number" || !Number.isSafeInteger(latency_ms) ||
     latency_ms < 0 || latency_ms > 86_400_000) throw new HttpError(400, "invalid_decision");
   const swapped = await rankingSwap(batch, reviewer, position);
+  const tieAvailable = choice === RANKING_TIE || body.tie_available === true ? 1 : 0;
   // The prefix and revision predicates are in the write, so a retry or stale tab cannot answer a different pair.
-  await db.prepare(`INSERT INTO synth_ranking_answers (batch_id,reviewer_id,position,revision,choice,swapped,latency_ms,chosen_at)
-    SELECT ?1,?2,?3,?4+1,?5,?6,?7,?8
+  await db.prepare(`INSERT INTO synth_ranking_answers (batch_id,reviewer_id,position,revision,choice,swapped,latency_ms,chosen_at,tie_available)
+    SELECT ?1,?2,?3,?4+1,?5,?6,?7,?8,?9
     WHERE ?3=(${completedSql})+1 AND ?4=COALESCE((${revisionSql} ?3),0)
       AND EXISTS (SELECT 1 FROM synth_ranking_pairs WHERE batch_id=?1 AND position=?3)
       AND EXISTS (SELECT 1 FROM batches WHERE id=?1 AND status='open')
     ON CONFLICT(batch_id,reviewer_id,position) DO UPDATE SET revision=excluded.revision, choice=excluded.choice,
-      latency_ms=excluded.latency_ms, chosen_at=excluded.chosen_at, swapped=excluded.swapped`)
-    .bind(batch, reviewer, position, revision, choice, swapped, latency_ms, now).run();
+      latency_ms=excluded.latency_ms, chosen_at=excluded.chosen_at, swapped=excluded.swapped, tie_available=excluded.tie_available`)
+    .bind(batch, reviewer, position, revision, choice, swapped, latency_ms, now, tieAvailable).run();
   return rankingState(db, batch, reviewer);
 }
 
 export async function rankUndo(db: D1Database, batch: string, reviewer: string, position: number, body: Record<string, unknown>) {
   const revision = version(body.revision);
-  await db.prepare(`UPDATE synth_ranking_answers SET revision=revision+1, choice=NULL, latency_ms=NULL, chosen_at=NULL
+  await db.prepare(`UPDATE synth_ranking_answers SET revision=revision+1, choice=NULL, latency_ms=NULL, chosen_at=NULL, tie_available=0
     WHERE batch_id=?1 AND reviewer_id=?2 AND position=?3 AND revision=?4 AND choice IS NOT NULL
       AND ?3=(${completedSql})
       AND EXISTS (SELECT 1 FROM batches WHERE id=?1 AND status='open')`)

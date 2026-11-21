@@ -1,9 +1,9 @@
-import type { Side } from "../../shared/synth_realism";
+import { RANKING_TIE, type RankingChoice, type Side } from "../../shared/synth_realism";
 
 export const RANKING_EXPORT_FILE = "realism_ranking_cc0.json";
 export const RANKING_EXPORT_SCHEMA = "realism_ranking_contributions.v1";
 export const RANKING_EXPORT_SQL = `SELECT p.pair_id, p.item_a, p.arm_a, p.item_b, p.arm_b,
-  a.reviewer_id AS reviewer, a.swapped, a.choice, a.latency_ms, a.chosen_at
+  a.reviewer_id AS reviewer, a.swapped, a.choice, a.latency_ms, a.chosen_at, a.tie_available
   FROM synth_ranking_answers a JOIN synth_ranking_pairs p ON p.batch_id=a.batch_id AND p.position=a.position
   WHERE a.batch_id=?1 AND a.choice IS NOT NULL ORDER BY a.reviewer_id, a.position`;
 
@@ -15,7 +15,8 @@ export interface RankingRow {
   arm_b: string | null;
   reviewer: string;
   swapped: Side;
-  choice: Side;
+  choice: RankingChoice;
+  tie_available: 0 | 1;
   latency_ms: number;
   chosen_at: number;
 }
@@ -29,11 +30,12 @@ export function rankingExport(batchId: string, rows: RankingRow[], exportedAt: s
       const [leftItem, rightItem] = row.swapped ? [row.item_b, row.item_a] : [row.item_a, row.item_b];
       const [leftArm, rightArm] = row.swapped ? [row.arm_b, row.arm_a] : [row.arm_a, row.arm_b];
       const control = leftArm !== null && rightArm !== null ? "standard" : leftArm === rightArm ? "real_real" : "real_synth";
-      const choice = row.choice === 0 ? "left" : "right";
+      const choice = row.choice === RANKING_TIE ? "tie" : row.choice === 0 ? "left" : "right";
       return {
         pair_id: row.pair_id, left_item_id: leftItem, right_item_id: rightItem, left_arm_id: leftArm, right_arm_id: rightArm,
-        choice, reviewer: row.reviewer, latency_ms: row.latency_ms, chosen_at: new Date(row.chosen_at).toISOString(),
-        control, correct: control === "real_synth" ? (row.choice === 0 ? leftArm : rightArm) === null : null,
+        choice, tie_available: row.tie_available === 1, reviewer: row.reviewer,
+        latency_ms: row.latency_ms, chosen_at: new Date(row.chosen_at).toISOString(),
+        control, correct: control === "real_synth" && choice !== "tie" ? (choice === "left" ? leftArm : rightArm) === null : null,
       };
     }),
   };
