@@ -72,7 +72,7 @@ it("pins real controls to TRAIN and allows separate comparison components", () =
 
 const rank = (id: string, a: string | null, b: string | null, choice: RankingRow["choice"], tie_available: 0 | 1 = 1): RankingRow => ({
   pair_id: id, item_a: "img-1", arm_a: a, item_b: "img-2", arm_b: b, reviewer: "rv_fixture",
-  swapped: 0, choice, tie_available, latency_ms: 36, chosen_at: 1,
+  swapped: 0, mapping_version: 1, choice, tie_available, latency_ms: 36, chosen_at: 1,
 });
 
 it("fits Davidson separately and counts ties by unordered arm pair and by control kind", () => {

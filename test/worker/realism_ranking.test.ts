@@ -92,13 +92,30 @@ it("writes the first valid choice once, supports atomic undo and exports the dis
     modality_by_arm: { "arm-alpha": "scan", "arm-beta": "scan" },
     decisions: [
       { control: "standard", reviewer: f.id, chosen_at: expect.any(String), latency_ms: 70, tie_available: false,
-        pair_id: "secret-pair-1", left_item_id: leftOfOne === "img-a" ? "item-a" : "item-b", choice: "right", correct: null },
+        pair_id: "secret-pair-1", left_item_id: leftOfOne === "img-a" ? "item-a" : "item-b", choice: "right", correct: null,
+        mapping_version: 1, winner_item_id: leftOfOne === "img-a" ? "item-b" : "item-a" },
       { control: "real_synth", right_item_id: rightOfTwo === "img-b" ? "item-b" : "item-a", choice: "right", correct: rightOfTwo === "img-b" },
       { control: "real_real", correct: null, choice: "left" },
     ],
   });
   expect((await f.undo(3, 1)).completed).toBe(2);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM synth_ranking_answers WHERE choice IS NOT NULL").first("n")).toBe(2);
+});
+
+it("uses the image measured on the physical left when a client presents the opposite asset order", async () => {
+  const f = await fixture();
+  const pair = (await f.state(f.request(base + "/next"))).current!;
+  const originalRight = new TextDecoder().decode(await (await f.request(pair.images[1])).arrayBuffer());
+  const url = base + "/pairs/1/choice";
+  const payload = { revision: 0, choice: 0, latency_ms: 10, mapping_version: 2 };
+  expect((await f.request(url, { body: payload })).status).toBe(400);
+  expect((await f.request(url, { body: { ...payload, left_asset: base + "/pairs/2/image/1" } })).status).toBe(400);
+  expect((await f.request(url, { body: { ...payload, left_asset: pair.images[1] } })).status).toBe(200);
+  const data = await (await f.request(exportPath)).json<{ files: Record<string, unknown> }>();
+  const visible = originalRight === "img-a" ? "item-a" : "item-b";
+  expect(data.files["realism_ranking_cc0.json"]).toMatchObject({
+    decisions: [{ left_item_id: visible, winner_item_id: visible, choice: "left", mapping_version: 2 }],
+  });
 });
 
 it("saves ties as completed choices, exports all three tie types, and undoes a tie safely", async () => {

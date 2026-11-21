@@ -44,9 +44,11 @@ Each modality in the session has one connected graph of synthetic cross-arm comp
 
 For an existing ranking session, migration 0021 copies the answer rows to widen the choice constraint. Budget for both copying and replacing the current answer rows. Verify the existing choices, timestamps and undo revisions against the private snapshot. The existing roster stays in service.
 
+Migration 0022 adds `mapping_version`. Version 1 retains the logical pair order stored by older clients. Version 2 records the display order based on the left image's rendered position. The default legacy grid matched the stored order in coordinate tests. A forced mirror reversed keyboard winners and left/right labels. Legacy rows do not record viewport coordinates, so preserve their stored order unless independent evidence identifies an inverted cohort.
+
 ## Private export and fit
 
-The allowlisted admin export returns `realism_ranking_cc0.json` with pairs, a `left`, `right` or `tie` outcome, whether the tie option was available, displayed item and arm IDs, verified arm modalities, decision time and reviewer pseudonym. CC0 applies to reviewer contributions. Keep the export private. The local CLI export also writes this file in mode 0600. Production uses the authenticated admin export.
+The allowlisted admin export returns `realism_ranking_cc0.json` with pairs, a `left`, `right` or `tie` outcome, `winner_item_id` (null for ties), `mapping_version`, whether the tie option was available, displayed item and arm IDs, verified arm modalities, decision time and reviewer pseudonym. CC0 applies to reviewer contributions. Keep the export private. The local CLI export also writes this file in mode 0600. Production uses the authenticated admin export.
 
 Run `npx tsx scripts/fit-realism-ranking.ts --input <private-export> --out <private-report>`. The report uses [Davidson](https://doi.org/10.1080/01621459.1970.10481082) for components with ties and Bradley–Terry for components with only decisive choices. The log-strength and Davidson log tie parameter use centered Gaussian priors of standard deviation 2. Approximate 95% Laplace intervals are conditional on this roster and treat comparisons as independent. Repeated images or decisions by a single reviewer can limit generalization. Each comparison component has a separate scale labelled with its modality. The fitter rejects mixed-modality data and exports lacking the arm modality map.
 
