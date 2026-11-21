@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { fitRanking } from "../../scripts/lib/fit-realism-ranking";
-import { parseRankingManifest } from "../../src/tasks/synth_realism/ranking";
+import { parseRankingManifest, validateRankingModalities } from "../../src/tasks/synth_realism/ranking";
 import { rankingExport, type RankingRow } from "../../src/tasks/synth_realism/ranking-export";
 
 const pin = (c: string) => c.repeat(64);
@@ -18,6 +18,33 @@ const manifest = {
   ],
   pairs: [{ pair_id: "pair-1", item_a: "synth-a", item_b: "synth-b" }, { pair_id: "pair-2", item_a: "synth-b", item_b: "real-a" }],
 };
+
+it("requires one connected graph per used modality and verifies matched controls against the pinned sidecar", () => {
+  const parsed = parseRankingManifest({
+    ...manifest,
+    images: [...manifest.images,
+      { item_id: "synth-c", arm_id: "c", path: "images/d.jpg", sha256: pin("e") },
+      { item_id: "synth-d", arm_id: "d", path: "images/e.jpg", sha256: pin("f") }],
+    pairs: [...manifest.pairs, { pair_id: "phone", item_a: "synth-c", item_b: "synth-d" }],
+  }, clearance);
+  const sha = pin("1");
+  const sidecar = {
+    schema: "realism_ranking_modalities.v1", manifest_sha256: sha,
+    items: { "synth-a": "scan", "synth-b": "scan", "real-a": "scan", "synth-c": "phone", "synth-d": "phone" },
+  };
+  const check = (items: Record<string, string>) => validateRankingModalities(parsed, sha, { ...sidecar, items });
+  expect(check(sidecar.items)).toEqual({
+    armModalities: { a: "scan", b: "scan", c: "phone", d: "phone" },
+    counts: [{ modality: "scan", arms: 2, pairs: 2, standard: 1 }, { modality: "phone", arms: 2, pairs: 1, standard: 1 }],
+  });
+  expect(() => check({ ...sidecar.items, "synth-d": "scan" })).toThrow("mixes scan and phone");
+  expect(() => check({ ...sidecar.items, "real-a": "phone" })).toThrow("mixes scan and phone");
+  expect(() => check({ ...sidecar.items, "synth-c": "scan", "synth-d": "scan" })).toThrow("one connected synthetic graph");
+  expect(() => validateRankingModalities(parsed, pin("2"), sidecar)).toThrow("manifest pin");
+  expect(() => validateRankingModalities({
+    ...parsed, images: parsed.images.map(image => image.item_id === "synth-d" ? { ...image, arm_id: "b" } : image),
+  }, sha, sidecar)).toThrow("arm spans multiple modalities");
+});
 
 it("pins real controls to TRAIN and allows separate comparison components", () => {
   expect(parseRankingManifest(manifest, clearance)).toEqual(manifest);
@@ -49,8 +76,10 @@ const rank = (id: string, a: string | null, b: string | null, choice: 0 | 1): Ra
 it("fits regularized Bradley–Terry intervals under separation and reports controls independently", () => {
   const standard = Array.from({ length: 12 }, (_, i) => rank(`std-${i}`, "a", "b", 0));
   const rows = [...standard, rank("c-1", null, "b", 0), rank("c-2", null, "a", 1), rank("c-3", null, null, 1)];
-  const fit = (observations: RankingRow[]) => fitRanking(rankingExport("fixture", observations, new Date(0).toISOString(), true));
+  const fit = (observations: RankingRow[]) => fitRanking(rankingExport("fixture", observations, new Date(0).toISOString(), true,
+    { a: "scan", b: "scan", c: "phone", d: "phone" }));
   const report = fit(rows);
+  expect(report.cross_component_ranks_identifiable).toBe(false); // No phone answers yet.
   expect(report.components).toEqual(fit(standard).components);
   expect(report.standard_pairs).toBe(12);
   expect(report.controls).toMatchObject({ real_synth: { answered: 2, correct: 1, accuracy: 0.5 },
@@ -70,5 +99,9 @@ it("fits regularized Bradley–Terry intervals under separation and reports cont
     expect(flipped[i]!.laplace_95[0]).toBeCloseTo(arm.laplace_95[0]!, 10);
     expect(flipped[i]!.laplace_95[1]).toBeCloseTo(arm.laplace_95[1]!, 10);
   }
-  expect(fit([...rows, rank("island", "c", "d", 1)])).toMatchObject({ cross_component_ranks_identifiable: false });
+  expect(fit([...rows, rank("phone", "c", "d", 1)])).toMatchObject({
+    cross_component_ranks_identifiable: false, components: [{ modality: "scan", comparisons: 12 }, { modality: "phone", comparisons: 1 }],
+  });
+  expect(() => fit([...rows, rank("mixed", "a", "c", 1)])).toThrow("mixed-modality comparison");
+  expect(() => fitRanking(rankingExport("fixture", rows, new Date(0).toISOString(), true, undefined))).toThrow("pinned modality map");
 });

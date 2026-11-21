@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RANKING_LABEL, SYNTH_REALISM } from "../src/shared/synth_realism";
-import { parseRankingManifest, RANKING_SCHEMA } from "../src/tasks/synth_realism/ranking";
+import { parseRankingManifest, RANKING_SCHEMA, validateRankingModalities } from "../src/tasks/synth_realism/ranking";
 import { isSha } from "../src/tasks/synth_realism/schema";
 import { parseArgs, str, target } from "./lib/args";
 import { assertOpenSource } from "./lib/guard";
@@ -22,15 +22,19 @@ async function main() {
   const bundle = openPath(str(flags, "bundle"));
   assertOpenSource(bundle);
   const rawManifest = readJson(join(bundle, "manifest.json"));
+  const rawModalities = readJson(join(bundle, "modalities.json"));
   const rawClearance = readJson(str(flags, "clearance"));
   const manifestPin = str(flags, "manifest-sha256");
+  const modalitiesPin = str(flags, "modalities-sha256");
   const clearancePin = str(flags, "clearance-sha256");
-  if (!isSha(manifestPin) || !isSha(clearancePin) || rawManifest.hash !== manifestPin || rawClearance.hash !== clearancePin) {
+  if (!isSha(manifestPin) || !isSha(modalitiesPin) || !isSha(clearancePin) ||
+    rawManifest.hash !== manifestPin || rawModalities.hash !== modalitiesPin || rawClearance.hash !== clearancePin) {
     throw new Error("ranking inputs do not match the pinned SHA-256 values");
   }
   const manifestJson = JSON.parse(rawManifest.bytes.toString("utf8"));
   const clearance = JSON.parse(rawClearance.bytes.toString("utf8"));
   const manifest = parseRankingManifest(manifestJson, clearance);
+  const modalities = validateRankingModalities(manifest, manifestPin, JSON.parse(rawModalities.bytes.toString("utf8")));
   if ((manifestJson.fixture === true) !== fixture || (clearance.fixture === true) !== fixture) {
     throw new Error("ranking inputs and fixture flag disagree");
   }
@@ -70,6 +74,7 @@ async function main() {
     }
     await budget(deployment, estimatedWrites);
     const source = lit(JSON.stringify({ schema: RANKING_SCHEMA, realism_mode: "ranking", manifest_sha256: manifestPin,
+      modalities_sha256: modalitiesPin, ranking_arm_modalities: modalities.armModalities,
       clearance_sha256: clearancePin, fixture }));
     const stage = `INSERT INTO batches (id, task_type, title, source_json, status, imported_at)
       VALUES (${batch}, ${lit(SYNTH_REALISM)}, ${lit(RANKING_LABEL.he)}, ${source}, 'closed', ${lit(new Date().toISOString())});`;
@@ -82,19 +87,22 @@ async function main() {
     } finally {
       rmSync(folder, { recursive: true });
     }
-    const stored = d1Query<{ status: string; pin: string; pairs: number; missing: number }>(deployment,
+    const stored = d1Query<{ status: string; pin: string; modalities_pin: string; pairs: number; missing: number }>(deployment,
       `SELECT status, json_extract(source_json,'$.manifest_sha256') AS pin,
+        json_extract(source_json,'$.modalities_sha256') AS modalities_pin,
         (SELECT COUNT(*) FROM synth_ranking_pairs WHERE batch_id=${batch}) AS pairs,
         (SELECT COUNT(*) FROM synth_ranking_pairs p WHERE p.batch_id=${batch} AND
           (NOT EXISTS (SELECT 1 FROM synth_realism_assets WHERE sha256=p.image_a AND part=0)
            OR NOT EXISTS (SELECT 1 FROM synth_realism_assets WHERE sha256=p.image_b AND part=0))) AS missing
           FROM batches WHERE id=${batch}`)[0]?.[0];
-    if (!stored || stored.status !== "closed" || stored.pin !== manifestPin || stored.pairs !== pairs.length || stored.missing) {
+    if (!stored || stored.status !== "closed" || stored.pin !== manifestPin || stored.modalities_pin !== modalitiesPin ||
+      stored.pairs !== pairs.length || stored.missing) {
       throw new Error("closed ranking batch failed readback");
     }
   }
-  console.log(JSON.stringify({ batch: manifest.batch_id, manifest_sha256: manifestPin, clearance_sha256: clearancePin,
-    pairs: pairs.length, controls, assets: assets.size, status: dry ? "dry-run" : "closed", estimatedWrites }, null, 2));
+  console.log(JSON.stringify({ batch: manifest.batch_id, manifest_sha256: manifestPin, modalities_sha256: modalitiesPin,
+    clearance_sha256: clearancePin, pairs: pairs.length, modalities: modalities.counts, controls, assets: assets.size,
+    status: dry ? "dry-run" : "closed", estimatedWrites }, null, 2));
 }
 
 await main();

@@ -21,7 +21,7 @@ async function fixture() {
     env.DB.prepare("DELETE FROM synth_ranking_pairs"),
     env.DB.prepare("DELETE FROM batches WHERE id=?1").bind(batch),
     env.DB.prepare("INSERT INTO batches (id,task_type,title,source_json,imported_at) VALUES (?1,'synth_realism','Fixture',?2,'2026-11-21')")
-      .bind(batch, '{"realism_mode":"ranking","fixture":true}'),
+      .bind(batch, '{"realism_mode":"ranking","fixture":true,"ranking_arm_modalities":{"arm-alpha":"scan","arm-beta":"scan"}}'),
     ...Array.from({ length: 3 }, (_, i) => env.DB.prepare(`INSERT INTO synth_ranking_pairs
       (batch_id,position,pair_id,item_a,arm_a,image_a,item_b,arm_b,image_b) VALUES (?1,?2,?3,'item-a',?4,'img-a','item-b',?5,'img-b')`)
       .bind(batch, i + 1, `secret-pair-${i + 1}`, i === 2 ? null : "arm-alpha", i === 0 ? "arm-beta" : null)),
@@ -89,6 +89,7 @@ it("writes the first valid choice once, supports atomic undo and exports the dis
   const data = await (await f.request(exportPath)).json<{ files: Record<string, unknown> }>();
   expect(data.files["realism_ranking_cc0.json"]).toMatchObject({
     license: "CC0-1.0", purpose: "generator_development_only",
+    modality_by_arm: { "arm-alpha": "scan", "arm-beta": "scan" },
     decisions: [
       { control: "standard", reviewer: f.id, chosen_at: expect.any(String), latency_ms: 70,
         pair_id: "secret-pair-1", left_item_id: leftOfOne === "img-a" ? "item-a" : "item-b", choice: "right", correct: null },

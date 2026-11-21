@@ -91,7 +91,8 @@ export async function rankingAdmin(db: D1Database, batch: BatchRecord, now: numb
   return {
     counts, reviewers: [...perReviewer].map(([id, decisions]) => ({ id, decisions })),
     export: () => json({ counts, problems: [], files: {
-      [RANKING_EXPORT_FILE]: rankingExport(batch.id, results, new Date(now).toISOString(), batch.source.fixture === true),
+      [RANKING_EXPORT_FILE]: rankingExport(batch.id, results, new Date(now).toISOString(), batch.source.fixture === true,
+        batch.source.ranking_arm_modalities),
     } }),
   };
 }
