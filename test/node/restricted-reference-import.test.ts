@@ -226,3 +226,68 @@ it("stages flagged drafts before lower-ranked unflagged drafts, with the same pr
     db.close();
   }
 });
+
+function registeredCaptureFixture() {
+  const batchId = "private-ref-capture-fixture";
+  const page = { ...projection().pages[0]!, page_id: "FIXTURE-01",
+    issuer_pdf_sha256: "a".repeat(64), issuer_page_index: 5, image_role: "issuer_render" };
+  const input = {
+    ...projection(), batch_id: batchId, draft_basis: "issuer_text_layer", blind_second_pass: [], pages: [page],
+    items: projection().items.map((item, i) => ({ ...item, page_id: page.page_id, kind: "verify",
+      candidate_text: "טיוטה", candidate_provenance: "reference_draft", uncertain: i === 0 })),
+  };
+  const roster = { schema: "registered_phone_captures.v1", registration: "fixture-register", pack_sha256: "b".repeat(64),
+    batch_id: batchId, pages: [{ page_id: page.page_id, issuer_pdf_sha256: page.issuer_pdf_sha256,
+      issuer_page_index: page.issuer_page_index, issue_key: page.book_group,
+      slots: [{ slot: "A", condition: "even" }, { slot: "B", condition: "angled" }] }] };
+  const rosterBytes = encode(roster);
+  const pins = { batch: batchId, itemsSha: digest(encode(input)), plantsSha: null, pages: 1, lines: 2, plants: 0,
+    separateBlindPages: 0, captureRosterSha: digest(rosterBytes) };
+  return { input, roster, rosterBytes, pins };
+}
+
+it("stages the separately registered issuer pages as a closed, private draft queue", async () => {
+  const { input, rosterBytes, pins } = registeredCaptureFixture();
+  const stage = await prepareRestrictedReferenceImport(encode(input), null, root, pins, rosterBytes);
+  expect(stage.bundle.batch.source).toMatchObject({ restricted_review: "draft_verification", capture_roster_sha256: pins.captureRosterSha });
+  expect(stage.bundle.items[0]!.payload).toMatchObject({
+    issuer_pdf_sha256: input.pages[0]!.issuer_pdf_sha256, issuer_page_index: 5, image_role: "issuer_render",
+  });
+  expect(stage.bundle.proposals[0]!.payload.uncertain).toBe(true);
+  const media = await prepareRestrictedMedia(stage);
+  const db = new DatabaseSync(":memory:");
+  try {
+    for (const file of readdirSync("migrations").sort()) db.exec(readFileSync(join("migrations", file), "utf8"));
+    db.exec(buildRestrictedStageSql(stage, media, media.objects.values(), new Date().toISOString()));
+    expect(db.prepare(`SELECT status, restricted_reference,
+      json_extract(source_json, '$.capture_roster_sha256') AS pin FROM batches`).get())
+      .toEqual({ status: "closed", restricted_reference: 1, pin: pins.captureRosterSha });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM proposals WHERE json_extract(media_json, '$.page.ref.source')='r2'").get()).toEqual({ n: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM restricted_reference_pages WHERE blind_allowed=0 AND first_allowed=1").get()).toEqual({ n: 1 });
+  } finally { db.close(); }
+});
+
+it("refuses missing or incorrect capture roster pins and malformed roster slots", async () => {
+  const { input, roster, rosterBytes, pins } = registeredCaptureFixture();
+  await expect(prepareRestrictedReferenceImport(encode(input), null, root, pins)).rejects.toThrow(/capture queue needs/);
+  await expect(prepareRestrictedReferenceImport(encode(input), null, root, { ...pins, captureRosterSha: "0".repeat(64) }, rosterBytes))
+    .rejects.toThrow(/capture roster checksum/);
+  roster.pages[0]!.slots[1]!.slot = "C";
+  const malformed = encode(roster);
+  await expect(prepareRestrictedReferenceImport(encode(input), null, root, { ...pins, captureRosterSha: digest(malformed) }, malformed))
+    .rejects.toThrow(/invalid registered capture roster/);
+});
+
+it.each([
+  ["page identifier", "page_id", "FIXTURE-02"],
+  ["issuer source digest", "issuer_pdf_sha256", "c".repeat(64)],
+  ["issuer page index", "issuer_page_index", 6],
+  ["issue group", "book_group", "different"],
+  ["phone pixels", "image_role", "phone_original"],
+])("refuses mismatched %s even with a freshly pinned projection", async (_, field, value) => {
+  const { input, rosterBytes, pins } = registeredCaptureFixture();
+  Object.assign(input.pages[0]!, { [field]: value });
+  const bytes = encode(input);
+  await expect(prepareRestrictedReferenceImport(bytes, null, root, { ...pins, itemsSha: digest(bytes) }, rosterBytes))
+    .rejects.toThrow(/issuer locators/);
+});

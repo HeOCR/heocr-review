@@ -86,6 +86,7 @@ function readback(pins: RestrictedPins) {
     ) AS bad_media,
     (json_extract(b.source_json,'$.items_sha256')=${lit(pins.itemsSha)}
       AND json_extract(b.source_json,'$.plants_sha256') IS ${lit(pins.plantsSha)}
+      AND json_extract(b.source_json,'$.capture_roster_sha256') IS ${lit(pins.captureRosterSha ?? null)}
       AND json_extract(b.source_json,'$.restricted_review') IS ${lit(pins.plantsSha === null ? DRAFT_VERIFICATION : null)}) AS pins_match
     FROM batches b LEFT JOIN batch_settings s ON s.batch_id=b.id WHERE b.id=${lit(pins.batch)};`)[0]?.[0];
 }
@@ -100,8 +101,10 @@ function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<
   const batch = lit(stage.pins.batch);
   const [pages, lines, plants] = d1Query<{
     id: string; page_key: string; parent: string; crop_key: string; content_sha: string; rank: number;
-    candidate_sha: string; planted_sha: string; plant_type: string; position: string;
-  }>("production", `SELECT i.external_id AS id, json_extract(i.payload_json,'$.page_image.ref.key') AS page_key
+    candidate_sha: string; planted_sha: string; plant_type: string; position: string; issuer_sha: string; issuer_page: number; image_role: string;
+  }>("production", `SELECT i.external_id AS id, json_extract(i.payload_json,'$.page_image.ref.key') AS page_key,
+      json_extract(i.payload_json,'$.issuer_pdf_sha256') AS issuer_sha,
+      json_extract(i.payload_json,'$.issuer_page_index') AS issuer_page, json_extract(i.payload_json,'$.image_role') AS image_role
     FROM items i JOIN restricted_reference_pages r ON r.item_id=i.id AND r.batch_id=i.batch_id WHERE i.batch_id=${batch};
     SELECT p.external_id AS id, i.external_id AS parent, p.content_sha256 AS content_sha, p.rank,
       json_extract(p.media_json,'$.page.ref.key') AS page_key, json_extract(p.media_json,'$.crop.ref.key') AS crop_key
@@ -114,7 +117,12 @@ function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<
   const pinnedPlants = new Set(stage.plants.rows.map(row => row.item_id));
   const key = (image: StoredImage | undefined) => image?.ref.source === "r2" ? image.ref.key : undefined;
   if (pageKeys.size !== stage.pins.pages || lineKeys.size !== stage.pins.lines || plantKeys.size !== stage.pins.plants ||
-    !stage.bundle.items.every((page) => pageKeys.get(page.externalId)?.page_key === key(prepared.itemImages.get(page.externalId))) ||
+    !stage.bundle.items.every((page) => {
+      const stored = pageKeys.get(page.externalId);
+      return stored && stored.page_key === key(prepared.itemImages.get(page.externalId)) &&
+        (!stage.pins.captureRosterSha || (stored.issuer_sha === page.payload.issuer_pdf_sha256 &&
+          stored.issuer_page === page.payload.issuer_page_index && stored.image_role === "issuer_render"));
+    }) ||
     !stage.bundle.proposals.every((line) => {
       const stored = lineKeys.get(line.externalId);
       const media = prepared.media.get(line.externalId);
@@ -146,19 +154,23 @@ async function main() {
     if (!Number.isSafeInteger(value) || value < 0) throw new Error(`--${key} must be a nonnegative integer`);
     return value;
   };
+  if (("capture-roster" in flags) !== ("capture-roster-sha256" in flags)) throw new Error("capture roster path and SHA-256 are required together");
+  const captureRosterPath = "capture-roster" in flags ? str(flags, "capture-roster") : null;
   const pins: RestrictedPins = {
     batch: str(flags, "batch"),
     itemsSha: str(flags, "items-sha256"), plantsSha: verification ? null : str(flags, "plants-sha256"),
     pages: count("pages"), lines: count("lines"), plants: verification ? 0 : count("plant-count"),
     separateBlindPages: verification ? 0 : count("separate-blind-pages"),
+    ...(captureRosterPath ? { captureRosterSha: str(flags, "capture-roster-sha256") } : {}),
   };
   const root = realpathSync(str(flags, "media-root"));
   const stage = await prepareRestrictedReferenceImport(
     readFileSync(str(flags, "items")), verification ? null : readFileSync(str(flags, "plants")), root, pins,
+    captureRosterPath ? readFileSync(captureRosterPath) : null,
   );
   const counts = {
     pages: pins.pages, lines: pins.lines, separate_blind_page_checks: stage.separateBlindPages, items_sha256: pins.itemsSha,
-    plants_sha256: pins.plantsSha, planted: stage.plants.rows.length, skipped_decided: 0, refused: 0,
+    plants_sha256: pins.plantsSha, ...(pins.captureRosterSha ? { capture_roster_sha256: pins.captureRosterSha } : {}), planted: stage.plants.rows.length, skipped_decided: 0, refused: 0,
   };
 
   if (destination === "local") {

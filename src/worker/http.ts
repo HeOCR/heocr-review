@@ -49,6 +49,30 @@ export async function readJson(request: Request, maxBytes = MAX_BODY_BYTES): Pro
   return value as Record<string, unknown>;
 }
 
+export async function readBytes(request: Request, limit: number, invalidCode: string) {
+  if (Number(request.headers.get("content-length")) > limit) throw new HttpError(413, "body_too_large");
+  const reader = request.body?.getReader();
+  if (!reader) throw new HttpError(400, invalidCode);
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.length;
+      if (size > limit) {
+        await reader.cancel();
+        throw new HttpError(413, "body_too_large");
+      }
+      chunks.push(next.value);
+    }
+  } finally { reader.releaseLock(); }
+  const all = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { all.set(chunk, offset); offset += chunk.length; }
+  return all;
+}
+
 /** Writes must come from this origin (SameSite=Lax already keeps the cookie off cross-site POSTs). */
 export function assertSameOrigin(request: Request): void {
   const origin = request.headers.get("origin");

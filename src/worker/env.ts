@@ -5,6 +5,9 @@ export interface Env {
   RESTRICTED_REFERENCE_MEDIA?: R2Bucket;
   /** Secret: exact reviewer pseudonym for the private reference queue. */
   RESTRICTED_REFERENCE_REVIEWER_ID?: string;
+  /** Set only after lead approval and private eval registration. */
+  REGISTERED_CAPTURE_ENABLED?: string;
+  REGISTERED_CAPTURE_ROSTER_SHA256?: string;
   /** "production" | "development". Only "development" (from .dev.vars) can enable the dev sign-in. */
   ENVIRONMENT: string;
   GOOGLE_CLIENT_ID?: string;

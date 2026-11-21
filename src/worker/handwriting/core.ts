@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { hex, hmacSha256, randomId } from "../crypto";
-import { HttpError } from "../http";
+import { HttpError, readBytes } from "../http";
 import { getReviewer } from "../db";
 import { readSession } from "../auth/session";
 
@@ -117,33 +117,9 @@ export async function slotFor(c: Intake, slug: string) {
   return { slot, packet };
 }
 
-export async function readBytes(request: Request, limit: number) {
-  if (Number(request.headers.get("content-length")) > limit) throw new HttpError(413, "body_too_large");
-  const reader = request.body?.getReader();
-  if (!reader) throw invalid();
-  let size = 0;
-  const chunks: Uint8Array[] = [];
-  try {
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      size += next.value.length;
-      if (size > limit) {
-        await reader.cancel();
-        throw new HttpError(413, "body_too_large");
-      }
-      chunks.push(next.value);
-    }
-  } finally { reader.releaseLock(); }
-  const all = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { all.set(chunk, offset); offset += chunk.length; }
-  return all;
-}
-
 export async function body(c: Intake, limit = 16_384): Promise<Record<string, unknown>> {
   if (!c.request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) throw new HttpError(415, "json_required");
-  const bytes = await readBytes(c.request, limit);
+  const bytes = await readBytes(c.request, limit, "invalid_intake_input");
   let value: unknown;
   try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)); } catch { throw invalid(); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();

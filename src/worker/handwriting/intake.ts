@@ -1,6 +1,6 @@
-import { json } from "../http";
+import { json, readBytes } from "../http";
 import { activePage, activeVersion, body, conflict, digestPattern, erasePrefix, inputId, invalid, isString, keyFor, language,
-  mediaPath, mediaResponse, newId, notFound, privateCode, putMedia, readBytes, sha, slotFor, withdrawalEmail, withdrawn, wording,
+  mediaPath, mediaResponse, newId, notFound, privateCode, putMedia, sha, slotFor, withdrawalEmail, withdrawn, wording,
   type Intake, type Version } from "./core";
 import { imageFrame, MAX_ORIGINAL } from "./image";
 import { linePolygons, polygonBounds } from "../../shared/handwriting-geometry";
@@ -84,7 +84,7 @@ export async function upload(c: Intake) {
       c.request.headers.get("x-intake-wording-version") !== agreement.version ||
       c.request.headers.get("x-intake-wording-sha256") !== agreement.sha256 ||
       c.request.headers.get("x-intake-prompt-sha256") !== page.prompt_hash || packet.sha256 !== page.prompt_hash) throw conflict();
-  const bytes = await readBytes(c.request, MAX_ORIGINAL);
+  const bytes = await readBytes(c.request, MAX_ORIGINAL, "invalid_intake_input");
   const frame = imageFrame(bytes);
   if (!frame || c.request.headers.get("content-type") !== frame.mime) throw invalid();
   const digest = await sha(bytes);
