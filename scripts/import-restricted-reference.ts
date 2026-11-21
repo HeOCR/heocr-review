@@ -5,7 +5,7 @@ import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
 import { contentSha256 } from "./lib/importsql";
 import { prepareRestrictedReferenceImport, type RestrictedImport, type RestrictedPins } from "./lib/restricted-reference-import";
-import { buildRestrictedStageSql, prepareRestrictedMedia, type ObjectReadback } from "./lib/restricted-reference-stage";
+import { buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia, type ObjectReadback } from "./lib/restricted-reference-stage";
 import { lit } from "./lib/sql";
 import { d1File, d1Query, loadCredentials } from "./lib/wrangler";
 import type { StoredImage } from "../src/tasks/types";
@@ -37,15 +37,15 @@ async function readPrivateObjects(batch: string, credentials: Record<string, str
     return envelope;
   }
   const [{ result: managed }, { result: custom }] = await Promise.all([
-    get<{ enabled: boolean }>("/domains/managed"), get<{ domains: unknown[] }>("/domains/custom"),
+    get<{ enabled: boolean; domain: string }>("/domains/managed"), get<{ domains: unknown[] }>("/domains/custom"),
   ]);
-  if (managed?.enabled !== false || !Array.isArray(custom?.domains) || custom.domains.length !== 0) {
+  if (!Array.isArray(custom?.domains) || custom.domains.length !== 0) {
     throw new Error("private R2 public-access settings did not pass");
   }
+  const anonymousUrl = disabledR2FixtureUrl(managed, accessFixture.key);
   const fixture = await request(`/objects/${accessFixture.key}`);
   if (!fixture.ok || await fixture.text() !== accessFixture.text) throw new Error("private R2 access fixture could not be read");
-  const s3 = `https://${account}.r2.cloudflarestorage.com/${bucket}/${accessFixture.key}`;
-  const anonymous = await fetch(s3, { redirect: "error", signal: AbortSignal.timeout(30000) });
+  const anonymous = await fetch(anonymousUrl, { redirect: "error", signal: AbortSignal.timeout(30000) });
   await anonymous.body?.cancel();
   if (anonymous.status !== 403 && anonymous.status !== 404) throw new Error("anonymous R2 access check did not pass");
 

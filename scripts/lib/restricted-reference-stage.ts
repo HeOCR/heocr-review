@@ -14,6 +14,13 @@ export interface ObjectReadback {
   etag: string;
 }
 
+export function disabledR2FixtureUrl(managed: { enabled?: boolean; domain?: string } | null, key: string): URL {
+  if (managed?.enabled !== false || typeof managed.domain !== "string" || !/^[a-z0-9-]+\.r2\.dev$/i.test(managed.domain)) {
+    throw new Error("expected a disabled managed R2 hostname");
+  }
+  return new URL("https://" + managed.domain + "/" + encodeURIComponent(key));
+}
+
 /** Use only the named private object namespace. Images never enter the static tree. */
 export async function prepareRestrictedMedia(
   stage: RestrictedImport,
