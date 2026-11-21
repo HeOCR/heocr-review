@@ -38,9 +38,13 @@ The TRAIN runtime roster is `train_phone_captures.v1` JSON with `pack_sha256`, `
 
 Use filenames `<page_id>-<condition>-<device>.<extension>` with actual device A or B. This intake also supports DNG container detection and uses the same 24 MiB file limit. Each page and condition gets one photo regardless of device. The restricted bucket holds a digest-only scope claim so exact duplicates cannot land in both buckets. During private readback, verify each pictured page against the approved TRAIN source manifest before any training or calibration handoff. Filename and hash checks alone cannot establish the source of a renamed or re-encoded image.
 
-## EXIF reporting
+## Camera metadata and working copies
 
-Turn off camera location tagging before shooting. The originals remain private and preserve exact camera bytes, including any metadata already embedded in them. No EXIF values are extracted into upload receipts or served by the Worker. After closing intake, run `npx tsx scripts/capture-exif-summary.ts <eval|train> <private-bucket-mirror> <roster-sha256>` on a private copy of the corresponding roster, slot receipts and original objects. It verifies the active receipt hashes and outputs only per-roster totals for EXIF presence, unreadable downloads and orientation counts. Unsupported files count as unreadable. Keep the original bytes and per-photo receipts in their respective private stores.
+Ask every photographer to turn off camera location tagging before shooting. Preserve exact camera bytes, including any embedded EXIF. Keep eval originals in restricted storage and TRAIN originals in the private TRAIN store. Any original that still has GPS stays with those restricted originals. Upload receipts and serving routes expose no extracted EXIF. Operators can use a private scratch mirror for hash verification and should remove it after verified staging.
+
+After closing intake, run `npx tsx scripts/capture-exif-summary.ts <eval|train> <private-bucket-mirror> <roster-sha256>` on the matching private roster and active slot receipts and originals. It verifies the active hashes and emits per-roster counts for device models, resolution, compression, EXIF and GPS presence. GPS values are never written. An unreadable image or malformed EXIF can leave GPS presence unknown. Keep per-photo intake and retake logs within the originals store.
+
+Add `--working-copies` to generate oriented PNGs under the same scoped mirror's `working/` prefix. The output contains pixels and hash lineage only. It omits EXIF, XMP and all other ancillary PNG chunks. The wrapper reports counts for any image it could not decode. Unavailable copies remain pending a decoder that can produce metadata-free pixels. Give workers, scorers and reports only the aggregate metadata summary. Use the sanitized copies as image inputs, and keep eval copies restricted and TRAIN copies within the private TRAIN flow.
 
 ## Verify the issuer references
 
