@@ -119,6 +119,7 @@ function fixtureStatements(minReviewers: number): string[] {
 
 export default defineConfig(async () => {
   const migrations = await readD1Migrations("migrations");
+  const intakeMigrations = await readD1Migrations("intake/migrations");
   return {
     test: {
       projects: [
@@ -127,6 +128,8 @@ export default defineConfig(async () => {
             cloudflareTest({
               wrangler: { configPath: "./wrangler.jsonc" },
               miniflare: {
+                d1Databases: { HANDWRITING_DB: "fixture-handwriting" },
+                r2Buckets: { HANDWRITING_MEDIA: "fixture-handwriting-media", HANDWRITING_CONTROL: "fixture-handwriting-control" },
                 bindings: {
                   ENVIRONMENT: "development",
                   DEV_AUTH_BYPASS: "1",
@@ -135,6 +138,7 @@ export default defineConfig(async () => {
                   GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com",
                   ADMIN_REVIEWER_IDS: "",
                   TEST_MIGRATIONS: migrations,
+                  TEST_HANDWRITING_MIGRATIONS: intakeMigrations,
                   TEST_FIXTURE_SQL: fixtureStatements(1),
                   TEST_PAGE_REVIEW_AI_SQL: pageReviewWithAiFlags(1),
                   TEST_SUBSET_SQL: pageReviewSubset(),
