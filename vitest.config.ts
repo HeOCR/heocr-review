@@ -129,7 +129,7 @@ export default defineConfig(async () => {
               wrangler: { configPath: "./wrangler.jsonc" },
               miniflare: {
                 d1Databases: { HANDWRITING_DB: "fixture-handwriting" },
-                r2Buckets: { HANDWRITING_MEDIA: "fixture-handwriting-media", HANDWRITING_CONTROL: "fixture-handwriting-control" },
+                r2Buckets: { HANDWRITING_MEDIA: "fixture-handwriting-media", HANDWRITING_CONTROL: "fixture-handwriting-control", TRAIN_CAPTURE_MEDIA: "fixture-train-captures" },
                 bindings: {
                   ENVIRONMENT: "development",
                   DEV_AUTH_BYPASS: "1",

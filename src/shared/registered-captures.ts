@@ -1,7 +1,10 @@
 export const CAPTURE_BATCH_PREFIX = "private-ref-capture-";
 export const CAPTURE_API = "/api/registered-captures/v1";
 export const CAPTURE_FORM = "/registered-captures";
+export const TRAIN_CAPTURE_API = "/api/registered-captures/train/v1";
+export const TRAIN_CAPTURE_FORM = "/registered-captures/train";
 export const CAPTURE_ROSTER_SCHEMA = "registered_phone_captures.v1";
+export const TRAIN_CAPTURE_ROSTER_SCHEMA = "train_phone_captures.v1";
 export const CAPTURE_DIGEST = /^[a-f0-9]{64}(?![\s\S])/;
 const pageKey = /^[A-Z0-9][A-Z0-9-]{0,79}(?![\s\S])/;
 const batchKey = /^private-ref-capture-[a-z0-9][a-z0-9._-]{0,78}(?![\s\S])/;
@@ -21,6 +24,16 @@ export type CaptureRoster = {
   pack_sha256: string;
   batch_id: string;
   pages: CapturePage[];
+};
+
+const trainSlots = ["FLAT", "OBLIQUE", "DIM"] as const;
+const extraTrainSlot = /^M-[A-Z]+(?![\s\S])/;
+type TrainSlot = { slot: string; condition: string };
+export type TrainCaptureRoster = {
+  schema: typeof TRAIN_CAPTURE_ROSTER_SCHEMA;
+  pack_sha256: string;
+  source_manifest_sha256: string;
+  pages: { page_id: string; slots: TrainSlot[] }[];
 };
 
 const field = (x: unknown, max: number): x is string =>
@@ -67,6 +80,41 @@ export function captureFile(roster: CaptureRoster, filename: string) {
 
 export function captureRoot(sha256: string) {
   return "registered-captures/v1/" + sha256;
+}
+
+/** Training uses a distinct schema and can never become an eval verification roster. */
+export function trainCaptureRoster(value: unknown): TrainCaptureRoster {
+  const roster = value as TrainCaptureRoster | null;
+  const ids = new Set<string>();
+  if (roster?.schema !== TRAIN_CAPTURE_ROSTER_SCHEMA || typeof roster.pack_sha256 !== "string" ||
+    !CAPTURE_DIGEST.test(roster.pack_sha256) || typeof roster.source_manifest_sha256 !== "string" ||
+    !CAPTURE_DIGEST.test(roster.source_manifest_sha256) || !Array.isArray(roster.pages) ||
+    !roster.pages.length || roster.pages.length > 40) throw new Error("invalid training capture roster");
+  for (const page of roster.pages) {
+    if (!page || typeof page.page_id !== "string" || !pageKey.test(page.page_id) || ids.has(page.page_id) ||
+      !Array.isArray(page.slots) || page.slots.length < 3 || page.slots.length > 4 ||
+      !page.slots.every((s, i) => s && field(s.condition, 160) && typeof s.slot === "string" &&
+        (i < trainSlots.length ? s.slot === trainSlots[i] : s.slot.length <= 20 && extraTrainSlot.test(s.slot)))) {
+      throw new Error("invalid training capture page");
+    }
+    ids.add(page.page_id);
+  }
+  return roster;
+}
+
+export function trainCaptureFile(roster: TrainCaptureRoster, filename: string) {
+  if (filename.length > 120) return null;
+  const match = /^([a-z0-9-]+?)-(m-[a-z]+|[a-z]+)-([ab])\.(jpg|jpeg|png|heic|heif|dng)$/i.exec(filename);
+  if (!match || match[0] !== filename) return null;
+  const [, id, slot, , ext] = match;
+  const page = roster.pages.find(p => p.page_id === id!.toUpperCase());
+  const assignment = page?.slots.find(s => s.slot === slot!.toUpperCase());
+  return page && assignment ? { page, assignment,
+    ext: ext!.toLowerCase() as "jpg" | "jpeg" | "png" | "heic" | "heif" | "dng" } : null;
+}
+
+export function trainCaptureRoot(sha256: string) {
+  return "train-phone-captures/v1/" + sha256;
 }
 
 export const captureLogFields = ["phone", "camera_mode", "printer", "paper", "orientation", "angle", "lighting"] as const;

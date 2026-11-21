@@ -1,6 +1,7 @@
 import {
   CAPTURE_API, CAPTURE_DIGEST, CAPTURE_FORM, captureFile, captureLog, captureRoot, captureRoster,
-  type CaptureLog, type CapturePage, type CaptureRoster, type CaptureSlot,
+  TRAIN_CAPTURE_API, TRAIN_CAPTURE_FORM, trainCaptureFile, trainCaptureRoot, trainCaptureRoster,
+  type CaptureLog,
 } from "../shared/registered-captures";
 import { readSession } from "./auth/session";
 import { captureImageType } from "./capture-image";
@@ -12,6 +13,7 @@ import { referenceReviewerAllowed } from "./restricted_reference";
 import { captureForm } from "./registered-capture-form";
 
 const maxCaptureBytes = 24 * 1024 * 1024;
+const pagesPerRequest = 11;
 type Receipt = {
   sha256: string;
   mime: string;
@@ -20,31 +22,47 @@ type Receipt = {
   uploaded_at: string;
   log: CaptureLog;
 };
-type SlotRecord = { page_id: string; slot: CaptureSlot; revisions: Receipt[] };
-type Intake = { bucket: R2Bucket; roster: CaptureRoster; pin: string; root: string };
+type SlotRecord = { page_id: string; slot: string; revisions: Receipt[] };
+type Intake = {
+  bucket: R2Bucket;
+  pages: { page_id: string; slots: { slot: string; condition: string }[] }[];
+  match: (filename: string) => ReturnType<typeof captureFile> | ReturnType<typeof trainCaptureFile>;
+  pin: string;
+  root: string;
+  train: boolean;
+  scopeClaims: R2Bucket;
+};
 
 export function isCapturePath(path: string) {
   return path === CAPTURE_FORM || path.startsWith(CAPTURE_FORM + "/") || path.startsWith("/api/registered-captures/");
 }
 
-async function intake(request: Request, env: Env, now: number): Promise<Intake> {
-  const pin = env.REGISTERED_CAPTURE_ROSTER_SHA256;
-  const bucket = env.RESTRICTED_REFERENCE_MEDIA;
-  if (env.REGISTERED_CAPTURE_ENABLED !== "1" || !pin || !CAPTURE_DIGEST.test(pin) || !bucket) throw new HttpError(404, "not_found");
+async function intake(request: Request, env: Env, now: number, train: boolean): Promise<Intake> {
+  const pin = train ? env.TRAIN_CAPTURE_ROSTER_SHA256 : env.REGISTERED_CAPTURE_ROSTER_SHA256;
+  const scopeClaims = env.RESTRICTED_REFERENCE_MEDIA;
+  const bucket = train ? env.TRAIN_CAPTURE_MEDIA : scopeClaims;
+  const enabled = train ? env.TRAIN_CAPTURE_ENABLED : env.REGISTERED_CAPTURE_ENABLED;
+  if (enabled !== "1" || !pin || !CAPTURE_DIGEST.test(pin) || !bucket || !scopeClaims) throw new HttpError(404, "not_found");
   const id = await readSession(env, request, now);
   if (!id || !referenceReviewerAllowed(env, new URL(request.url), id)) throw new HttpError(404, "not_found");
   const reviewer = await getReviewer(env.DB, id);
   if (!reviewer || reviewer.blocked) throw new HttpError(404, "not_found");
-  const root = captureRoot(pin);
+  const root = train ? trainCaptureRoot(pin) : captureRoot(pin);
   const object = await bucket.get(root + "/roster.json");
   if (!object || object.size > 64 * 1024) throw new HttpError(404, "not_found");
+  if (train && await scopeClaims.head(root + "/roster.json")) throw new HttpError(404, "not_found");
   const bytes = await object.arrayBuffer();
   if (hex(await crypto.subtle.digest("SHA-256", bytes)) !== pin) throw new HttpError(404, "not_found");
-  const roster = captureRoster(JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)));
-  return { bucket, roster, pin, root };
+  const roster: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
+  if (train) {
+    const checked = trainCaptureRoster(roster);
+    return { bucket, pages: checked.pages, match: filename => trainCaptureFile(checked, filename), pin, root, train, scopeClaims };
+  }
+  const checked = captureRoster(roster);
+  return { bucket, pages: checked.pages, match: filename => captureFile(checked, filename), pin, root, train, scopeClaims };
 }
 
-async function readSlot(c: Intake, page: CapturePage, slot: CaptureSlot) {
+async function readSlot(c: Intake, page: Intake["pages"][number], slot: string) {
   const key = c.root + "/slots/" + page.page_id + "/" + slot + ".json";
   const object = await c.bucket.get(key);
   if (object) {
@@ -56,18 +74,25 @@ async function readSlot(c: Intake, page: CapturePage, slot: CaptureSlot) {
   return { key, data: { page_id: page.page_id, slot, revisions: [] as Receipt[] }, etag: null };
 }
 
-async function status(c: Intake) {
+async function status(c: Intake, url: URL) {
+  const cursor = url.searchParams.get("cursor") ?? "0";
+  const start = Number(cursor);
+  if (!/^(0|[1-9][0-9]?)$/.test(cursor) || start % pagesPerRequest || start >= c.pages.length) {
+    throw new HttpError(400, "capture_invalid_cursor");
+  }
   const pages = [];
-  // Sequential per page keeps bucket fan-out bounded even for the full capture roster.
-  for (const page of c.roster.pages) {
+  for (const page of c.pages.slice(start, start + pagesPerRequest)) {
     const slots = await Promise.all(page.slots.map(async assignment => {
       const { data } = await readSlot(c, page, assignment.slot);
       const current = data.revisions.at(-1);
-      return { ...assignment, current: current ? { sha256: current.sha256, filename: current.filename } : null };
+      const stem = page.page_id + "-" + assignment.slot;
+      return { ...assignment, names: c.train ? [stem + "-A", stem + "-B"] : [stem],
+        current: current ? { sha256: current.sha256, filename: current.filename } : null };
     }));
     pages.push({ page_id: page.page_id, slots });
   }
-  return json({ roster_sha256: c.pin, pages });
+  const end = start + pages.length;
+  return json({ roster_sha256: c.pin, pages, next: end < c.pages.length ? end : null });
 }
 
 function captureLogHeader(request: Request, retake: boolean) {
@@ -77,11 +102,24 @@ function captureLogHeader(request: Request, retake: boolean) {
   } catch { return null; }
 }
 
+// Private, digest-only reservation across the two buckets. A rename or concurrent
+// upload cannot cause the same camera bytes to be archived in both scopes.
+async function claimCaptureScope(c: Intake, sha256: string) {
+  const key = "phone-capture-scope/v1/" + sha256;
+  const scope = c.train ? "train" : "eval";
+  const claim = await c.scopeClaims.put(key, "", {
+    onlyIf: { etagDoesNotMatch: "*" }, customMetadata: { scope },
+  });
+  if (!claim && (await c.scopeClaims.head(key))?.customMetadata?.scope !== scope) {
+    throw new HttpError(409, "capture_bytes_already_used");
+  }
+}
+
 async function upload(c: Intake, request: Request, now: number) {
   assertSameOrigin(request);
   if (request.headers.get("x-capture-roster") !== c.pin) throw new HttpError(409, "capture_roster_changed");
   const filename = request.headers.get("x-capture-filename") ?? "";
-  const match = captureFile(c.roster, filename);
+  const match = c.match(filename);
   if (!match) throw new HttpError(400, "capture_filename_unregistered");
   const { page, assignment, ext } = match;
   const { slot } = assignment;
@@ -102,6 +140,7 @@ async function upload(c: Intake, request: Request, now: number) {
   if ((current?.sha256 ?? null) !== replaces || previous.data.revisions.some(r => r.sha256 === sha256)) {
     throw new HttpError(409, "capture_slot_changed");
   }
+  await claimCaptureScope(c, sha256);
   const claim = page.page_id + "/" + slot;
   const key = c.root + "/originals/" + sha256;
   const created = await c.bucket.put(key, bytes, {
@@ -128,10 +167,18 @@ async function upload(c: Intake, request: Request, now: number) {
 export async function registeredCaptures(request: Request, env: Env, path: string) {
   try {
     const now = Date.now();
-    const c = await intake(request, env, now);
-    if (request.method === "GET" && (path === CAPTURE_FORM || path === CAPTURE_FORM + "/")) return captureForm();
-    if (request.method === "GET" && path === CAPTURE_API) return await status(c);
-    if (request.method === "POST" && path === CAPTURE_API + "/upload") return await upload(c, request, now);
+    const train = path === TRAIN_CAPTURE_FORM || path === TRAIN_CAPTURE_FORM + "/" ||
+      path === TRAIN_CAPTURE_API || path === TRAIN_CAPTURE_API + "/upload";
+    const form = train ? TRAIN_CAPTURE_FORM : CAPTURE_FORM;
+    const api = train ? TRAIN_CAPTURE_API : CAPTURE_API;
+    const isForm = request.method === "GET" && (path === form || path === form + "/");
+    const isStatus = request.method === "GET" && path === api;
+    const isUpload = request.method === "POST" && path === api + "/upload";
+    if (!isForm && !isStatus && !isUpload) throw new HttpError(404, "not_found");
+    const c = await intake(request, env, now, train);
+    if (isForm) return captureForm(train);
+    if (isStatus) return await status(c, new URL(request.url));
+    if (isUpload) return await upload(c, request, now);
     throw new HttpError(404, "not_found");
   } catch (error) {
     // Provider errors may include private keys and log fields.

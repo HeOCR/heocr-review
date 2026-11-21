@@ -1,6 +1,6 @@
 # Registered phone captures
 
-Intake and issuer-reference verification share one eval-registered page roster. A capture belongs to a named view of a registered page. The reference queue has one issuer render and one line roster per page, with all phone views mapped to that page. The upload form is disabled in the shipped configuration.
+Eval intake and issuer-reference verification share one registered page roster. A capture belongs to a named view of a registered page. The reference queue has one issuer render and one line roster per page, with all phone views mapped to that page. Training has a separate intake roster and storage. Both upload forms are disabled in the shipped configuration.
 
 ## Eval handoff
 
@@ -25,9 +25,22 @@ With lead authorization and approved interface copy, configure `REGISTERED_CAPTU
 
 Name each original `<page_id>-<slot>.<extension>`. Use original camera files in JPEG, PNG, or still HEIC/HEIF, up to 24 MiB each. On mobile, use a file picker that preserves the renamed original file and its bytes. The upload accepts more than one file and records device, camera mode, printer, paper, orientation, angle and lighting. A retake must name the current capture hash and provide a reason. A duplicate delivery of the current bytes returns the prior receipt. Reusing identical bytes for another slot is refused.
 
+- Before upload, the browser shows a local preview and flags signs of soft focus or clipped coverage. Check text sharpness and all four corners yourself, and remove and retake any unusable photo. For formats the browser cannot preview, inspect the original in the photo app. The receipt displays the SHA-256 of the submitted original bytes.
 - Originals live under `registered-captures/v1/<roster-sha256>/originals/<capture-sha256>`. They are archived unchanged, with no browser download route. Use authorized private bucket access for eval handoff.
 - Each slot record at `registered-captures/v1/<roster-sha256>/slots/<page_id>/<slot>.json` lists the successful revisions and capture log in order. The final revision is the active original. Follow the slot record as the authority. If simultaneous uploads left an unreferenced original, keep it out of the freeze and reconcile it privately.
 - Close intake before freezing by turning off the upload flag and allowing in-flight requests to finish. Keep the roster pin for reference verification. Eval reads back the expected slot records, hashes the raw bytes against their receipts and confirms the photographed page and assigned condition. Check full decode, privacy, framing and the retake log before freezing. HEIC/HEIF format detection during upload is a container check. Any sanitized derivative needs its own hash and lineage to the unchanged original.
+
+## Private TRAIN capture intake
+
+Use a separate private R2 bucket with public development URLs and custom domains disabled. Bind it to `TRAIN_CAPTURE_MEDIA`. After lead approval and approval of the interface copy, set `TRAIN_CAPTURE_ROSTER_SHA256` to the exact private runtime roster hash and `TRAIN_CAPTURE_ENABLED=1`. The form at `/registered-captures/train` uses the same canonical host and reviewer allowlist as eval. Intake fails closed if the TRAIN roster is visible in the restricted eval binding.
+
+The TRAIN runtime roster is `train_phone_captures.v1` JSON with `pack_sha256`, `source_manifest_sha256` and `pages`. Project it from the pinned TRAIN source manifest. Each page has a `page_id` and ordered `slots` with `slot` and `condition`. Each page has `FLAT`, `OBLIQUE` and `DIM`, plus its optional registered `M-…` variant. Stage the roster at `train-phone-captures/v1/<roster-sha256>/roster.json` in the TRAIN bucket. Originals and slot receipts use the same relative layout as eval beneath that prefix.
+
+Use filenames `<page_id>-<condition>-<device>.<extension>` with actual device A or B. This intake also supports DNG container detection and uses the same 24 MiB file limit. Each page and condition gets one photo regardless of device. The restricted bucket holds a digest-only scope claim so exact duplicates cannot land in both buckets. During private readback, verify each pictured page against the approved TRAIN source manifest before any training or calibration handoff. Filename and hash checks alone cannot establish the source of a renamed or re-encoded image.
+
+## EXIF reporting
+
+Turn off camera location tagging before shooting. The originals remain private and preserve exact camera bytes, including any metadata already embedded in them. No EXIF values are extracted into upload receipts or served by the Worker. After closing intake, run `npx tsx scripts/capture-exif-summary.ts <eval|train> <private-bucket-mirror> <roster-sha256>` on a private copy of the corresponding roster, slot receipts and original objects. It verifies the active receipt hashes and outputs only per-roster totals for EXIF presence, unreadable downloads and orientation counts. Unsupported files count as unreadable. Keep the original bytes and per-photo receipts in their respective private stores.
 
 ## Verify the issuer references
 
