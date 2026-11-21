@@ -67,17 +67,6 @@ export function captureRoster(value: unknown): CaptureRoster {
   return roster;
 }
 
-export function captureFile(roster: CaptureRoster, filename: string) {
-  if (filename.length > 100) return null;
-  const normalized = filename.replace(/\.[A-Za-z]+$/u, ext => ext.toLowerCase());
-  const match = /^([A-Z0-9-]+)-([ABC])\.(jpg|jpeg|png|heic|heif)$/u.exec(normalized);
-  if (!match || match[0] !== normalized) return null;
-  const [, id, slot, ext] = match;
-  const page = roster.pages.find(p => p.page_id === id);
-  const assignment = page?.slots.find(s => s.slot === slot);
-  return page && assignment ? { page, assignment, ext: ext as "jpg" | "jpeg" | "png" | "heic" | "heif" } : null;
-}
-
 export function captureRoot(sha256: string) {
   return "registered-captures/v1/" + sha256;
 }
@@ -100,17 +89,6 @@ export function trainCaptureRoster(value: unknown): TrainCaptureRoster {
     ids.add(page.page_id);
   }
   return roster;
-}
-
-export function trainCaptureFile(roster: TrainCaptureRoster, filename: string) {
-  if (filename.length > 120) return null;
-  const match = /^([a-z0-9-]+?)-(m-[a-z]+|[a-z]+)-([ab])\.(jpg|jpeg|png|heic|heif|dng)$/i.exec(filename);
-  if (!match || match[0] !== filename) return null;
-  const [, id, slot, , ext] = match;
-  const page = roster.pages.find(p => p.page_id === id!.toUpperCase());
-  const assignment = page?.slots.find(s => s.slot === slot!.toUpperCase());
-  return page && assignment ? { page, assignment,
-    ext: ext!.toLowerCase() as "jpg" | "jpeg" | "png" | "heic" | "heif" | "dng" } : null;
 }
 
 export function trainCaptureRoot(sha256: string) {

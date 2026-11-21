@@ -18,7 +18,12 @@ const copy = {
   submit: ["העלאה", "Upload"],
   failed: ["ההעלאה לא הושלמה. בדקו את הפרטים או נסו שוב.", "Upload could not be completed. Check the details or retry."],
   received: ["הקובץ נשמר", "File saved"],
-  filename: ["שם הקובץ אינו תואם לשיבוץ ברשימה, או שנבחרו כמה קבצים לאותו שיבוץ.", "The filename does not match a registered slot, or more than one file was selected for that slot."],
+  page: ["עמוד", "Page"],
+  slot: ["שיבוץ", "Slot"],
+  condition: ["תנאי צילום", "Capture condition"],
+  device: ["מכשיר A או B", "Device A or B"],
+  choose: ["בחרו", "Choose"],
+  duplicate: ["בחרו שיבוץ נפרד לכל צילום.", "Choose a separate slot for each photo."],
   checking: ["בודקים את הצילום…", "Checking photo…"],
   inspect: ["בדקו את חדות הטקסט ואת ארבע פינות הדף בתצוגה.", "Check text sharpness and all four page corners in the preview."],
   soft: ["ייתכן שהטקסט מטושטש או שהניגודיות נמוכה. בדקו בהגדלה או צלמו שוב.", "Text may be blurry or low contrast. Inspect it at full size or retake."],
@@ -39,7 +44,7 @@ const common=${JSON.stringify(common)}, perFile=${JSON.stringify(perFile)};
 const form=document.querySelector('form'), files=document.querySelector('#files');
 const list=document.querySelector('#files-to-upload'), status=document.querySelector('#status'), progress=document.querySelector('#progress');
 const button=form.querySelector('button');
-const slots=new Map(), assignments=[];let pin,pending=[];
+const pages=new Map(), assignments=[];let pin,pending=[],sending=false;
 const field=(key,required)=>{
   const el=document.createElement('label');el.textContent=label(key);
   const input=document.createElement('input');input.maxLength=key==='retake'?240:160;input.required=required;input.dir='auto';
@@ -48,9 +53,41 @@ const field=(key,required)=>{
 function update(){
   progress.textContent=label('progress')+' · '+assignments.filter(slot=>slot.current).length+' / '+assignments.length;
 }
+function picker(key){
+  const el=document.createElement('label');el.textContent=label(key);
+  const select=document.createElement('select');select.required=true;select.dir='auto';el.append(select);
+  return {el,select};
+}
+function option(value,text){
+  const el=document.createElement('option');el.value=value;el.textContent=text;return el;
+}
+function selectedSlot(item){
+  return pages.get(item.page.value)?.find(s=>s.slot===item.assignment.value);
+}
+function missing(slot,item){
+  return !slot.current&&!pending.some(other=>other!==item&&!other.done&&selectedSlot(other)===slot);
+}
+function fillSlots(item,value){
+  const slots=pages.get(item.page.value)??[];
+  item.assignment.replaceChildren(option('',label('choose')),
+    ...slots.map(s=>option(s.slot,s.slot+' · '+s.condition+(s.current?' ✓':''))));
+  item.assignment.value=value??slots.find(slot=>missing(slot,item))?.slot??'';
+}
 function refreshButton(){
   const unsaved=pending.filter(item=>!item.done);
-  button.disabled=!unsaved.length||unsaved.some(item=>item.checked.disabled||!item.checked.checked);
+  const used=new Set();let duplicate=false,unready=false;
+  for(const item of unsaved){
+    const slot=selectedSlot(item);
+    const replacing=!!slot?.current;
+    item.retake.el.hidden=!replacing;
+    item.retake.input.required=replacing;
+    if(slot&&used.has(slot))duplicate=true;
+    if(slot)used.add(slot);
+    unready||=!slot||item.checked.disabled||!item.checked.checked||
+      (train&&!item.device.value)||(replacing&&!item.retake.input.value.trim());
+  }
+  if(!form.hidden)status.textContent=duplicate?label('duplicate'):'';
+  button.disabled=sending||!unsaved.length||duplicate||unready;
 }
 async function start(){
   try{
@@ -61,9 +98,10 @@ async function start(){
       const info=await response.json();
       if(pin&&pin!==info.roster_sha256)throw Error();
       pin=info.roster_sha256;
-      for(const page of info.pages)for(const slot of page.slots){
-        assignments.push(slot);
-        for(const stem of slot.names)slots.set(stem,slot);
+      for(const page of info.pages){
+        const slots=page.slots.map(slot=>({...slot,page_id:page.page_id}));
+        pages.set(page.page_id,slots);
+        assignments.push(...slots);
       }
       cursor=info.next;
     }while(cursor!==null);
@@ -110,18 +148,19 @@ async function checkPhoto(item){
 }
 files.addEventListener('change',async()=>{
   const selected=[...files.files];files.value='';
-  list.replaceChildren();status.textContent='';pending=[];const seen=new Set();
+  list.replaceChildren();status.textContent='';pending=[];
   for(const file of selected){
-    const match=/^([A-Za-z0-9-]+)\\.(jpg|jpeg|png|heic|heif|dng)$/i.exec(file.name);
-    const name=match?.[1];
-    const slot=match&&match[0]===file.name&&(train||match[2].toLowerCase()!=='dng')&&slots.get(train?name.toUpperCase():name);
-    if(!slot||seen.has(slot)){status.textContent=label('filename');pending=[];list.replaceChildren();refreshButton();return}
-    seen.add(slot);
+    const next=assignments.find(slot=>missing(slot));
     const box=document.createElement('fieldset'), heading=document.createElement('legend');
-    heading.dir='auto';heading.textContent=file.name+' · '+slot.condition;box.append(heading);
+    heading.dir='auto';heading.textContent=file.name;box.append(heading);
+    const page=picker('page'), assignment=picker(train?'condition':'slot'), device=train?picker('device'):null;
+    page.select.append(option('',label('choose')),...[...pages.keys()].map(id=>option(id,id)));
+    page.select.value=next?.page_id??'';
+    box.append(page.el,assignment.el);
+    if(device){device.select.append(option('',label('choose')),option('A','A'),option('B','B'));box.append(device.el)}
     const inputs={};
     for(const key of perFile){const {el,input}=field(key,true);box.append(el);inputs[key]=input}
-    if(slot.current){const {el,input}=field('retake',false);box.append(el);inputs.retake=input}
+    const retake=field('retake',false);retake.el.hidden=true;box.append(retake.el);
     const canvas=document.createElement('canvas');canvas.hidden=true;canvas.setAttribute('aria-hidden','true');box.append(canvas);
     const check=document.createElement('p');check.setAttribute('role','status');check.textContent=label('checking');box.append(check);
     const confirmation=document.createElement('label'), checked=document.createElement('input');
@@ -129,7 +168,12 @@ files.addEventListener('change',async()=>{
     confirmation.append(checked,' '+label('confirmed'));box.append(confirmation);
     const remove=document.createElement('button');remove.type='button';remove.textContent=label('remove');box.append(remove);
     const note=document.createElement('p');note.setAttribute('role','status');box.append(note);
-    const item={file,slot,inputs,note,check,canvas,checked,remove,done:false};
+    const item={file,page:page.select,assignment:assignment.select,device:device?.select,retake,box,inputs,note,check,canvas,checked,remove,done:false};
+    fillSlots(item,next?.slot);
+    page.select.addEventListener('change',()=>{retake.input.value='';fillSlots(item);refreshButton()});
+    assignment.select.addEventListener('change',()=>{retake.input.value='';refreshButton()});
+    device?.select.addEventListener('change',refreshButton);
+    retake.input.addEventListener('input',refreshButton);
     remove.addEventListener('click',()=>{pending=pending.filter(candidate=>candidate!==item);box.remove();refreshButton()});
     list.append(box);pending.push(item);
   }
@@ -137,7 +181,8 @@ files.addEventListener('change',async()=>{
   for(const item of pending)if(pending.includes(item))await checkPhoto(item);
 });
 form.addEventListener('submit',async event=>{
-  event.preventDefault();button.disabled=true;files.disabled=true;
+  event.preventDefault();if(button.disabled||sending)return;
+  sending=true;button.disabled=true;files.disabled=true;
   const controls=[...form.elements].filter(el=>!el.disabled);
   for(const control of controls)control.disabled=true;
   try{
@@ -145,20 +190,27 @@ form.addEventListener('submit',async event=>{
     for(const item of pending){
       if(item.done)continue;
       const log={...base,...Object.fromEntries(perFile.map(key=>[key,item.inputs[key].value]))};
-      const headers={'x-capture-roster':pin,'x-capture-filename':item.file.name};
-      if(item.slot.current&&item.inputs.retake?.value.trim()){
-        headers['x-capture-replaces']=item.slot.current.sha256;log.retake_reason=item.inputs.retake.value;
+      const slot=selectedSlot(item);
+      const headers={'x-capture-roster':pin,'x-capture-filename':encodeURIComponent(item.file.name),
+        'x-capture-page':slot.page_id,'x-capture-slot':slot.slot};
+      if(train)headers['x-capture-device']=item.device.value;
+      if(slot.current){
+        headers['x-capture-replaces']=slot.current.sha256;log.retake_reason=item.retake.input.value;
       }
       headers['x-capture-log']=encodeURIComponent(JSON.stringify(log));
       try{
         const response=await fetch(api+'/upload',{method:'POST',headers,body:item.file});
         if(!response.ok)throw Error();
-        item.slot.current=await response.json();item.done=true;item.remove.hidden=true;
-        const digest=document.createElement('code');digest.dir='ltr';digest.textContent=item.slot.current.sha256;
+        slot.current=await response.json();item.done=true;item.remove.hidden=true;
+        const digest=document.createElement('code');digest.dir='ltr';digest.textContent=slot.current.sha256;
         item.note.replaceChildren(label('received'),' · ',digest);update();
       }catch{item.note.textContent=label('failed')}
     }
-  }finally{for(const control of controls)control.disabled=false;files.disabled=false;refreshButton()}
+  }finally{
+    for(const control of controls)control.disabled=false;
+    for(const item of pending)if(item.done)item.box.disabled=true;
+    sending=false;files.disabled=false;refreshButton();
+  }
 });
 start();`;
 
@@ -167,9 +219,9 @@ export function captureForm(train: boolean) {
   const fields = common.map(key => `<label for="${key}">${label(key)}<input id="${key}" dir="auto" required maxlength="160"></label>`).join("");
   const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label("title")}</title>
   <style nonce="${nonce}">body{box-sizing:border-box;max-width:46rem;margin:1rem auto;padding:0 1rem;font:1rem/1.5 system-ui;color:#172431}
-  label,fieldset{display:block;margin:.65rem 0}input,button{font:inherit;max-width:100%;padding:.45rem}label input:not([type=checkbox]){display:block}
-  input:not([type=file],[type=checkbox]){box-sizing:border-box;width:100%}legend,code{overflow-wrap:anywhere}button{min-height:44px}
-  canvas{max-width:min(100%,22rem);height:auto;border:1px solid #a8b7c4}p:empty{display:none}</style></head>
+  label,fieldset{display:block;margin:.65rem 0}input,button,select{font:inherit;max-width:100%;padding:.45rem}label input:not([type=checkbox]),select{display:block}
+  input:not([type=file],[type=checkbox]),select{box-sizing:border-box;width:100%}legend,code{overflow-wrap:anywhere}button,select{min-height:44px}
+  canvas{max-width:min(100%,22rem);height:auto;border:1px solid #a8b7c4}p:empty,[hidden]{display:none}</style></head>
   <body><main><h1>${label("title")} · ${label(train ? "train" : "eval")}</h1><p id="progress" dir="auto"></p>
   <form hidden>${fields}<label for="files">${label("files")}<input id="files" type="file" accept=".jpg,.jpeg,.png,.heic,.heif${train ? ",.dng" : ""}" multiple></label>
   <div id="files-to-upload"></div><button disabled>${label("submit")}</button></form><p id="status" role="status"></p></main>

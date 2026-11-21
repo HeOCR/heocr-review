@@ -1,6 +1,6 @@
 import {
-  CAPTURE_API, CAPTURE_DIGEST, CAPTURE_FORM, captureFile, captureLog, captureRoot, captureRoster,
-  TRAIN_CAPTURE_API, TRAIN_CAPTURE_FORM, trainCaptureFile, trainCaptureRoot, trainCaptureRoster,
+  CAPTURE_API, CAPTURE_DIGEST, CAPTURE_FORM, captureLog, captureRoot, captureRoster,
+  TRAIN_CAPTURE_API, TRAIN_CAPTURE_FORM, trainCaptureRoot, trainCaptureRoster,
   type CaptureLog,
 } from "../shared/registered-captures";
 import { readSession } from "./auth/session";
@@ -19,6 +19,7 @@ type Receipt = {
   mime: string;
   bytes: number;
   filename: string;
+  device?: "A" | "B";
   uploaded_at: string;
   log: CaptureLog;
 };
@@ -26,7 +27,6 @@ type SlotRecord = { page_id: string; slot: string; revisions: Receipt[] };
 type Intake = {
   bucket: R2Bucket;
   pages: { page_id: string; slots: { slot: string; condition: string }[] }[];
-  match: (filename: string) => ReturnType<typeof captureFile> | ReturnType<typeof trainCaptureFile>;
   pin: string;
   root: string;
   train: boolean;
@@ -56,10 +56,10 @@ async function intake(request: Request, env: Env, now: number, train: boolean): 
   const roster: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
   if (train) {
     const checked = trainCaptureRoster(roster);
-    return { bucket, pages: checked.pages, match: filename => trainCaptureFile(checked, filename), pin, root, train, scopeClaims };
+    return { bucket, pages: checked.pages, pin, root, train, scopeClaims };
   }
   const checked = captureRoster(roster);
-  return { bucket, pages: checked.pages, match: filename => captureFile(checked, filename), pin, root, train, scopeClaims };
+  return { bucket, pages: checked.pages, pin, root, train, scopeClaims };
 }
 
 async function readSlot(c: Intake, page: Intake["pages"][number], slot: string) {
@@ -85,8 +85,7 @@ async function status(c: Intake, url: URL) {
     const slots = await Promise.all(page.slots.map(async assignment => {
       const { data } = await readSlot(c, page, assignment.slot);
       const current = data.revisions.at(-1);
-      const stem = page.page_id + "-" + assignment.slot;
-      return { ...assignment, names: c.train ? [stem + "-A", stem + "-B"] : [stem],
+      return { ...assignment,
         current: current ? { sha256: current.sha256, filename: current.filename } : null };
     }));
     pages.push({ page_id: page.page_id, slots });
@@ -118,25 +117,36 @@ async function claimCaptureScope(c: Intake, sha256: string) {
 async function upload(c: Intake, request: Request, now: number) {
   assertSameOrigin(request);
   if (request.headers.get("x-capture-roster") !== c.pin) throw new HttpError(409, "capture_roster_changed");
-  const filename = request.headers.get("x-capture-filename") ?? "";
-  const match = c.match(filename);
-  if (!match) throw new HttpError(400, "capture_filename_unregistered");
-  const { page, assignment, ext } = match;
-  const { slot } = assignment;
+  const page = c.pages.find(p => p.page_id === request.headers.get("x-capture-page"));
+  const slot = request.headers.get("x-capture-slot");
+  const device = request.headers.get("x-capture-device");
+  if (!page || !slot || !page.slots.some(s => s.slot === slot) ||
+    (c.train ? device !== "A" && device !== "B" : device !== null)) throw new HttpError(400, "capture_slot_unregistered");
+  let filename: string;
+  try {
+    const encoded = request.headers.get("x-capture-filename") ?? "";
+    if (encoded.length > 2048) throw new Error();
+    filename = decodeURIComponent(encoded);
+    if (!filename.trim() || filename.length > 255 || /[/\\\p{Cc}\p{Cf}]/u.test(filename)) throw new Error();
+  } catch { throw new HttpError(400, "capture_invalid_filename"); }
   const replaces = request.headers.get("x-capture-replaces");
   if (replaces !== null && !CAPTURE_DIGEST.test(replaces)) throw new HttpError(400, "capture_invalid_log");
   const log = captureLogHeader(request, replaces !== null);
   if (!log) throw new HttpError(400, "capture_invalid_log");
   const bytes = await readBytes(request, maxCaptureBytes, "capture_invalid_image");
-  const mime = captureImageType(bytes, ext);
+  const mime = captureImageType(bytes, c.train);
   if (!mime) throw new HttpError(415, "capture_invalid_image");
   const sha256 = hex(await crypto.subtle.digest("SHA-256", bytes));
   const previous = await readSlot(c, page, slot);
   const current = previous.data.revisions.at(-1);
-  const result = (receipt: Receipt, code: number) => json({
-    page_id: page.page_id, slot, sha256: receipt.sha256, filename: receipt.filename, revisions: previous.data.revisions.length,
+  const result = (receipt: Receipt, code: number, revisions = previous.data.revisions.length) => json({
+    page_id: page.page_id, slot, sha256: receipt.sha256, filename: receipt.filename,
+    ...(receipt.device ? { device: receipt.device } : {}), revisions,
   }, code);
-  if (current?.sha256 === sha256) return result(current, 200);
+  if (current?.sha256 === sha256) {
+    if (current.device && current.device !== device) throw new HttpError(409, "capture_slot_changed");
+    return result(current, 200);
+  }
   if ((current?.sha256 ?? null) !== replaces || previous.data.revisions.some(r => r.sha256 === sha256)) {
     throw new HttpError(409, "capture_slot_changed");
   }
@@ -151,15 +161,17 @@ async function upload(c: Intake, request: Request, now: number) {
     const stored = await c.bucket.head(key);
     if (!stored || stored.size !== bytes.length || stored.customMetadata?.slot !== claim) throw new HttpError(409, "capture_bytes_already_used");
   }
-  const receipt = { sha256, mime, bytes: bytes.length, filename, uploaded_at: new Date(now).toISOString(), log };
+  const receipt: Receipt = { sha256, mime, bytes: bytes.length, filename,
+    ...(device === "A" || device === "B" ? { device } : {}), uploaded_at: new Date(now).toISOString(), log };
   previous.data.revisions.push(receipt);
   const saved = await c.bucket.put(previous.key, JSON.stringify(previous.data), {
     onlyIf: previous.etag ? { etagMatches: previous.etag } : { etagDoesNotMatch: "*" },
   });
   if (!saved) {
     const updated = await readSlot(c, page, slot);
-    if (updated.data.revisions.at(-1)?.sha256 !== sha256) throw new HttpError(409, "capture_slot_changed");
-    return result(receipt, 200);
+    const winner = updated.data.revisions.at(-1);
+    if (winner?.sha256 !== sha256 || winner.device !== receipt.device) throw new HttpError(409, "capture_slot_changed");
+    return result(winner, 200, updated.data.revisions.length);
   }
   return result(receipt, 201);
 }

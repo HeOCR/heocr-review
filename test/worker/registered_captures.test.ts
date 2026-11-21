@@ -64,15 +64,18 @@ async function fixture(label: string) {
       REGISTERED_CAPTURE_ROSTER_SHA256: opts.pin ?? pin, TRAIN_CAPTURE_ENABLED: "1", TRAIN_CAPTURE_ROSTER_SHA256: trainPin,
       ...opts.config }, exec);
   };
-  const upload = (name: string, body: Uint8Array = pageImage, extra?: Record<string, string>) => request(CAPTURE_API + "/upload", {
-    body, headers: { "x-capture-filename": name, "x-capture-roster": pin,
-      "x-capture-log": encodeURIComponent(JSON.stringify(captureLog)), ...extra },
-  });
-  const trainUpload = (name: string, body: Uint8Array = trainImage, extra?: Record<string, string>) =>
-    request(TRAIN_CAPTURE_API + "/upload", {
-      body, headers: { "x-capture-filename": name, "x-capture-roster": trainPin,
-        "x-capture-log": encodeURIComponent(JSON.stringify(captureLog)), ...extra },
+  type Upload = { page?: string; slot?: string; device?: string; filename?: string; bytes?: Uint8Array; headers?: Record<string,string> };
+  const send = (train: boolean, options: Upload = {}) => {
+    const { page = train ? "TRAIN-FIXTURE-01" : "FIXTURE-01", slot = train ? "FLAT" : "A", device = "A",
+      filename = "IMG_0001.JPG", bytes = train ? trainImage : pageImage, headers } = options;
+    return request((train ? TRAIN_CAPTURE_API : CAPTURE_API) + "/upload", {
+      body: bytes, headers: { "x-capture-filename": encodeURIComponent(filename), "x-capture-roster": train ? trainPin : pin,
+        "x-capture-page": page, "x-capture-slot": slot, ...(train ? { "x-capture-device": device } : {}),
+        "x-capture-log": encodeURIComponent(JSON.stringify(captureLog)), ...headers },
     });
+  };
+  const upload = (options?: Upload) => send(false, options);
+  const trainUpload = (options?: Upload) => send(true, options);
   return { request, upload, trainUpload, other, root, pin, trainRoot, trainPin, trainBytes, id };
 }
 
@@ -93,45 +96,48 @@ it("keeps capture shell, roster, uploads and raw objects behind explicit private
   const result = await f.request(CAPTURE_API);
   expect(await result.json()).toMatchObject({ roster_sha256: f.pin, pages: [{ page_id: "FIXTURE-01" }, { page_id: "FIXTURE-02" }] });
   expect(result.headers.get("cache-control")).toBe("no-store");
-  expect((await f.upload("FIXTURE-01-A.jpg", pageImage, { origin: "https://example.invalid" })).status).toBe(403);
+  expect((await f.upload({ headers: { origin: "https://example.invalid" } })).status).toBe(403);
   await env.DB.prepare("UPDATE reviewers SET blocked=1 WHERE id=?").bind(f.id).run();
   expect((await f.request(CAPTURE_API)).status).toBe(404);
 });
 
-it("binds originals to exact filename slots with private bytes, capture logs, retries and explicit retakes", async () => {
+it("binds unchanged originals to selected slots, retains the camera filename, and requires guarded retakes", async () => {
   const f = await fixture("intake");
-  for (const name of ["FIXTURE-01-C.png", "FIXTURE-03-A.png", "FIXTURE-01-a.png", "../FIXTURE-01-A.png", "FIXTURE-01-A.png.jpg"]) {
-    expect((await f.upload(name)).status).toBe(400);
+  for (const options of [{ slot: "C" }, { page: "FIXTURE-03" }, { slot: "a" }, { page: "" },
+    { filename: "../IMG_0001.JPG" }, { headers: { "x-capture-device": "A" } }]) {
+    expect((await f.upload(options)).status).toBe(400);
   }
-  expect((await f.upload("FIXTURE-01-A.jpg")).status).toBe(415);
-  expect((await f.upload("FIXTURE-01-A.png", pageImage, { "x-capture-roster": "0".repeat(64) })).status).toBe(409);
-  expect((await f.upload("FIXTURE-01-A.png", pageImage, { "x-capture-log": encodeURIComponent("{}") })).status).toBe(400);
+  expect((await f.upload({ bytes: pageImage.slice(0, 10) })).status).toBe(415);
+  expect((await f.upload({ headers: { "x-capture-roster": "0".repeat(64) } })).status).toBe(409);
+  expect((await f.upload({ headers: { "x-capture-log": encodeURIComponent("{}") } })).status).toBe(400);
   expect((await media.list({ prefix: f.root + "/originals/" })).objects).toHaveLength(0);
 
-  const first = await f.upload("FIXTURE-01-A.PNG");
+  const first = await f.upload({ filename: "FIXTURE-02-C.JPG" });
   expect(first.status).toBe(201);
   const firstSha = await sha(pageImage);
-  expect(await first.json()).toMatchObject({ page_id: "FIXTURE-01", slot: "A", sha256: firstSha, revisions: 1 });
+  expect(await first.json()).toMatchObject({ page_id: "FIXTURE-01", slot: "A",
+    filename: "FIXTURE-02-C.JPG", sha256: firstSha, revisions: 1 });
   const key = f.root + "/originals/" + firstSha;
   expect((await media.head(key))?.httpMetadata?.cacheControl).toBe("private, no-store");
+  expect((await media.head(key))?.httpMetadata?.contentType).toBe("image/png");
   expect(new Uint8Array(await (await media.get(key))!.arrayBuffer())).toEqual(pageImage);
   expect((await f.request(CAPTURE_API + "/originals/" + firstSha)).status).toBe(404);
-  expect((await f.upload("FIXTURE-01-A.png")).status).toBe(200);
-  expect((await f.upload("FIXTURE-01-B.png")).status).toBe(409);
-  expect((await f.upload("FIXTURE-01-A.HEIC", heif)).status).toBe(409);
-  expect((await f.upload("FIXTURE-01-A.HEIC", heif.slice(0, -3))).status).toBe(415);
+  expect((await f.upload()).status).toBe(200);
+  expect((await f.upload({ slot: "B" })).status).toBe(409);
+  expect((await f.upload({ bytes: heif })).status).toBe(409);
+  expect((await f.upload({ bytes: heif.slice(0, -3) })).status).toBe(415);
 
   const retake = { "x-capture-replaces": firstSha,
     "x-capture-log": encodeURIComponent(JSON.stringify({ ...captureLog, retake_reason: "soft focus" })) };
-  expect((await f.upload("FIXTURE-01-A.HEIC", heif, { ...retake, "x-capture-replaces": "0".repeat(64) })).status).toBe(409);
-  expect((await f.upload("FIXTURE-01-A.HEIC", heif, { "x-capture-replaces": firstSha })).status).toBe(400);
-  expect((await f.upload("FIXTURE-01-A.HEIC", heif, retake)).status).toBe(201);
-  expect((await f.upload("FIXTURE-01-A.HEIC", heif, retake)).status).toBe(200);
-  expect((await f.upload("FIXTURE-01-A.png")).status).toBe(409);
+  expect((await f.upload({ bytes: heif, headers: { ...retake, "x-capture-replaces": "0".repeat(64) } })).status).toBe(409);
+  expect((await f.upload({ bytes: heif, headers: { "x-capture-replaces": firstSha } })).status).toBe(400);
+  expect((await f.upload({ bytes: heif, filename: "צילום ٢.heic", headers: retake })).status).toBe(201);
+  expect((await f.upload({ bytes: heif, headers: retake })).status).toBe(200);
+  expect((await f.upload()).status).toBe(409);
   const record = await media.get(f.root + "/slots/FIXTURE-01/A.json");
   expect(await record!.json()).toMatchObject({ page_id: "FIXTURE-01", slot: "A", revisions: [
-    { sha256: firstSha, log: captureLog },
-    { sha256: await sha(heif), log: { ...captureLog, retake_reason: "soft focus" } },
+    { sha256: firstSha, filename: "FIXTURE-02-C.JPG", log: captureLog },
+    { sha256: await sha(heif), filename: "צילום ٢.heic", log: { ...captureLog, retake_reason: "soft focus" } },
   ] });
   const active = await f.request(CAPTURE_API);
   expect(await active.json()).toMatchObject({ pages: [{ slots: [
@@ -141,13 +147,14 @@ it("binds originals to exact filename slots with private bytes, capture logs, re
 
 it("admits one active revision when two uploads race the same registered slot", async () => {
   const f = await fixture("race");
-  const both = await Promise.all([f.upload("FIXTURE-02-C.HEIC", heif), f.upload("FIXTURE-02-C.png")]);
+  const target = { page: "FIXTURE-02", slot: "C" };
+  const both = await Promise.all([f.upload({ ...target, bytes: heif }), f.upload(target)]);
   expect(both.map(r => r.status).sort()).toEqual([201, 409]);
   const object = await media.get(f.root + "/slots/FIXTURE-02/C.json");
   const state = await object!.json<{ revisions: unknown[] }>();
   expect(state.revisions).toHaveLength(1);
-  const retry = both[0]!.status === 201 ? f.upload("FIXTURE-02-C.HEIC", heif) : f.upload("FIXTURE-02-C.png");
-  expect((await retry).status).toBe(200);
+  const retry = await f.upload({ ...target, bytes: both[0]!.status === 201 ? heif : pageImage });
+  expect(retry.status).toBe(200);
 });
 
 it("keeps TRAIN disabled independently, fails closed on a shared binding and paginates 125 distinct views", async () => {
@@ -175,31 +182,38 @@ it("keeps TRAIN disabled independently, fails closed on a shared binding and pag
   expect((await f.request(TRAIN_CAPTURE_API, { config: { TRAIN_CAPTURE_MEDIA: media } })).status).toBe(404);
 });
 
-it("validates TRAIN device aliases and exact slots, with private receipts and raw bytes only in the selected scope", async () => {
+it("validates TRAIN page, condition and device with private receipts and exact original bytes", async () => {
   const f = await fixture("separation");
-  expect((await f.upload("TRAIN-FIXTURE-01-FLAT-A.png")).status).toBe(400);
-  expect((await f.trainUpload("FIXTURE-01-A.png")).status).toBe(400);
-  expect((await f.trainUpload("TRAIN-FIXTURE-06-M-FOLD-A.png")).status).toBe(400);
-  expect((await f.trainUpload("TRAIN-FIXTURE-01-FLAT-C.png")).status).toBe(400);
-  expect((await f.trainUpload("TRAIN-FIXTURE-01-FLAT-A.dng")).status).toBe(415);
-  expect((await f.trainUpload("TRAIN-FIXTURE-01-FLAT-A.png", pageImage, { "x-capture-roster": f.pin })).status).toBe(409);
-  const result = await f.trainUpload("train-fixture-01-m-fold-b.PNG");
+  expect((await f.upload({ page: "TRAIN-FIXTURE-01", slot: "FLAT" })).status).toBe(400);
+  expect((await f.trainUpload({ page: "FIXTURE-01", slot: "A" })).status).toBe(400);
+  expect((await f.trainUpload({ page: "TRAIN-FIXTURE-06", slot: "M-FOLD" })).status).toBe(400);
+  expect((await f.trainUpload({ device: "C" })).status).toBe(400);
+  expect((await f.trainUpload({ device: "" })).status).toBe(400);
+  expect((await f.trainUpload({ bytes: trainImage.slice(0, 10) })).status).toBe(415);
+  expect((await f.trainUpload({ headers: { "x-capture-roster": f.pin } })).status).toBe(409);
+  const selected = { slot: "M-FOLD", device: "B", filename: "IMG_0042.PNG" };
+  const result = await f.trainUpload(selected);
   expect(result.status).toBe(201);
   const digest = await sha(trainImage);
-  expect(await result.json()).toMatchObject({ page_id: "TRAIN-FIXTURE-01", slot: "M-FOLD", sha256: digest, revisions: 1 });
+  expect(await result.json()).toMatchObject({ page_id: "TRAIN-FIXTURE-01", slot: "M-FOLD", device: "B",
+    filename: selected.filename, sha256: digest, revisions: 1 });
+  expect((await f.trainUpload({ ...selected, device: "A" })).status).toBe(409);
+  expect((await f.trainUpload(selected)).status).toBe(200);
+  const receipt = await trainMedia.get(f.trainRoot + "/slots/TRAIN-FIXTURE-01/M-FOLD.json");
+  expect(await receipt!.json()).toMatchObject({ revisions: [{ device: "B", filename: selected.filename }] });
   const key = f.trainRoot + "/originals/" + digest;
   expect(new Uint8Array(await (await trainMedia.get(key))!.arrayBuffer())).toEqual(trainImage);
   expect(await media.head(key)).toBeNull();
   expect(await media.head(f.root + "/originals/" + digest)).toBeNull();
-  expect((await f.upload("FIXTURE-01-A.png", trainImage)).status).toBe(409);
+  expect((await f.upload({ bytes: trainImage })).status).toBe(409);
   expect((await f.request(TRAIN_CAPTURE_API + "/originals/" + digest)).status).toBe(404);
-  expect((await f.upload("FIXTURE-01-A.heic", heif)).status).toBe(201);
+  expect((await f.upload({ bytes: heif })).status).toBe(201);
   expect(await trainMedia.head(f.trainRoot + "/originals/" + await sha(heif))).toBeNull();
 });
 
 it("reserves exact bytes in a single scope even when opposing uploads race", async () => {
   const f = await fixture("cross-scope-race");
-  const captures = await Promise.all([f.upload("FIXTURE-01-A.png", raceImage), f.trainUpload("TRAIN-FIXTURE-01-FLAT-A.png", raceImage)]);
+  const captures = await Promise.all([f.upload({ bytes: raceImage }), f.trainUpload({ bytes: raceImage })]);
   expect(captures.map(r => r.status).sort()).toEqual([201, 409]);
   const digest = await sha(raceImage);
   const objects = await Promise.all([

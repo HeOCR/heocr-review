@@ -1,7 +1,4 @@
 import { imageFrame } from "./handwriting/image";
-import type { captureFile } from "../shared/registered-captures";
-
-type Extension = NonNullable<ReturnType<typeof captureFile>>["ext"] | "dng";
 
 // HEIF originals are retained for eval's offline decoder. Only still HEVC picture brands are admitted.
 const stillHevc = new Set(["heic", "heix", "heim", "heis"]);
@@ -29,11 +26,8 @@ function isHeic(data: Uint8Array) {
   return metadata && payload;
 }
 
-export function captureImageType(data: Uint8Array, ext: Extension) {
-  if (ext === "heic" || ext === "heif") return isHeic(data) ? "image/heic" : null;
-  if (ext === "dng") return isDng(data) ? "image/x-adobe-dng" : null;
-  const type = ext === "png" ? "image/png" : "image/jpeg";
-  return imageFrame(data)?.mime === type ? type : null;
+export function captureImageType(data: Uint8Array, allowDng: boolean) {
+  return imageFrame(data)?.mime ?? (isHeic(data) ? "image/heic" : allowDng && isDng(data) ? "image/x-adobe-dng" : null);
 }
 
 // TIFF-header check only. As with HEIF, full decoding is part of private admission.
