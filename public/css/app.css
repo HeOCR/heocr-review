@@ -122,6 +122,7 @@ main#app.task .state { padding-inline: 16px; }
 .realism-feedback .act { justify-self: start; }
 .realism-status:empty { display: none; }
 .ranking-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ranking-pair { direction: ltr; }
 .ranking-undo { min-height: 44px; }
 .ranking-panel { display: grid; gap: 6px; min-width: 0; }
 .ranking-image { cursor: zoom-in; }

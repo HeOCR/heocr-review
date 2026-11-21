@@ -1,4 +1,4 @@
-import { RANKING_TIE, type RankingPair, type RankingQueue, type Side } from "../shared/synth_realism";
+import { RANKING_MAPPING_VERSION, RANKING_TIE, type RankingPair, type RankingQueue, type Side } from "../shared/synth_realism";
 import { RANKING_EXPORT_FILE, RANKING_EXPORT_SQL, rankingExport, type RankingRow } from "../tasks/synth_realism/ranking-export";
 import type { BatchRecord } from "../tasks/types";
 import { HttpError, json } from "./http";
@@ -51,17 +51,23 @@ export async function rankChoice(db: D1Database, batch: string, reviewer: string
   const { choice, latency_ms } = body;
   if ((choice !== 0 && choice !== 1 && choice !== RANKING_TIE) || typeof latency_ms !== "number" || !Number.isSafeInteger(latency_ms) ||
     latency_ms < 0 || latency_ms > 86_400_000) throw new HttpError(400, "invalid_decision");
-  const swapped = await rankingSwap(batch, reviewer, position);
+  const mapping = body.mapping_version === undefined ? 1 : body.mapping_version;
+  const assetOrder = pairView(batch, position, revision).images;
+  if ((mapping === 1 && body.left_asset !== undefined) ||
+    (mapping === RANKING_MAPPING_VERSION && body.left_asset !== assetOrder[0] && body.left_asset !== assetOrder[1]) ||
+    (mapping !== 1 && mapping !== RANKING_MAPPING_VERSION)) throw new HttpError(400, "invalid_decision");
+  const swapped = (await rankingSwap(batch, reviewer, position)) ^ Number(body.left_asset === assetOrder[1]);
   const tieAvailable = choice === RANKING_TIE || body.tie_available === true ? 1 : 0;
   // The prefix and revision predicates are in the write, so a retry or stale tab cannot answer a different pair.
-  await db.prepare(`INSERT INTO synth_ranking_answers (batch_id,reviewer_id,position,revision,choice,swapped,latency_ms,chosen_at,tie_available)
-    SELECT ?1,?2,?3,?4+1,?5,?6,?7,?8,?9
+  await db.prepare(`INSERT INTO synth_ranking_answers (batch_id,reviewer_id,position,revision,choice,swapped,latency_ms,chosen_at,tie_available,mapping_version)
+    SELECT ?1,?2,?3,?4+1,?5,?6,?7,?8,?9,?10
     WHERE ?3=(${completedSql})+1 AND ?4=COALESCE((${revisionSql} ?3),0)
       AND EXISTS (SELECT 1 FROM synth_ranking_pairs WHERE batch_id=?1 AND position=?3)
       AND EXISTS (SELECT 1 FROM batches WHERE id=?1 AND status='open')
     ON CONFLICT(batch_id,reviewer_id,position) DO UPDATE SET revision=excluded.revision, choice=excluded.choice,
-      latency_ms=excluded.latency_ms, chosen_at=excluded.chosen_at, swapped=excluded.swapped, tie_available=excluded.tie_available`)
-    .bind(batch, reviewer, position, revision, choice, swapped, latency_ms, now, tieAvailable).run();
+      latency_ms=excluded.latency_ms, chosen_at=excluded.chosen_at, swapped=excluded.swapped,
+      tie_available=excluded.tie_available, mapping_version=excluded.mapping_version`)
+    .bind(batch, reviewer, position, revision, choice, swapped, latency_ms, now, tieAvailable, mapping).run();
   return rankingState(db, batch, reviewer);
 }
 

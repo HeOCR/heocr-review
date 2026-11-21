@@ -1,5 +1,5 @@
 import type { BatchSummary } from "../../shared/api";
-import { RANKING_TIE, type RankingChoice, type RankingPair, type RankingQueue } from "../../shared/synth_realism";
+import { RANKING_MAPPING_VERSION, RANKING_TIE, type RankingChoice, type RankingPair, type RankingQueue } from "../../shared/synth_realism";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h, mount } from "../dom";
 import { t } from "../i18n";
@@ -78,8 +78,14 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
     const counter = h("div", { class: "realism-counter", role: "status" },
       bdi(t(current ? "sr_counter" : "sr_counter_done", { current: current ? completed + 1 : completed, total })));
     const buttons: HTMLButtonElement[] = [];
+    const panels: { photo: HTMLImageElement; zoom: HTMLButtonElement; button: HTMLButtonElement; asset: string }[] = [];
+    const physicalOrder = () => [...panels].sort((a, b) => a.photo.getBoundingClientRect().left - b.photo.getBoundingClientRect().left);
+    const sideLabels = [
+      { zoom: "rr_zoom_left", choice: "rr_choose_left", key: "ArrowLeft" },
+      { zoom: "rr_zoom_right", choice: "rr_choose_right", key: "ArrowRight" },
+    ] as const;
     let shownAt: number | null = null;
-    let selection: { choice: RankingChoice; revision: number; latency_ms: number } | null = null;
+    let selection: { choice: RankingChoice; revision: number; latency_ms: number; left_asset: string } | null = null;
     const undo = previous ? h("button", { type: "button", class: "act quiet ranking-undo", onclick: () => {
       void save(`${base}/pairs/${previous.position}/undo`, { revision: previous.revision });
     } }, t("rr_undo")) : null;
@@ -112,11 +118,13 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
 
     function choose(choice: RankingChoice) {
       if (busy || dialog.open || shownAt === null) return;
-      selection ??= { choice, revision: current!.revision, latency_ms: Math.min(86_400_000, Math.round(performance.now() - shownAt)) };
-      void save(`${base}/pairs/${current!.position}/choice`, { ...selection, tie_available: true });
+      selection ??= { choice, revision: current!.revision, left_asset: physicalOrder()[0]!.asset,
+        latency_ms: Math.min(86_400_000, Math.round(performance.now() - shownAt)) };
+      void save(`${base}/pairs/${current!.position}/choice`,
+        { ...selection, tie_available: true, mapping_version: RANKING_MAPPING_VERSION });
     }
 
-    const grid = h("div", { class: "realism-pair", dir: "ltr" });
+    const grid = h("div", { class: "realism-pair ranking-pair", dir: "ltr" });
     status.textContent = t("loading");
     mount(root, bar, heading, grid, status, dialog);
     const images = prefetch(current);
@@ -128,16 +136,17 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
       if (disposed || !status.isConnected) return;
       status.textContent = "";
       for (const side of sides) {
-        const label = t(side === 0 ? "rr_zoom_left" : "rr_zoom_right");
-        const zoom = h("button", { type: "button", class: "realism-panel ranking-image", "aria-label": label, onclick: () => {
+        const photo = ready[side]!;
+        const zoom = h("button", { type: "button", class: "realism-panel ranking-image", onclick: () => {
+          const label = t(sideLabels[physicalOrder()[0]!.photo === photo ? 0 : 1].zoom);
           mount(dialog, h("div", { class: "ranking-bar" }, h("span", { id: "ranking-zoom-title" }, label),
             h("button", { type: "button", class: "act", autofocus: true, onclick: () => dialog.close() }, t("close"))),
-          h("img", { src: ready[side]!.src, alt: "" }));
+          h("img", { src: photo.src, alt: "" }));
           dialog.showModal();
-        } }, h("span", { class: "realism-scan" }, ready[side]!));
+        } }, h("span", { class: "realism-scan" }, photo));
         const button = h("button", { type: "button", class: "act ranking-choice", dir: "auto", disabled: true,
-          "aria-keyshortcuts": side === 0 ? "ArrowLeft" : "ArrowRight",
-          onclick: () => choose(side) }, t(side === 0 ? "rr_choose_left" : "rr_choose_right"));
+          onclick: () => choose(physicalOrder()[0]!.photo === photo ? 0 : 1) });
+        panels.push({ photo, zoom, button, asset: current.images[side] });
         buttons.push(button);
         grid.append(h("div", { class: "ranking-panel" }, zoom, button));
       }
@@ -147,6 +156,12 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
       root.append(tie, h("p", { class: "ranking-keys" }, t("rr_keys")));
       requestAnimationFrame(() => {
         if (disposed || !status.isConnected) return;
+        for (const [index, panel] of physicalOrder().entries()) {
+          const labels = sideLabels[index]!;
+          panel.zoom.setAttribute("aria-label", t(labels.zoom));
+          panel.button.textContent = t(labels.choice);
+          panel.button.setAttribute("aria-keyshortcuts", labels.key);
+        }
         shownAt = performance.now();
         buttons.forEach((button) => { button.disabled = busy; });
         chooseKey = choose;

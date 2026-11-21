@@ -6,6 +6,7 @@ export const TAGS = [
 export type RealismTag = (typeof TAGS)[number];
 export type Side = 0 | 1;
 export const RANKING_TIE = 2;
+export const RANKING_MAPPING_VERSION = 2;
 export type RankingChoice = Side | typeof RANKING_TIE;
 
 export interface RealismTrial {

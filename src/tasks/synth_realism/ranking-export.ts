@@ -3,7 +3,7 @@ import { RANKING_TIE, type RankingChoice, type Side } from "../../shared/synth_r
 export const RANKING_EXPORT_FILE = "realism_ranking_cc0.json";
 export const RANKING_EXPORT_SCHEMA = "realism_ranking_contributions.v1";
 export const RANKING_EXPORT_SQL = `SELECT p.pair_id, p.item_a, p.arm_a, p.item_b, p.arm_b,
-  a.reviewer_id AS reviewer, a.swapped, a.choice, a.latency_ms, a.chosen_at, a.tie_available
+  a.reviewer_id AS reviewer, a.swapped, a.choice, a.latency_ms, a.chosen_at, a.tie_available, a.mapping_version
   FROM synth_ranking_answers a JOIN synth_ranking_pairs p ON p.batch_id=a.batch_id AND p.position=a.position
   WHERE a.batch_id=?1 AND a.choice IS NOT NULL ORDER BY a.reviewer_id, a.position`;
 
@@ -15,6 +15,7 @@ export interface RankingRow {
   arm_b: string | null;
   reviewer: string;
   swapped: Side;
+  mapping_version: 1 | 2;
   choice: RankingChoice;
   tie_available: 0 | 1;
   latency_ms: number;
@@ -33,7 +34,8 @@ export function rankingExport(batchId: string, rows: RankingRow[], exportedAt: s
       const choice = row.choice === RANKING_TIE ? "tie" : row.choice === 0 ? "left" : "right";
       return {
         pair_id: row.pair_id, left_item_id: leftItem, right_item_id: rightItem, left_arm_id: leftArm, right_arm_id: rightArm,
-        choice, tie_available: row.tie_available === 1, reviewer: row.reviewer,
+        choice, winner_item_id: choice === "tie" ? null : choice === "left" ? leftItem : rightItem,
+        mapping_version: row.mapping_version, tie_available: row.tie_available === 1, reviewer: row.reviewer,
         latency_ms: row.latency_ms, chosen_at: new Date(row.chosen_at).toISOString(),
         control, correct: control === "real_synth" && choice !== "tie" ? (choice === "left" ? leftArm : rightArm) === null : null,
       };
