@@ -3,7 +3,7 @@ import { imageUrl, type Box } from "../shared/media";
 import { sha256Hex } from "../shared/sha256";
 import { TERMS_VERSION } from "../shared/terms";
 import { taskType } from "../tasks/registry";
-import { ALLOWED_REFERENCE_PROPOSAL } from "../tasks/restricted_reference";
+import { ALLOWED_REFERENCE_PROPOSAL, protectedReferenceBatchSql } from "../tasks/restricted_reference";
 import { PROPOSAL_COLUMNS, toProposal, type ProposalRow } from "../tasks/rows";
 import { PASS1_SQL, REGISTERED_PAGE_SQL } from "../tasks/line_verify/pagerecords";
 import { candidateOf } from "../tasks/line_verify/triage";
@@ -39,7 +39,9 @@ async function access(c: Ctx, batchId: string, write: boolean) {
 
 const lineScope = `p.active=1 AND ${PASS1_SQL} AND ${ALLOWED_REFERENCE_PROPOSAL}
   AND (p.gate_kind IS NULL OR p.gate_kind='always') AND json_extract(p.payload_json,'$.gold') IS NULL`;
-const pageScope = `i.batch_id=?1 AND i.id=?2 AND ${REGISTERED_PAGE_SQL}
+const sweepRoster = `${REGISTERED_PAGE_SQL} AND (NOT ${protectedReferenceBatchSql("i.batch_id")} OR EXISTS(
+  SELECT 1 FROM restricted_reference_pages rp WHERE rp.batch_id=i.batch_id AND rp.item_id=i.id AND rp.first_allowed=1))`;
+const pageScope = `i.batch_id=?1 AND i.id=?2 AND ${sweepRoster}
   AND EXISTS(SELECT 1 FROM batches b JOIN batch_settings s ON s.batch_id=b.id
     WHERE b.id=i.batch_id AND b.status='open' AND s.mode='triage' AND s.pointed_books='keep')`;
 const checkFree = "NOT EXISTS(SELECT 1 FROM page_checks WHERE batch_id=?1 AND item_id=?2 AND reviewer_id=?3 AND superseded_at IS NULL)";
@@ -100,7 +102,7 @@ async function readPage(c: Ctx, batch: BatchRecord, reviewer: string, id: number
   return { page, rows, image };
 }
 
-const pendingPage = `i.batch_id=?1 AND ${REGISTERED_PAGE_SQL}
+const pendingPage = `i.batch_id=?1 AND ${sweepRoster}
   AND NOT EXISTS(SELECT 1 FROM page_checks ck WHERE ck.item_id=i.id AND ck.batch_id=i.batch_id AND ck.reviewer_id=?2 AND ck.superseded_at IS NULL)`;
 
 export async function pendingSweepPages(db: D1Database, batchId: string, reviewer: string) {

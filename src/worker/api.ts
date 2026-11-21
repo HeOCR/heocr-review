@@ -338,7 +338,8 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   if (!isAdmin(ctx.env, reviewer.id)) await enforceWriteDay(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
-  if (Boolean(batch.unplantedReview) !== (body.pageSweepDraft === true)) throw new HttpError(409, "stale_draft");
+  const unplanted = batch.unplantedReview === true && triageable(proposal);
+  if (unplanted !== (body.pageSweepDraft === true)) throw new HttpError(409, "stale_draft");
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
   if (isRestrictedDraftVerification(batch) && body.value !== "exact" && body.value !== "edited") {
     throw new HttpError(400, "invalid_decision", "a draft verification decision must be exact or edited");
@@ -399,7 +400,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals WHERE id=?2 AND content_sha256=?6`,
         )
         .bind(decisionId, proposal.id, reviewer.id, normalized.value, normalized.text, proposal.contentSha256, TERMS_VERSION, now, day(ctx.now),
-          batch.unplantedReview ? "line_unplanted" : "line"),
+          unplanted ? "line_unplanted" : "line"),
       db.prepare(`DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2
         AND EXISTS (SELECT 1 FROM proposals WHERE id=?2 AND content_sha256=?3)`).bind(reviewer.id, proposal.id, proposal.contentSha256),
     ]);

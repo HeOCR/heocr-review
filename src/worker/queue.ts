@@ -302,7 +302,7 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
   const options = type.optionsFor?.(p) ?? type.options;
   return {
     id: p.id,
-    ...(batch.unplantedReview ? { pageSweepDraft: true as const } : {}),
+    ...(batch.unplantedReview && triageable(p) ? { pageSweepDraft: true as const } : {}),
     batchId: p.batchId,
     externalId: p.externalId,
     itemTitle: p.itemTitle,

@@ -19,9 +19,10 @@ async function fixture() {
     env.DB.prepare(`INSERT INTO batches(id,task_type,title,source_json,imported_at,status,restricted_reference)
       VALUES (?,'line_verify','Fixture',?,'now','open',1)`).bind(batch,JSON.stringify({batch_id:batch,schema_version:"line_verify_items.v1.2"})),
     env.DB.prepare("INSERT INTO batch_settings(batch_id,updated_at,updated_by,mode,pointed_books) VALUES (?,'now','fixture','triage','keep')").bind(batch),
-    ...[93100,93110].map(n => env.DB.prepare("INSERT INTO items(id,batch_id,external_id,title,payload_json) VALUES (?,?,?,'Fixture',?)")
+    ...[93100,93110,93120].map(n => env.DB.prepare("INSERT INTO items(id,batch_id,external_id,title,payload_json) VALUES (?,?,?,'Fixture',?)")
       .bind(n,batch,"fixture-page-"+n,JSON.stringify({page_image:scan,line_verify_imported_at:"now",width:700,height:900}))),
     env.DB.prepare("INSERT INTO restricted_reference_pages(batch_id,item_id) VALUES (?,93100)").bind(batch),
+    env.DB.prepare("INSERT INTO restricted_reference_pages(batch_id,item_id,first_allowed,blind_allowed) VALUES (?,93120,0,1)").bind(batch),
     ...[93101,93102,93103,93104].map((n, i) => env.DB.prepare(`INSERT INTO proposals
       (id,batch_id,item_id,external_id,category,confidence,rank,payload_json,media_json,content_sha256)
       VALUES (?,?,93100,?,'a','a',?,?,?,?)`).bind(n,batch,"fixture-line-"+n,i,JSON.stringify({
@@ -51,6 +52,8 @@ it("uses restricted page media and atomically finishes a page with preserved and
   expect((await f.request(root+"/next",undefined,{cookie:f.other.cookie})).status).toBe(404);
   expect((await f.request(root+"/next",undefined,{host:"https://heocr-review.heocr.workers.dev"})).status).toBe(404);
   expect((await f.request(root+"/pages/93110/image")).status).toBe(404);
+  expect((await f.request(root+"/pages/93120/image")).status).toBe(404);
+  expect((await f.request(root+"/pages/93120")).status).toBe(404);
   const page=await f.page();
   expect(page.lines.map(l=>[l.state,l.box])).toEqual([["done",box],["open",box],["open",null],["open",null]]);
   expect((await f.request(page.image.url)).headers.get("cache-control")).toContain("no-store");
