@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import sharp from "sharp";
+import { CAPTURE_BATCH_PREFIX, CAPTURE_DIGEST, captureRoster } from "../../src/shared/registered-captures";
 import { lineVerifyImporter } from "../../src/tasks/line_verify/importer";
 import { ITEMS_SCHEMA_V12, LLM_PROVENANCE, lineTextProblems, type PixelBox } from "../../src/tasks/line_verify/schema";
 import { DRAFT_VERIFICATION, needsRestrictedRoster, RESTRICTED_BATCH_PREFIX } from "../../src/tasks/restricted_reference";
@@ -23,6 +24,7 @@ export interface RestrictedPins {
   lines: number;
   plants: number;
   separateBlindPages: number;
+  captureRosterSha?: string;
 }
 
 interface Page {
@@ -35,6 +37,9 @@ interface Page {
   source: string;
   booklet: string;
   book_group: string;
+  issuer_pdf_sha256?: string;
+  issuer_page_index?: number;
+  image_role?: string;
 }
 
 interface Line {
@@ -58,6 +63,7 @@ interface Projection {
   pages: Page[];
   items: Line[];
   blind_second_pass: string[];
+  draft_basis?: string;
 }
 
 function requireScope(ok: unknown, reason: string): asserts ok {
@@ -85,7 +91,9 @@ function byUnique<T>(records: T[], id: (record: T) => string, kind: string): Map
   return keyed;
 }
 
-export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plantsBytes: Buffer | null, mediaRoot: string, pins: RestrictedPins) {
+export async function prepareRestrictedReferenceImport(
+  itemsBytes: Buffer, plantsBytes: Buffer | null, mediaRoot: string, pins: RestrictedPins, captureRosterBytes: Buffer | null = null,
+) {
   requireScope(batchKey.test(pins.batch) && needsRestrictedRoster(pins.batch), "batch is outside the restricted writer's scope");
   requireScope(sha.test(pins.itemsSha) && digest(itemsBytes) === pins.itemsSha, "items checksum differs");
   const { plantsSha } = pins;
@@ -103,6 +111,22 @@ export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plant
     Array.isArray(input.items) && input.items.length === pins.lines && pins.lines > 0, "registered roster counts differ");
   requireScope(verification || (plants?.bundle_sha256 === pins.itemsSha && Array.isArray(plants.plants) && plants.plants.length === pins.plants),
     "plant count or binding to the items pin differs");
+
+  const capture = pins.batch.startsWith(CAPTURE_BATCH_PREFIX);
+  requireScope(capture === !!pins.captureRosterSha && capture === !!captureRosterBytes, "capture queue needs its separately pinned registration roster");
+  const registered = captureRosterBytes && pins.captureRosterSha ? (() => {
+    requireScope(verification && CAPTURE_DIGEST.test(pins.captureRosterSha) && digest(captureRosterBytes) === pins.captureRosterSha,
+      "capture roster checksum or verification mode differs");
+    const roster = captureRoster(JSON.parse(captureRosterBytes.toString("utf8")));
+    requireScope(roster.batch_id === pins.batch && roster.pages.length === pins.pages && input.draft_basis === "issuer_text_layer",
+      "capture roster batch, page count or draft basis differs");
+    requireScope(roster.pages.every((entry, i) => {
+      const page = input.pages[i];
+      return page && page.page_id === entry.page_id && page.issuer_pdf_sha256 === entry.issuer_pdf_sha256 &&
+        page.issuer_page_index === entry.issuer_page_index && page.book_group === entry.issue_key && page.image_role === "issuer_render";
+    }), "verification pages differ from registered issuer locators or order");
+    return new Map(roster.pages.map(page => [page.page_id, page]));
+  })() : null;
 
   const pages = byUnique(input.pages, (page) => page.page_id, "page");
   const lines = byUnique(input.items, (line) => line.item_id, "item");
@@ -161,9 +185,14 @@ export async function prepareRestrictedReferenceImport(itemsBytes: Buffer, plant
   });
   bundle.batch.source = { ...bundle.batch.source, restricted_partition: "test", items_sha256: pins.itemsSha, plants_sha256: pins.plantsSha };
   if (verification) bundle.batch.source.restricted_review = DRAFT_VERIFICATION;
+  if (registered) bundle.batch.source.capture_roster_sha256 = pins.captureRosterSha;
   for (const item of bundle.items) {
     const page = pages.get(item.externalId)!;
     Object.assign(item.payload, { booklet: page.booklet, book_group: page.book_group, restricted_partition: "test" });
+    const entry = registered?.get(item.externalId);
+    if (entry) Object.assign(item.payload, {
+      issuer_pdf_sha256: entry.issuer_pdf_sha256, issuer_page_index: entry.issuer_page_index, image_role: "issuer_render",
+    });
   }
   for (const proposal of bundle.proposals) {
     const line = lines.get(proposal.externalId)!;

@@ -346,3 +346,48 @@ it("serves a completeness-only page only with pinned coverage and requires a rea
     page_id: "fixture-page", completeness: { answer: "missing_lines", lines_added_at: expect.any(String) },
   }], rows: [{ queue: "desktop_added", correction: { text: "תוספת" } }] });
 });
+
+it("requires the approved capture roster pin for verification, media, decisions and export", async () => {
+  const { owner, admin, req } = await fixtureUsers();
+  const pin = "8".repeat(64);
+  const batch = "private-ref-capture-fixture";
+  const source = JSON.stringify({ restricted_review: DRAFT_VERIFICATION, capture_roster_sha256: pin });
+  const itemId = 92200, proposalId = 92201;
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO batches(id,task_type,title,source_json,imported_at,restricted_reference,status)
+      VALUES (?,'line_verify','capture fixture',?,'now',1,'closed')`).bind(batch, source),
+    env.DB.prepare(`INSERT INTO items(id,batch_id,external_id,title,payload_json) VALUES (?,?,'FIXTURE-01','Fixture',?)`)
+      .bind(itemId, batch, JSON.stringify({ page_image: image })),
+    env.DB.prepare(`INSERT INTO proposals(id,batch_id,item_id,external_id,category,confidence,rank,payload_json,media_json,content_sha256)
+      SELECT ?,?,?,'fixture-issuer-line',category,confidence,0,payload_json,?,content_sha256 FROM proposals
+        WHERE batch_id='fixture_line_verify_v1' ORDER BY rank LIMIT 1`).bind(proposalId, batch, itemId, images),
+    env.DB.prepare("INSERT INTO restricted_reference_pages(batch_id,item_id) VALUES (?,?)").bind(batch, itemId),
+  ]);
+  await env.RESTRICTED_REFERENCE_MEDIA!.put(`${batch}/${key}`, "fixture issuer image");
+  const queue = `/api/batches/${batch}`;
+  const next = queue + "/next";
+  const exportPath = `/api/admin/batches/${batch}/export`;
+  const ownerRequest = (method: string, path: string, roster?: string, data?: unknown) => req(method, path, owner.cookie, host, data,
+    { REGISTERED_CAPTURE_ROSTER_SHA256: roster });
+  expect((await ownerRequest("GET", next, pin)).status).toBe(404);
+  expect((await ownerRequest("GET", proposalMedia(proposalId, "page"), pin)).status).toBe(404);
+  await env.DB.prepare("UPDATE batches SET status='open' WHERE id=?").bind(batch).run();
+  for (const roster of [undefined, "9".repeat(64)]) {
+    expect(await (await ownerRequest("GET", "/api/batches", roster)).text()).not.toContain(batch);
+    expect((await ownerRequest("GET", next, roster)).status).toBe(404);
+    expect((await ownerRequest("GET", exportPath, roster)).status).toBe(404);
+    expect((await ownerRequest("GET", proposalMedia(proposalId, "page"), roster)).status).toBe(404);
+  }
+  expect((await req("GET", next, admin.cookie, host, undefined, { REGISTERED_CAPTURE_ROSTER_SHA256: pin })).status).toBe(404);
+  expect((await req("GET", next, owner.cookie, alternate, undefined, { REGISTERED_CAPTURE_ROSTER_SHA256: pin })).status).toBe(404);
+  expect(await (await ownerRequest("GET", next, pin)).json()).toMatchObject({
+    proposal: { id: proposalId, view: { draftVerification: true }, options: [{ value: "exact" }, { value: "edited" }] },
+  });
+  const issuerImage = await ownerRequest("GET", proposalMedia(proposalId, "page"), pin);
+  expect(new TextDecoder().decode(await issuerImage.arrayBuffer())).toBe("fixture issuer image");
+  expect((await ownerRequest("POST", `/api/proposals/${proposalId}/decision`, undefined, { value: "exact" })).status).toBe(404);
+  expect((await ownerRequest("POST", `/api/proposals/${proposalId}/decision`, pin, { value: "edited", text: "הגהה" })).status).toBe(200);
+  expect(await (await ownerRequest("GET", next, pin)).json()).toMatchObject({ proposal: null, page: { mode: "check" } });
+  expect((await ownerRequest("POST", `${queue}/pages/${itemId}/check`, pin, confirm)).status).toBe(200);
+  expect((await ownerRequest("GET", exportPath, pin)).status).toBe(200);
+});

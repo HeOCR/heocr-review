@@ -1,5 +1,6 @@
+import { CAPTURE_BATCH_PREFIX, CAPTURE_DIGEST } from "../shared/registered-captures";
 import { PRIVATE_IMAGE_KEY } from "../shared/media";
-import { restrictedStaticDirectory } from "../tasks/restricted_reference";
+import { isRestrictedDraftVerification, restrictedStaticDirectory } from "../tasks/restricted_reference";
 import type { BatchRecord, StoredImage } from "../tasks/types";
 import type { Env } from "./env";
 import { HttpError } from "./http";
@@ -7,11 +8,19 @@ import { HttpError } from "./http";
 export const RESTRICTED_MEDIA_PATH = "/api/restricted-media/v1";
 
 export function canReadReference(env: Env, url: URL, reviewerId: string, batch: BatchRecord): boolean {
+  if (batch.id.startsWith(CAPTURE_BATCH_PREFIX)) {
+    const pin = env.REGISTERED_CAPTURE_ROSTER_SHA256;
+    if (!isRestrictedDraftVerification(batch) || !pin || !CAPTURE_DIGEST.test(pin) || batch.source.capture_roster_sha256 !== pin) return false;
+  }
   if (!batch.restrictedReference) {
     // Existing legacy data stays in D1. On deployment it cannot be served until its private roster is installed.
     return env.ENVIRONMENT === "development" || !restrictedStaticDirectory(batch.id);
   }
   if (!["line_verify", "page_review"].includes(batch.taskType)) return false;
+  return referenceReviewerAllowed(env, url, reviewerId);
+}
+
+export function referenceReviewerAllowed(env: Env, url: URL, reviewerId: string): boolean {
   const host = url.origin === "https://review.heocr.org" ||
     (env.ENVIRONMENT === "development" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname));
   const allowed = env.RESTRICTED_REFERENCE_REVIEWER_ID ?? "";
