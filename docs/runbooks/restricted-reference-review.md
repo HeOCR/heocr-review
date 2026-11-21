@@ -111,6 +111,20 @@ Use the authenticated Admin export to retrieve `line_verify_decisions.json` for 
 `reference_verification_pages.json` for explicit page answers and any added lines. A null `completeness`
 value means the page is pending. Added-line boxes use page fractions.
 
+### Page sweep for ratified issuer drafts
+
+Use a `private-ref-draft-` batch ID for issuer drafts outside the phone capture roster. After eval ratification
+and the closed-stage readback, add the exact batch ID and the importer's `--items-sha256` projection digest
+to the `RATIFIED_ISSUER_SWEEP_PINS` JSON map in the private Worker configuration. For example, the map has the
+shape `{"private-ref-draft-example":"<64 lowercase hex characters>"}`. Preserve existing entries when adding a
+batch. Keep the source archive and its ratification pins in the private staging receipt. The registry uses the
+digest of the imported items projection. A missing or mismatched entry denies even direct links and exports
+for that batch.
+
+With `PAGE_SWEEP_ENABLED=1` and the authorized batch open, desktop opens page sweep. The reviewer confirms or
+corrects flagged lines individually before completing a page. The existing line comparison and missing-lines
+editor stay available. The phone capture upload flag and its roster pin are independent of this registry.
+
 Keep these batches closed through staging. Supply a counts-only receipt for the registered roster, active line
 proposals, prior usable decisions, authorized blind passes, and completeness-only pages. Compare those counts to
 the eval pins and verify that the excluded pages have no active queue path. Verify the staged media keys and

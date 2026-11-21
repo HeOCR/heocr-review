@@ -7,13 +7,41 @@ import { HttpError } from "./http";
 
 export const RESTRICTED_MEDIA_PATH = "/api/restricted-media/v1";
 
-export const isCaptureDraft = (batch: BatchRecord) =>
-  batch.id.startsWith(CAPTURE_BATCH_PREFIX) && isRestrictedDraftVerification(batch);
+const ISSUER_DRAFT_BATCH_PREFIX = "private-ref-draft-";
+
+function sweepPinField(id: string) {
+  if (id.startsWith(CAPTURE_BATCH_PREFIX)) return "capture_roster_sha256";
+  if (id.startsWith(ISSUER_DRAFT_BATCH_PREFIX)) return "items_sha256";
+  return null;
+}
+
+export function draftSweepPin(batch: BatchRecord) {
+  const field = sweepPinField(batch.id);
+  if (!field || !isRestrictedDraftVerification(batch)) return null;
+  const digest = batch.source[field];
+  return typeof digest === "string" && CAPTURE_DIGEST.test(digest) ? { field, digest } : null;
+}
+
+function issuerRegistryPin(config: string | undefined, batchId: string): string | undefined {
+  if (!config) return undefined;
+  try {
+    const registry: unknown = JSON.parse(config);
+    if (!registry || typeof registry !== "object" || Array.isArray(registry)) return undefined;
+    if (!Object.hasOwn(registry, batchId)) return undefined;
+    const digest = (registry as Record<string, unknown>)[batchId];
+    return typeof digest === "string" && CAPTURE_DIGEST.test(digest) ? digest : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function canReadReference(env: Env, url: URL, reviewerId: string, batch: BatchRecord): boolean {
-  if (batch.id.startsWith(CAPTURE_BATCH_PREFIX)) {
-    const pin = env.REGISTERED_CAPTURE_ROSTER_SHA256;
-    if (!isCaptureDraft(batch) || !pin || !CAPTURE_DIGEST.test(pin) || batch.source.capture_roster_sha256 !== pin) return false;
+  if (sweepPinField(batch.id)) {
+    const pin = draftSweepPin(batch);
+    if (!pin) return false;
+    const expected = pin.field === "capture_roster_sha256" ? env.REGISTERED_CAPTURE_ROSTER_SHA256 :
+      issuerRegistryPin(env.RATIFIED_ISSUER_SWEEP_PINS, batch.id);
+    if (pin.digest !== expected) return false;
   }
   if (!batch.restrictedReference) {
     // Existing legacy data stays in D1. On deployment it cannot be served until its private roster is installed.

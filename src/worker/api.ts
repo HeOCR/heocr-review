@@ -1,6 +1,6 @@
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
 import { canSweep, pendingSweepPages, usesUnplantedReview } from "./page-sweep";
-import { canReadReference, isCaptureDraft, privateReferenceImage } from "./restricted_reference";
+import { canReadReference, draftSweepPin, privateReferenceImage } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
 import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingPage, trainingProgress } from "./page_paste_train";
@@ -238,7 +238,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const params = new URL(ctx.request.url).searchParams;
   const subsetId = params.get("subset");
   if (isRestrictedDraftVerification(batch)) {
-    if (params.get("queue") === "fix" && isCaptureDraft(batch) && canSweep(ctx.env, ctx.url, reviewer.id, batch)) {
+    if (params.get("queue") === "fix" && draftSweepPin(batch) && canSweep(ctx.env, ctx.url, reviewer.id, batch)) {
       const page = await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
       const progress = await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now);
       return json({ proposal: null, progress, prefetch: [], page });

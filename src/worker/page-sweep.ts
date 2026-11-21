@@ -14,7 +14,7 @@ import { getBatch, getReviewer } from "./db";
 import { randomId } from "./crypto";
 import type { Env } from "./env";
 import { assertSameOrigin, HttpError, json, readJson } from "./http";
-import { canReadReference, isCaptureDraft, privateReferenceImage, referenceImage, referenceReviewerAllowed } from "./restricted_reference";
+import { canReadReference, draftSweepPin, privateReferenceImage, referenceImage, referenceReviewerAllowed } from "./restricted_reference";
 import { enforce, LIMITS } from "./ratelimit";
 
 const missing = () => new HttpError(404, "not_found");
@@ -24,7 +24,7 @@ const retiredPlantBatch = (batch: BatchRecord) => PAGE_SWEEP_BATCHES.some(id => 
 
 export function canSweep(env: Env, url: URL, reviewer: string, batch: BatchRecord) {
   return env.PAGE_SWEEP_ENABLED === "1" && batch.taskType === "line_verify" && batch.settings?.pointedBooks === "keep" &&
-    (isCaptureDraft(batch) ? batch.settings.mode === "standard" : retiredPlantBatch(batch) && batch.settings.mode === "triage") &&
+    (draftSweepPin(batch) ? batch.settings.mode === "standard" : retiredPlantBatch(batch) && batch.settings.mode === "triage") &&
     referenceReviewerAllowed(env, url, reviewer) && canReadReference(env, url, reviewer, batch);
 }
 
@@ -47,13 +47,13 @@ const lineScope = `p.active=1 AND ${PASS1_SQL} AND ${ALLOWED_REFERENCE_PROPOSAL}
   AND (p.gate_kind IS NULL OR p.gate_kind='always') AND json_extract(p.payload_json,'$.gold') IS NULL`;
 const sweepRoster = `${REGISTERED_PAGE_SQL} AND (NOT ${protectedReferenceBatchSql("i.batch_id")} OR EXISTS(
   SELECT 1 FROM restricted_reference_pages rp WHERE rp.batch_id=i.batch_id AND rp.item_id=i.id AND rp.first_allowed=1))`;
-// Bind the roster again inside the transaction in case the batch changes after access().
+// Recheck the draft pin inside the transaction in case the batch changes after access().
 function pageScope(batch: BatchRecord) {
-  const capture = isCaptureDraft(batch);
-  const condition = capture
+  const pin = draftSweepPin(batch);
+  const condition = pin
     ? `s.mode='standard' AND b.restricted_reference=1 AND b.task_type='line_verify'
       AND json_extract(b.source_json,'$.restricted_review')='${DRAFT_VERIFICATION}'
-      AND json_extract(b.source_json,'$.capture_roster_sha256')=?4`
+      AND json_extract(b.source_json,'$.${pin.field}')=?4`
     : "s.mode='triage' AND ?4 IS NULL";
   return `i.batch_id=?1 AND i.id=?2 AND ${sweepRoster}
     AND EXISTS(SELECT 1 FROM batches b JOIN batch_settings s ON s.batch_id=b.id
@@ -61,7 +61,7 @@ function pageScope(batch: BatchRecord) {
 }
 
 function scopeBindings(batch: BatchRecord, id: number, reviewer: string) {
-  return [batch.id, id, reviewer, isCaptureDraft(batch) ? batch.source.capture_roster_sha256 as string : null] as const;
+  return [batch.id, id, reviewer, draftSweepPin(batch)?.digest ?? null] as const;
 }
 const checkFree = "NOT EXISTS(SELECT 1 FROM page_checks WHERE batch_id=?1 AND item_id=?2 AND reviewer_id=?3 AND superseded_at IS NULL)";
 const maxLines = 500;
@@ -96,13 +96,13 @@ function boxOf(box: Box | null | undefined, text: string): Box | null {
     box[2] - box[0] < 0.012 || box[3] - box[1] < 0.003 || !/[\p{L}\p{N}]/u.test(text)) return null;
   return box;
 }
-function stateOf(row: Row, capture: boolean): SweepLine["state"] {
+function stateOf(row: Row, draftVerification: boolean): SweepLine["state"] {
   if (row.matched && !row.pending) {
     if (row.value === "edited" || row.value === "typed") return "edited";
     return row.value === "exact" || row.value === "correct" ? "done" : "flagged";
   }
   if (row.skipped) return "skipped";
-  return row.old_id || (capture && row.uncertain === 1) ? "pending" : "open";
+  return row.old_id || (draftVerification && row.uncertain === 1) ? "pending" : "open";
 }
 async function readPage(c: Ctx, batch: BatchRecord, reviewer: string, id: number) {
   const db = c.env.DB;
@@ -143,16 +143,16 @@ export async function sweepRead(c: Ctx, batchId: string, id?: number) {
     : image;
   if (!display) throw missing();
   const type = taskType(batch.taskType)!;
-  const capture = isCaptureDraft(batch);
+  const draftVerification = draftSweepPin(batch) !== null;
   const view: SweepPage = {
     id: page.id, title: page.title, token: token(page, rows),
     image: { url: imageUrl(display.ref), width: display.width, height: display.height },
     lines: rows.map((r, i) => {
       const p = toProposal(r);
-      const state = stateOf(r, capture);
+      const state = stateOf(r, draftVerification);
       const text = (r.matched && !r.pending ? r.text : null) ?? candidateOf(p) ?? "";
       return { id: r.id, text, state, order: i + 1, box: boxOf(p.media.page?.box, text),
-        options: (type.optionsFor?.(p) ?? []).filter(o => capture
+        options: (type.optionsFor?.(p) ?? []).filter(o => draftVerification
           ? o.value === "exact" && (state === "pending" || state === "skipped")
           : !["exact","edited","typed"].includes(o.value)) };
     }),
@@ -187,11 +187,11 @@ export async function sweepWrite(c: Ctx, batchId: string, id: number) {
   const db = c.env.DB;
   const now = new Date(c.now).toISOString();
   const day = now.slice(0,10);
-  const capture = isCaptureDraft(batch);
+  const draftVerification = draftSweepPin(batch) !== null;
   const base = scopeBindings(batch, id, reviewer);
   const samePage = `EXISTS(SELECT 1 FROM items i WHERE ${pageScope(batch)})`;
   if (body.action === "finish" || body.action === "missing_lines") {
-    if (rows.some(r => ["pending", "skipped"].includes(stateOf(r, capture)))) throw new HttpError(409,"not_open");
+    if (rows.some(r => ["pending", "skipped"].includes(stateOf(r, draftVerification)))) throw new HttpError(409,"not_open");
     const witness = JSON.stringify(rows.map(identity));
     const checkId = randomId("pc-");
     const inserts = JSON.stringify(rows.filter(r => !r.old_id).map(r => ({ ...identity(r), decision: randomId("hr-") })));
@@ -211,11 +211,11 @@ export async function sweepWrite(c: Ctx, batchId: string, id: number) {
   }
   if (body.action !== "edit" || !Number.isSafeInteger(body.line) || typeof body.value !== "string") throw new HttpError(400,"invalid_decision");
   const row = rows.find(r => r.id === body.line);
-  if (!row || !["open","pending","skipped"].includes(stateOf(row, capture))) throw stale();
+  if (!row || !["open","pending","skipped"].includes(stateOf(row, draftVerification))) throw stale();
   const p = toProposal(row);
   const type = taskType(batch.taskType)!;
   const value = body.value === "edited" && p.payload.kind === "type" ? "typed" : body.value;
-  if ((capture && value !== "exact" && value !== "edited") || !type.optionsFor?.(p).some(o => o.value === value)) throw new HttpError(400,"invalid_decision");
+  if ((draftVerification && value !== "exact" && value !== "edited") || !type.optionsFor?.(p).some(o => o.value === value)) throw new HttpError(400,"invalid_decision");
   const normalized = type.normalizeDecision(p, value, body.text);
   if (!normalized.ok) throw new HttpError(400,"invalid_decision",normalized.error);
   const guard = `${samePage} AND ${checkFree} AND EXISTS(SELECT 1 FROM proposals p WHERE p.id=?5
