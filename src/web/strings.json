@@ -1020,13 +1020,17 @@
   "הימני אמיתי יותר",
   "Right looks more real"
  ],
+ "rr_choose_tie": [
+  "נראים אמיתיים באותה המידה",
+  "They look equally real"
+ ],
  "rr_undo": [
   "ביטול הבחירה האחרונה",
   "Undo last choice"
  ],
  "rr_keys": [
-  "אפשר לבחור גם עם מקשי החיצים.",
-  "You can also choose with the arrow keys."
+  "אפשר לבחור עם חץ שמאלה או ימינה, או עם חץ למעלה אם שתי התמונות נראות אמיתיות באותה המידה.",
+  "Use Left or Right to choose a side, or Up if both images look equally real."
  ],
  "rr_zoom_left": [
   "הגדלת התמונה השמאלית",

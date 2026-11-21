@@ -1,11 +1,12 @@
 import type { BatchSummary } from "../../shared/api";
-import type { RankingPair, RankingQueue, Side } from "../../shared/synth_realism";
+import { RANKING_TIE, type RankingChoice, type RankingPair, type RankingQueue } from "../../shared/synth_realism";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h, mount } from "../dom";
 import { t } from "../i18n";
 import type { ReviewHooks, ReviewScreen } from "./common";
 
 const sides = [0, 1] as const;
+const shortcuts = new Map<string, RankingChoice>([["ArrowLeft", 0], ["ArrowRight", 1], ["ArrowUp", RANKING_TIE]]);
 
 export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): ReviewScreen {
   const root = h("section", { class: "realism", "aria-labelledby": "ranking-heading" });
@@ -13,7 +14,7 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
   const cache = new Map<number, { abort: AbortController; urls: string[]; images: Promise<HTMLImageElement[]> }>();
   let disposed = false;
   let busy = false;
-  let chooseKey: ((side: Side) => void) | null = null;
+  let chooseKey: ((choice: RankingChoice) => void) | null = null;
 
   function prefetch(pair: RankingPair) {
     const cached = cache.get(pair.position);
@@ -78,7 +79,7 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
       bdi(t(current ? "sr_counter" : "sr_counter_done", { current: current ? completed + 1 : completed, total })));
     const buttons: HTMLButtonElement[] = [];
     let shownAt: number | null = null;
-    let selection: { choice: Side; revision: number; latency_ms: number } | null = null;
+    let selection: { choice: RankingChoice; revision: number; latency_ms: number } | null = null;
     const undo = previous ? h("button", { type: "button", class: "act quiet ranking-undo", onclick: () => {
       void save(`${base}/pairs/${previous.position}/undo`, { revision: previous.revision });
     } }, t("rr_undo")) : null;
@@ -109,10 +110,10 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
       return;
     }
 
-    function choose(side: Side) {
+    function choose(choice: RankingChoice) {
       if (busy || dialog.open || shownAt === null) return;
-      selection ??= { choice: side, revision: current!.revision, latency_ms: Math.min(86_400_000, Math.round(performance.now() - shownAt)) };
-      void save(`${base}/pairs/${current!.position}/choice`, selection);
+      selection ??= { choice, revision: current!.revision, latency_ms: Math.min(86_400_000, Math.round(performance.now() - shownAt)) };
+      void save(`${base}/pairs/${current!.position}/choice`, { ...selection, tie_available: true });
     }
 
     const grid = h("div", { class: "realism-pair", dir: "ltr" });
@@ -135,11 +136,15 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
           dialog.showModal();
         } }, h("span", { class: "realism-scan" }, ready[side]!));
         const button = h("button", { type: "button", class: "act ranking-choice", dir: "auto", disabled: true,
+          "aria-keyshortcuts": side === 0 ? "ArrowLeft" : "ArrowRight",
           onclick: () => choose(side) }, t(side === 0 ? "rr_choose_left" : "rr_choose_right"));
         buttons.push(button);
         grid.append(h("div", { class: "ranking-panel" }, zoom, button));
       }
-      root.append(h("p", { class: "ranking-keys" }, t("rr_keys")));
+      const tie = h("button", { type: "button", class: "act ranking-choice ranking-tie", dir: "auto", disabled: true,
+        "aria-keyshortcuts": "ArrowUp", onclick: () => choose(RANKING_TIE) }, t("rr_choose_tie"));
+      buttons.push(tie);
+      root.append(tie, h("p", { class: "ranking-keys" }, t("rr_keys")));
       requestAnimationFrame(() => {
         if (disposed || !status.isConnected) return;
         shownAt = performance.now();
@@ -155,10 +160,11 @@ export function realismRankingView(batch: BatchSummary, hooks: ReviewHooks): Rev
   }
 
   function keydown(event: KeyboardEvent) {
+    const choice = shortcuts.get(event.key);
     if (!chooseKey || event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
-      root.querySelector("dialog[open]") || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+      root.querySelector("dialog[open]") || choice === undefined) return;
     event.preventDefault();
-    chooseKey(event.key === "ArrowLeft" ? 0 : 1);
+    chooseKey(choice);
   }
   window.addEventListener("keydown", keydown);
   void load();

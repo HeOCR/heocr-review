@@ -127,6 +127,7 @@ main#app.task .state { padding-inline: 16px; }
 .ranking-image { cursor: zoom-in; }
 .ranking-image img { display: block; }
 .ranking-choice { min-height: 44px; padding-inline: 4px; }
+.ranking-tie { display: flex; margin: 8px auto 0; padding-inline: 12px; }
 .ranking-keys { color: var(--muted); font-size: .875rem; }
 .ranking-dialog { max-width: min(95vw, 1000px); max-height: 94vh; padding: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--line); }
 .ranking-dialog::backdrop { background: rgb(0 0 0 / .65); }

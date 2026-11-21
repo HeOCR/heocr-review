@@ -71,7 +71,7 @@ it("writes the first valid choice once, supports atomic undo and exports the dis
   const f = await fixture();
   const path = base + "/pairs/1/choice";
   expect((await f.request(path, { body: { revision: 0, choice: 0, latency_ms: 15 }, origin: "https://bad.invalid" })).status).toBe(403);
-  expect((await f.request(path, { body: { revision: 0, choice: 2, latency_ms: 15 } })).status).toBe(400);
+  expect((await f.request(path, { body: { revision: 0, choice: 3, latency_ms: 15 } })).status).toBe(400);
   expect((await f.choose(2, 0)).completed).toBe(0);
   const leftOfOne = new TextDecoder().decode(await (await f.request(base + "/pairs/1/image/0")).arrayBuffer());
   const [a, b] = await Promise.all([f.choose(1, 0), f.choose(1, 0)]);
@@ -91,7 +91,7 @@ it("writes the first valid choice once, supports atomic undo and exports the dis
     license: "CC0-1.0", purpose: "generator_development_only",
     modality_by_arm: { "arm-alpha": "scan", "arm-beta": "scan" },
     decisions: [
-      { control: "standard", reviewer: f.id, chosen_at: expect.any(String), latency_ms: 70,
+      { control: "standard", reviewer: f.id, chosen_at: expect.any(String), latency_ms: 70, tie_available: false,
         pair_id: "secret-pair-1", left_item_id: leftOfOne === "img-a" ? "item-a" : "item-b", choice: "right", correct: null },
       { control: "real_synth", right_item_id: rightOfTwo === "img-b" ? "item-b" : "item-a", choice: "right", correct: rightOfTwo === "img-b" },
       { control: "real_real", correct: null, choice: "left" },
@@ -99,4 +99,21 @@ it("writes the first valid choice once, supports atomic undo and exports the dis
   });
   expect((await f.undo(3, 1)).completed).toBe(2);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM synth_ranking_answers WHERE choice IS NOT NULL").first("n")).toBe(2);
+});
+
+it("saves ties as completed choices, exports all three tie types, and undoes a tie safely", async () => {
+  const f = await fixture();
+  expect((await f.choose(1, 0, 2)).completed).toBe(1);
+  expect((await f.choose(2, 0, 2)).completed).toBe(2);
+  expect((await f.choose(3, 0, 2)).current).toBeNull();
+  const data = await (await f.request(exportPath)).json<{ files: Record<string, unknown> }>();
+  expect(data.files["realism_ranking_cc0.json"]).toMatchObject({
+    decisions: ["standard", "real_synth", "real_real"].map(control =>
+      ({ control, choice: "tie", tie_available: true, correct: null, latency_ms: 70 })),
+  });
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM synth_ranking_answers WHERE choice=2").first("n")).toBe(3);
+  expect(await f.undo(3, 1)).toMatchObject({ completed: 2, current: { position: 3, revision: 2 } });
+  expect((await f.choose(3, 0, 2)).completed).toBe(2);
+  expect((await f.choose(3, 2, 1)).completed).toBe(3);
+  expect(await env.DB.prepare("SELECT choice FROM synth_ranking_answers WHERE position=3").first("choice")).toBe(1);
 });

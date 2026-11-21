@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import { fitRanking } from "../../scripts/lib/fit-realism-ranking";
 import { parseRankingManifest, validateRankingModalities } from "../../src/tasks/synth_realism/ranking";
@@ -68,9 +70,66 @@ it("pins real controls to TRAIN and allows separate comparison components", () =
   }, clearance).images).toHaveLength(5);
 });
 
-const rank = (id: string, a: string | null, b: string | null, choice: 0 | 1): RankingRow => ({
+const rank = (id: string, a: string | null, b: string | null, choice: RankingRow["choice"], tie_available: 0 | 1 = 1): RankingRow => ({
   pair_id: id, item_a: "img-1", arm_a: a, item_b: "img-2", arm_b: b, reviewer: "rv_fixture",
-  swapped: 0, choice, latency_ms: 36, chosen_at: 1,
+  swapped: 0, choice, tie_available, latency_ms: 36, chosen_at: 1,
+});
+
+it("fits Davidson separately and counts ties by unordered arm pair and by control kind", () => {
+  const rows = [rank("a-won", "a", "b", 0), rank("a-tied", "b", "a", 2), rank("phone-win", "c", "d", 0),
+    rank("control-win", null, "a", 0), rank("control-tie", "a", null, 2),
+    rank("real-real-tie", null, null, 2), rank("real-real-right", null, null, 1),
+    rank("forced-win", "a", "b", 0, 0), rank("forced-control-miss", null, "a", 1, 0)];
+  const fit = (results: RankingRow[]) => fitRanking(rankingExport("fixture", results, new Date(0).toISOString(), true,
+    { a: "scan", b: "scan", c: "phone", d: "phone" }));
+  const report = fit(rows);
+  expect(report.components).toMatchObject([
+    { modality: "scan", model: "davidson", comparisons: 3, ties: 1, tie_log_propensity: expect.any(Number) },
+    { modality: "phone", model: "bradley_terry", comparisons: 1, ties: 0, tie_log_propensity: null },
+  ]);
+  expect(report.components[0]!.arms.map(a => a.arm_id)).toEqual(["a", "b"]);
+  expect(report.arm_pair_ties).toEqual([
+    { modality: "scan", arm_a: "a", arm_b: "b", answered: 3, tie_eligible: 2, ties: 1, tie_rate: 0.5 },
+    { modality: "phone", arm_a: "c", arm_b: "d", answered: 1, tie_eligible: 1, ties: 0, tie_rate: 0 },
+  ]);
+  expect(report.controls).toMatchObject({
+    overall: { answered: 5, tie_eligible: 4, ties: 2, tie_rate: 0.5 },
+    real_synth: { answered: 3, tie_eligible: 2, ties: 1, decisive: 2, correct: 1, accuracy: 0.5, tie_rate: 0.5 },
+    real_real: { answered: 2, ties: 1, chose_left: 0, chose_right: 1, tie_rate: 0.5 },
+  });
+  const allTies = fit([rank("all-tied", "a", "b", 2), rank("tied-control", null, "a", 2)]);
+  expect(allTies.components[0]!.arms.map(x => x.centered_log_strength)).toEqual([0, 0]);
+  expect(allTies.controls.real_synth).toMatchObject({ ties: 1, decisive: 0, accuracy: null, wilson_95: null });
+});
+
+it("migrates saved left/right and undone ranking rows unchanged, then accepts a timed tie", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE batches(id TEXT PRIMARY KEY); CREATE TABLE reviewers(id TEXT PRIMARY KEY);");
+    db.exec(readFileSync("migrations/0020_realism_ranking.sql", "utf8"));
+    db.exec(`INSERT INTO batches VALUES ('fixture');
+      INSERT INTO reviewers VALUES ('reviewer');
+      INSERT INTO synth_ranking_pairs VALUES
+        ('fixture',1,'p1','a','one','left','b','two','right'),
+        ('fixture',2,'p2','b','two','right','a','one','left'),
+        ('fixture',3,'p3','a','one','left','b','two','right');
+      INSERT INTO synth_ranking_answers VALUES
+        ('fixture','reviewer',1,1,0,1,17,100),
+        ('fixture','reviewer',2,1,1,0,19,105),
+        ('fixture','reviewer',3,2,NULL,1,NULL,NULL);`);
+    const snapshot = () => db.prepare("SELECT batch_id,reviewer_id,position,revision,choice,swapped,latency_ms,chosen_at FROM synth_ranking_answers ORDER BY position").all();
+    const before = snapshot();
+    db.exec(readFileSync("migrations/0021_realism_ranking_ties.sql", "utf8"));
+    expect(snapshot()).toEqual(before);
+    expect(db.prepare("SELECT SUM(tie_available) AS offered FROM synth_ranking_answers").get()?.offered).toBe(0);
+    expect(() => db.exec("UPDATE synth_ranking_answers SET choice=2 WHERE position=3")).toThrow("CHECK");
+    expect(() => db.exec("UPDATE synth_ranking_answers SET choice=2,latency_ms=23,chosen_at=110 WHERE position=3")).toThrow("CHECK");
+    db.exec("UPDATE synth_ranking_answers SET choice=2,tie_available=1,latency_ms=23,chosen_at=110 WHERE position=3");
+    expect(snapshot()[2]).toMatchObject({ choice: 2, revision: 2, latency_ms: 23, chosen_at: 110 });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally {
+    db.close();
+  }
 });
 
 it("fits regularized Bradley–Terry intervals under separation and reports controls independently", () => {
