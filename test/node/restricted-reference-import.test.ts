@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,14 +13,43 @@ const encode = (value: unknown) => Buffer.from(JSON.stringify(value));
 const batch = "private-ref-fixture-import";
 const candidate = "A\u0301 ב";
 
-it("probes only the disabled managed R2 hostname for anonymous object denial", () => {
+it("uses only the disabled managed R2 hostname", () => {
   const domain = "pub-fixture.r2.dev";
   expect(disabledR2FixtureUrl({ enabled: false, domain }, "access-check.txt").href)
     .toBe("https://pub-fixture.r2.dev/access-check.txt");
   expect(() => disabledR2FixtureUrl({ enabled: true, domain }, "access-check.txt")).toThrow(/disabled/);
   expect(() => disabledR2FixtureUrl({ enabled: false, domain: domain + ".example.com" }, "access-check.txt")).toThrow(/disabled/);
-  for (const status of [401, 403, 404]) expect(() => assertAnonymousR2Denial(status)).not.toThrow();
-  for (const status of [200, 206, 302, 400, 500]) expect(() => assertAnonymousR2Denial(status)).toThrow(/unexpected/);
+});
+
+it("checks both R2 endpoints anonymously and rejects direct or redirected 2xx responses", async () => {
+  const received: { route: string | undefined; auth: string | undefined; cookie: string | undefined }[] = [];
+  const server = createServer((request, response) => {
+    received.push({ route: request.url, auth: request.headers.authorization, cookie: request.headers.cookie });
+    switch (request.url) {
+      case "/unsigned-s3": response.writeHead(400); break;
+      case "/disabled-403": response.writeHead(403); break;
+      case "/redirect-denied": response.writeHead(302, { Location: "/disabled-404" }); break;
+      case "/redirect-content": response.writeHead(307, { Location: "/content" }); break;
+      case "/content": response.writeHead(206); break;
+      case "/error": response.writeHead(500); break;
+      default: response.writeHead(404); break;
+    }
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("fixture server has no port");
+    const at = (route: string) => new URL(route, `http://127.0.0.1:${address.port}`);
+    await expect(assertAnonymousR2Denial(at("/disabled-403"), at("/unsigned-s3"))).resolves.toEqual({ managed: 403, s3: 400 });
+    await expect(assertAnonymousR2Denial(at("/redirect-denied"), at("/error"))).resolves.toEqual({ managed: 404, s3: 500 });
+    await expect(assertAnonymousR2Denial(at("/disabled-403"), at("/content"))).rejects.toThrow(/S3 R2 access succeeded/);
+    await expect(assertAnonymousR2Denial(at("/redirect-content"), at("/unsigned-s3"))).rejects.toThrow(/managed R2 access redirected to content/);
+    expect(received.map(({ route }) => route)).toContain("/disabled-404");
+    expect(received.every(({ auth, cookie }) => !auth && !cookie)).toBe(true);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 let root: string;
 let raster: Buffer;

@@ -21,10 +21,20 @@ export function disabledR2FixtureUrl(managed: { enabled?: boolean; domain?: stri
   return new URL("https://" + managed.domain + "/" + encodeURIComponent(key));
 }
 
-export function assertAnonymousR2Denial(status: number): void {
-  if (status !== 401 && status !== 403 && status !== 404) {
-    throw new Error(`anonymous R2 access check returned unexpected HTTP ${status}`);
+export async function assertAnonymousR2Denial(managed: URL, s3: URL): Promise<{ managed: number; s3: number }> {
+  async function probe(endpoint: string, url: URL): Promise<number> {
+    const response = await fetch(url, {
+      credentials: "omit", redirect: "follow", signal: AbortSignal.timeout(30_000),
+    });
+    await response.body?.cancel();
+    if (response.ok) {
+      throw new Error(`anonymous ${endpoint} R2 access ${response.redirected ? "redirected to content" : "succeeded"} (HTTP ${response.status})`);
+    }
+    return response.status;
   }
+
+  const [managedStatus, s3Status] = await Promise.all([probe("managed", managed), probe("S3", s3)]);
+  return { managed: managedStatus, s3: s3Status };
 }
 
 /** Use only the named private object namespace. Images never enter the static tree. */

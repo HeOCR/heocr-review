@@ -19,7 +19,7 @@ interface CloudflareResponse<T> {
   result_info?: { cursor?: string; is_truncated?: boolean };
 }
 
-async function readPrivateObjects(batch: string, credentials: Record<string, string>): Promise<ObjectReadback[]> {
+async function readPrivateObjects(batch: string, credentials: Record<string, string>) {
   const account = credentials.CLOUDFLARE_ACCOUNT_ID;
   const token = credentials.CLOUDFLARE_API_TOKEN;
   if (!account || !/^[a-f0-9]{32}$/.test(account) || !token || credentials.CLOUDFLARE_WORKERS_SUBDOMAIN !== "heocr") {
@@ -42,12 +42,11 @@ async function readPrivateObjects(batch: string, credentials: Record<string, str
   if (!Array.isArray(custom?.domains) || custom.domains.length !== 0) {
     throw new Error("private R2 public-access settings did not pass");
   }
-  const anonymousUrl = disabledR2FixtureUrl(managed, accessFixture.key);
+  const managedUrl = disabledR2FixtureUrl(managed, accessFixture.key);
+  const s3Url = new URL(`https://${account}.r2.cloudflarestorage.com/${bucket}/${encodeURIComponent(accessFixture.key)}`);
   const fixture = await request(`/objects/${accessFixture.key}`);
   if (!fixture.ok || await fixture.text() !== accessFixture.text) throw new Error("private R2 access fixture could not be read");
-  const anonymous = await fetch(anonymousUrl, { redirect: "error", signal: AbortSignal.timeout(30000) });
-  await anonymous.body?.cancel();
-  assertAnonymousR2Denial(anonymous.status);
+  const anonymousProbes = await assertAnonymousR2Denial(managedUrl, s3Url);
 
   const objects: ObjectReadback[] = [];
   const cursors = new Set<string>();
@@ -61,7 +60,7 @@ async function readPrivateObjects(batch: string, credentials: Record<string, str
     cursors.add(page.cursor);
     query.set("cursor", page.cursor);
   }
-  return objects;
+  return { objects, anonymousProbes };
 }
 
 function readback(pins: RestrictedPins) {
@@ -177,7 +176,7 @@ async function main() {
   }
   if (!existing) await checkWriteBudget(destination, estimate, {});
   const prepared = await prepareRestrictedMedia(stage);
-  const objects = await readPrivateObjects(pins.batch, credentials);
+  const { objects, anonymousProbes } = await readPrivateObjects(pins.batch, credentials);
   const sql = buildRestrictedStageSql(stage, prepared, objects, new Date().toISOString());
   if (!existing) {
     const dir = mkdtempSync(join(tmpdir(), "restricted-review-stage-"));
@@ -193,7 +192,10 @@ async function main() {
   }
   if (!stageMatches(pins, readback(pins))) throw new Error("production closed-stage readback differs; hold activation");
   verifyStoredRefs(stage, prepared);
-  console.log(JSON.stringify({ ...counts, private_media_objects_verified: prepared.objects.size, status: "closed", already_staged: !!existing }));
+  console.log(JSON.stringify({
+    ...counts, private_media_objects_verified: prepared.objects.size, anonymous_probes: anonymousProbes,
+    status: "closed", already_staged: !!existing,
+  }));
 }
 
 main().catch((error: unknown) => {
