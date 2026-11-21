@@ -43,7 +43,7 @@ export function pageSweepView(batch: BatchSummary, hooks: ReviewHooks): ReviewSc
       if (disposed) return;
       if (page) render(page);
       else mount(root, heads(), h("h1", {}, t("done_h")),
-        h("a", { href: `#b/${encodeURIComponent(batch.id)}/q/fix` }, t("q_fix", { n: batch.triage?.fix ?? 0 })),
+        ...(batch.triage ? [h("a", { href: `#b/${encodeURIComponent(batch.id)}/q/fix` }, t("q_fix", { n: batch.triage.fix }))] : []),
         h("a", { href: "#tasks" }, t("all_tasks")));
     } catch (error) {
       mount(root, heads(), status, h("button", { type: "button", onclick: () => void load() }, t("retry")));

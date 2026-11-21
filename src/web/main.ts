@@ -182,8 +182,9 @@ async function route(): Promise<void> {
     const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
     const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
     const startAt = linked ? Number(linked[1]) : undefined;
-    const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage") : undefined;
-    const sweep = batch.pageSweep && !linked && !chosen?.[3] && matchMedia("(min-width: 900px) and (pointer: fine)").matches;
+    const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage")
+      : batch.pageSweep && chosen?.[3] === "fix" ? "fix" : undefined;
+    const sweep = batch.pageSweep && !linked && !chosen?.[3] && desktopSweep();
     const view: ReviewScreen = sweep ? pageSweepView(batch, hooks) :
       batch.taskType === PAGE_PASTE_TRAIN ? pagePasteTrainView(batch, hooks)
         : batch.taskType === SYNTH_REALISM
@@ -195,7 +196,9 @@ async function route(): Promise<void> {
           : batch.taskType === "line_verify"
             ? lineVerifyView(batch, hooks, startAt, queue)
             : reviewView(batch, hooks, startAt);
-    const head = sweep ? [] : batch.triage ? [queueNav(batch, linked ? undefined : queue)] : batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
+    const head = sweep ? [] : batch.triage ? [queueNav(batch, linked ? undefined : queue)] :
+      batch.pageSweep && desktopSweep() ? [sweepLink(batch)] :
+      batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
     show("task", ...head.map((n) => h("div", { class: "batchhead" }, n)), view.el);
     setWhere(batch.title);
     dispose = view.dispose;
@@ -229,6 +232,10 @@ function subsetNav(batch: BatchSummary, current: string | undefined): HTMLElemen
   );
 }
 
+const desktopSweep = () => matchMedia("(min-width: 900px) and (pointer: fine)").matches;
+const sweepLink = (batch: BatchSummary) => h("a", { href: `#b/${encodeURIComponent(batch.id)}` },
+  lang() === "he" ? "סקירת דף" : "Page sweep");
+
 /** A triage batch's two queues: triage (any screen) and the desktop fixes, with what each still holds for me. */
 function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): HTMLElement {
   const link = (q: "triage" | "fix", label: string) =>
@@ -236,7 +243,7 @@ function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): H
   return h(
     "nav",
     { class: "subsetnav small", "aria-label": t("filter") },
-    ...(batch.pageSweep && matchMedia("(min-width: 900px) and (pointer: fine)").matches ? [h("a", { href: `#b/${encodeURIComponent(batch.id)}` }, lang() === "he" ? "סקירת דף" : "Page sweep")] : []),
+    ...(batch.pageSweep && desktopSweep() ? [sweepLink(batch)] : []),
     link("triage", t("q_triage", { n: batch.triage!.triage })),
     link("fix", t("q_fix", { n: batch.triage!.fix })),
   );
@@ -244,8 +251,10 @@ function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): H
 
 /** Every open batch, the ones with work left for this reviewer first. */
 function picker(batches: BatchSummary[]): HTMLElement {
-  const priority = (b: BatchSummary) => (b.pageSweep?.remainingPages ?? 0) > 0
-    ? PAGE_SWEEP_BATCHES.findIndex(id => id === b.id) : PAGE_SWEEP_BATCHES.length;
+  const priority = (b: BatchSummary) => {
+    const index = PAGE_SWEEP_BATCHES.findIndex(id => id === b.id);
+    return (b.pageSweep?.remainingPages ?? 0) > 0 && index >= 0 ? index : PAGE_SWEEP_BATCHES.length;
+  };
   const sorted = [...batches].sort((a, b) => priority(a) - priority(b) ||
     Number(b.progress.remainingForMe > 0) - Number(a.progress.remainingForMe > 0));
   return h(
@@ -254,7 +263,7 @@ function picker(batches: BatchSummary[]): HTMLElement {
     h("h1", {}, t("pick_h")),
     ...sorted.map((b) => {
       const p = b.progress;
-      const pages = matchMedia("(min-width: 900px) and (pointer: fine)").matches ? b.pageSweep?.remainingPages : undefined;
+      const pages = desktopSweep() ? b.pageSweep?.remainingPages : undefined;
       // A volunteer batch shows the volunteer's own count only (nothing about other volunteers' work).
       const own = p.ownOnly === true;
       const pct = !own && p.total ? Math.round((p.covered / p.total) * 100) : 0;
