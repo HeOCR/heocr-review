@@ -7,11 +7,13 @@ import { DatabaseSync } from "node:sqlite";
 import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget } from "./lib/d1budget";
 import { commaDraftsSql, commaReadbackSql, guardedCommaUpdate, planCommaBackfill, queueKey, type CommaDraftRow } from "./lib/draft-comma-backfill";
+import { punctuationSwitches } from "./lib/draft-comma-spacing";
 import { d1File, d1Query, loadCredentials } from "./lib/wrangler";
 
 async function main() {
   const { flags } = parseArgs(process.argv.slice(2));
   const destination = target(flags);
+  const marks = punctuationSwitches(flags);
   const apply = flags.apply === true;
   const path = realpathSync(str(flags, "backup"));
   const bytes = readFileSync(path);
@@ -24,10 +26,10 @@ async function main() {
   }
   const db = new DatabaseSync(":memory:");
   db.exec(bytes.toString("utf8"));
-  const { queues, updates } = planCommaBackfill(db.prepare(commaDraftsSql).all() as unknown as CommaDraftRow[]);
+  const { queues, updates } = planCommaBackfill(db.prepare(commaDraftsSql).all() as unknown as CommaDraftRow[], marks);
   db.close();
   const estimate = updates.length;
-  console.log(JSON.stringify({ backup_sha256: sha, write_estimate: estimate, queues }));
+  console.log(JSON.stringify({ backup_sha256: sha, write_estimate: estimate, marks: marks.length ? marks : [","], queues }));
 
   if (destination === "production") {
     const credentials = loadCredentials();
@@ -51,7 +53,7 @@ async function main() {
     for (let i = 0; i < updates.length; i += 500) {
       const chunk = updates.slice(i, i + 500);
       const rows = d1Query<{ id: number; content_sha256: string; original_sha: string }>(
-        destination, commaReadbackSql(chunk.map(u => u.row.id)),
+        destination, commaReadbackSql(chunk.map(u => u.row.id), marks.length > 0),
       )[0] ?? [];
       const readback = new Map(rows.map(row => [row.id, row]));
       for (const update of chunk) {
@@ -68,7 +70,7 @@ async function main() {
 
 main().catch(error => {
   const message = error instanceof Error ? error.message : "";
-  const allowed = /^(backup must|production apply requires|backfill write failed|this import would write|cannot check the D1 write budget)/;
+  const allowed = /^(backup must|production apply requires|backfill write failed|this import would write|cannot check the D1 write budget|--(?:period|semicolon|colon|question-mark|exclamation-mark) does not take a value)/;
   console.error(allowed.test(message) ? message : "Comma-spacing operation failed. Check protected inputs locally.");
   process.exitCode = 1;
 });

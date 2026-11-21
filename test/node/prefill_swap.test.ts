@@ -91,4 +91,14 @@ describe("the draft swap plan", () => {
     const a = planPrefillSwap(v13({ [A0]: "שורה" }), "h_eval_v1_lines", liveRows());
     expect(JSON.stringify(a)).toBe(JSON.stringify(planPrefillSwap(v13({ [A0]: "שורה" }), "h_eval_v1_lines", liveRows())));
   });
+
+  it("applies opt-in spacing to new drafts and recognizes the same source on a default retry", () => {
+    const bundle = v13({ [A0]: "המכתב ,הגיע !זהירות" });
+    const batch = "h_eval_v1_lines";
+    const on = planPrefillSwap(bundle, batch, liveRows(), ["!"]);
+    expect(JSON.parse(on.updates[0]!.payload_json).candidate_text).toBe("המכתב, הגיע! זהירות");
+    expect(JSON.parse(planPrefillSwap(bundle, batch, liveRows()).updates[0]!.payload_json).candidate_text).toBe("המכתב, הגיע !זהירות");
+    const after = liveRows().map(row => row.external_id === A0 ? { ...row, ...on.updates[0] } : row);
+    expect(planPrefillSwap(bundle, batch, after)).toMatchObject({ updates: [], already: 1 });
+  });
 });

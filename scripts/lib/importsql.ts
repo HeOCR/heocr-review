@@ -2,15 +2,15 @@ import { createHash } from "node:crypto";
 import { canonicalJson, type ImportBundle, type ImportProposal } from "../../src/tasks/import";
 import type { ProposalMedia, StoredImage } from "../../src/tasks/types";
 import { lit } from "./sql";
-import { commaSpacingRevision, COMMA_AUDIT } from "./draft-comma-spacing";
+import { COMMA_AUDIT, PUNCTUATION_AUDIT, importSpacingRevision, type PunctuationMark } from "./draft-comma-spacing";
 
 export function contentSha256(contentKey: unknown): string {
   return createHash("sha256").update(canonicalJson(contentKey), "utf8").digest("hex");
 }
 
-export function importProposalContent(task: string, proposal: ImportProposal, planted = false) {
+export function importProposalContent(task: string, proposal: ImportProposal, planted = false, marks: readonly PunctuationMark[] = []) {
   const originalSha = contentSha256(proposal.contentKey);
-  const correction = planted ? null : commaSpacingRevision(task, proposal.payload, originalSha);
+  const correction = planted ? null : importSpacingRevision(task, proposal.payload, originalSha, marks);
   return { originalSha, correction };
 }
 
@@ -29,6 +29,7 @@ interface ImportOptions {
   addOnly?: boolean;
   itemImages?: ReadonlyMap<string, StoredImage>;
   planted?: ReadonlySet<string>;
+  punctuation?: readonly PunctuationMark[];
 }
 
 export function buildImportStatements(
@@ -57,17 +58,20 @@ export function buildImportStatements(
   }
   for (const p of bundle.proposals) {
     const itemId = `(SELECT id FROM items WHERE batch_id = ${b} AND external_id = ${lit(p.itemExternalId)})`;
-    const { originalSha, correction } = importProposalContent(batch.taskType, p, opts.planted?.has(p.externalId));
+    const { originalSha, correction } = importProposalContent(batch.taskType, p, opts.planted?.has(p.externalId), opts.punctuation);
     const payload = lit(JSON.stringify(correction?.payload ?? p.payload));
     const content = lit(correction?.contentSha256 ?? originalSha);
     // A re-import can encounter a prior answer or saved edit on the raw proposal. Keep that revision.
     const keep = `EXISTS (SELECT 1 FROM decisions WHERE proposal_id=proposals.id)
       OR EXISTS (SELECT 1 FROM drafts WHERE proposal_id=proposals.id)`;
     const pinned = `EXISTS (SELECT 1 FROM triage_plants WHERE proposal_id=proposals.id)`;
-    const sameSource = `(proposals.content_sha256=${lit(originalSha)} OR json_extract(proposals.payload_json,'$.${COMMA_AUDIT}.content_sha256')=${lit(originalSha)})`;
-    const update = (column: string, raw: string) => !correction ? `excluded.${column}` :
-      `CASE WHEN ${pinned} OR ((${keep}) AND ${sameSource}) THEN proposals.${column}
-        WHEN ${keep} THEN ${raw} ELSE excluded.${column} END`;
+    const firstPunctuation = `json_extract(proposals.payload_json,'$.${PUNCTUATION_AUDIT}[0].content_sha256')`;
+    const sameSource = `(proposals.content_sha256=${lit(originalSha)} OR json_extract(proposals.payload_json,'$.${COMMA_AUDIT}.content_sha256')=${lit(originalSha)} OR ${firstPunctuation}=${lit(originalSha)})`;
+    // Disabling a switch on re-import leaves a prior reviewed or unreviewed opt-in revision of the same source in place.
+    const update = (column: string, raw: string) => `CASE
+      WHEN ${firstPunctuation} IS NOT NULL AND ${sameSource} THEN proposals.${column}
+      ${correction ? `WHEN ${pinned} OR ((${keep}) AND ${sameSource}) THEN proposals.${column} WHEN ${keep} THEN ${raw}` : ""}
+      ELSE excluded.${column} END`;
     out.push(
       `INSERT INTO proposals (batch_id, item_id, external_id, category, confidence, rank, payload_json, media_json, content_sha256, active, gate_kind, gate_ref) VALUES (${b}, ${itemId}, ${lit(p.externalId)}, ${lit(p.category)}, ${lit(p.confidence)}, ${p.rank}, ${payload}, ${lit(JSON.stringify(media.get(p.externalId) ?? {}))}, ${content}, 1, ${p.gate ? lit(p.gate.kind) : "NULL"}, ${p.gate?.ref ? lit(p.gate.ref) : "NULL"})
   ON CONFLICT (batch_id, external_id) DO UPDATE SET item_id = excluded.item_id, category = excluded.category, confidence = excluded.confidence, rank = excluded.rank, payload_json = ${update("payload_json", lit(JSON.stringify(p.payload)))}, media_json = excluded.media_json, content_sha256 = ${update("content_sha256", lit(originalSha))}, active = 1, gate_kind = excluded.gate_kind, gate_ref = excluded.gate_ref;`,

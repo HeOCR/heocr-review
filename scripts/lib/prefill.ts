@@ -11,7 +11,7 @@
 import { lineVerifyImporter } from "../../src/tasks/line_verify/importer";
 import { ITEMS_SCHEMA_V13, LLM_PROVENANCE, draftProblems, itemsFileProblems, type LvItemsFile } from "../../src/tasks/line_verify/schema";
 import { contentSha256 } from "./importsql";
-import { commaSpacingRevision, COMMA_AUDIT } from "./draft-comma-spacing";
+import { COMMA_AUDIT, PUNCTUATION_AUDIT, importSpacingRevision, originalDraftContent, type PunctuationMark } from "./draft-comma-spacing";
 
 export interface LiveProposal {
   id: number;
@@ -42,7 +42,7 @@ export interface SwapPlan {
   provenances: string[];
 }
 
-export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposal[]): SwapPlan {
+export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposal[], punctuation: readonly PunctuationMark[] = []): SwapPlan {
   const file = raw as LvItemsFile;
   if (!(file && typeof file === "object" && Array.isArray(file.items))) throw new Error("the bundle is not an items file");
   if (file.schema_version !== ITEMS_SCHEMA_V13) throw new Error(`schema_version must be ${ITEMS_SCHEMA_V13}, not ${String(file.schema_version)}`);
@@ -66,12 +66,11 @@ export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposa
   }
   // A live line may already hold a draft from an earlier swap: compare it with that draft in place.
   const liveDraft = (r: LiveProposal) => {
-    const x = JSON.parse(r.payload_json) as { kind?: string; candidate_text?: string; candidate_provenance?: string;
-      [COMMA_AUDIT]?: { content_sha256: string; fields: {candidate_text?: string} } };
-    const audit = x[COMMA_AUDIT];
-    const candidate = audit?.fields.candidate_text ?? x.candidate_text;
+    const x = JSON.parse(r.payload_json) as Record<string, unknown> & { kind?: string; candidate_text?: string; candidate_provenance?: string };
+    const original = originalDraftContent(x, r.content_sha256);
+    const candidate = (original.fields.candidate_text as string | undefined) ?? x.candidate_text;
     return { candidate: x.kind === "type" && candidate && x.candidate_provenance?.startsWith("llm:") ? candidate : null,
-      hash: audit?.content_sha256 ?? r.content_sha256 };
+      hash: original.content_sha256 };
   };
   const differ = [...plain.values()]
     .filter((p) => {
@@ -100,11 +99,16 @@ export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposa
       continue;
     }
     const old = JSON.parse(row.payload_json) as Record<string, unknown>;
-    const audit = old[COMMA_AUDIT] as { fields: Record<string, unknown> } | undefined;
-    const raw = { ...old, ...audit?.fields, candidate_text: payload.candidate_text, candidate_provenance: payload.candidate_provenance } as Record<string, unknown>;
-    delete raw[COMMA_AUDIT];
+    const original = originalDraftContent(old, row.content_sha256);
     const sourceSha = contentSha256(p.contentKey);
-    const corrected = commaSpacingRevision("line_verify", raw, sourceSha);
+    if (old[PUNCTUATION_AUDIT] && original.content_sha256 === sourceSha) {
+      plan.already++;
+      continue;
+    }
+    const raw = { ...old, ...original.fields, candidate_text: payload.candidate_text, candidate_provenance: payload.candidate_provenance } as Record<string, unknown>;
+    delete raw[COMMA_AUDIT];
+    delete raw[PUNCTUATION_AUDIT];
+    const corrected = importSpacingRevision("line_verify", raw, sourceSha, punctuation);
     const newSha = corrected?.contentSha256 ?? sourceSha;
     if (row.content_sha256 === newSha) {
       plan.already++;
