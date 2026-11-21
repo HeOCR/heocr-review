@@ -1,3 +1,5 @@
+import { ALLOWED_REFERENCE_PROPOSAL } from "../tasks/restricted_reference";
+import { canReadReference, privateReferenceImage } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
 import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingPage, trainingProgress } from "./page_paste_train";
@@ -19,9 +21,9 @@ import { exportRows, getBatch, getProposal, getReviewer, listBatches, type Revie
 import type { Env } from "./env";
 import { checkDraft } from "./drafts";
 import { HttpError, MAX_PAGE_BODY_BYTES, assertSameOrigin, json, readJson } from "./http";
-import { TRIAGE_QUEUES, isOpenTo, loadSubset, nextFor, progressFor, proposalView, subsetsOf, triageCounts, triageFilter, type TriageQueue } from "./queue";
+import { TRIAGE_QUEUES, isOpenTo, loadSubset, nextFor, pendingBlindReference, progressFor, proposalView, subsetsOf, triageCounts, triageFilter, type TriageQueue } from "./queue";
 import { isTriageBatch, isTriageValue, triageable } from "../tasks/line_verify/triage";
-import { PAGE_ANSWERS, addLine, boxProblem, currentCheck, nextPage, normalizeAdded, pageItem, recordInitialPageCheck, recordPageCheck, removeLine } from "./pages";
+import { PAGE_ANSWERS, addLine, boxProblem, completenessImage, currentCheck, nextPage, normalizeAdded, pageItem, recordInitialPageCheck, recordPageCheck, removeLine } from "./pages";
 import type { LineRouting } from "../tasks/line_verify/resolution";
 import { dropPointedBook, pointedDropsExtra } from "./pointed_books";
 import { goldDecided, goldKnown, goldOf, isVolunteerV11, phistGoldExtras, recordGoldDecision, setPull } from "./phist_gold";
@@ -178,6 +180,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
   const list = await listBatches(ctx.env.DB, true);
   const out: BatchSummary[] = [];
   for (const b of list) {
+    if (!canReadReference(ctx.env, ctx.url, reviewer.id, b)) continue;
     if (b.taskType === PAGE_PASTE_TRAIN) {
       if (isAdmin(ctx.env, reviewer.id) && isTrainingPaste(b)) {
         const { total, completed, own } = await trainingProgress(ctx.env.DB, b.id, reviewer.id);
@@ -216,9 +219,10 @@ export async function batches(ctx: Ctx): Promise<Response> {
   return json({ batches: out });
 }
 
-async function openBatch(ctx: Ctx, id: string) {
+async function openBatch(ctx: Ctx, id: string, reviewerId: string) {
   const batch = await getBatch(ctx.env.DB, id);
-  if (!batch || batch.status !== "open" || !taskType(batch.taskType)) throw new HttpError(404, "not_found");
+  if (!batch || batch.status !== "open" || !taskType(batch.taskType) ||
+    !canReadReference(ctx.env, ctx.url, reviewerId, batch)) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   return batch;
 }
@@ -226,7 +230,7 @@ async function openBatch(ctx: Ctx, id: string) {
 export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.readMinute, reviewer.id, ctx.now);
-  const batch = await openBatch(ctx, batchId);
+  const batch = await openBatch(ctx, batchId, reviewer.id);
   if (isConsensus(batch)) return json(await nextLine(ctx.env.DB, batch, reviewer.id, isAdmin(ctx.env, reviewer.id), ctx.now));
   // ?subset=<id>: serve only that subset's pages (a filter; the decisions are ordinary ones on the same proposals).
   const params = new URL(ctx.request.url).searchParams;
@@ -259,7 +263,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
 async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   const proposal = Number.isSafeInteger(id) ? await getProposal(ctx.env.DB, id) : null;
   if (!proposal || !proposal.active) throw new HttpError(404, "not_found");
-  const batch = await openBatch(ctx, proposal.batchId);
+  const batch = await openBatch(ctx, proposal.batchId, reviewerId);
   // A volunteer line: only one this reviewer was served (or decided); the maintainer's: only one that went to them.
   if (isConsensus(batch)) {
     if (!(await lineOpenTo(ctx.env.DB, proposal, reviewerId, isAdmin(ctx.env, reviewerId)))) throw new HttpError(409, "not_open", "this line is not open to you");
@@ -268,6 +272,7 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   // A gated page (a reserve, a blind second pass) is not shown or decided by link before it opens to this reviewer,
   // unless they already decided it (going back to change a decision).
   if (!(await isOpenTo(ctx.env.DB, proposal, reviewerId, ctx.now))) {
+    if (batch.restrictedReference) throw new HttpError(409, "not_open");
     const mine = await ctx.env.DB.prepare("SELECT 1 AS ok FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 LIMIT 1")
       .bind(proposal.id, reviewerId)
       .first<{ ok: number }>();
@@ -276,7 +281,8 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   // A first pass is closed to a reviewer while its blind second pass is open to them and they have not decided it:
   // they must not see (or change) their first answers during the blind pass.
   const blind = await ctx.env.DB.prepare(
-    `SELECT id, batch_id FROM proposals WHERE batch_id = ?1 AND gate_kind = 'after_confirm' AND gate_ref = ?2 AND active = 1`,
+    `SELECT p.id, p.batch_id FROM proposals p
+    WHERE p.batch_id = ?1 AND p.gate_kind = 'after_confirm' AND p.gate_ref = ?2 AND p.active = 1 AND ${ALLOWED_REFERENCE_PROPOSAL}`,
   )
     .bind(proposal.batchId, proposal.externalId)
     .first<{ id: number; batch_id: string }>();
@@ -296,6 +302,23 @@ export async function showProposal(ctx: Ctx, id: number): Promise<Response> {
   // ?queue=triage: the line as triage shows it (a plant's text, no attention runs).
   const triage = new URL(ctx.request.url).searchParams.get("queue") === "triage";
   return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id, triage) });
+}
+
+export async function restrictedProposalImage(ctx: Ctx, id: number, kind: "crop" | "page"): Promise<Response> {
+  const reviewer = await requireReviewer(ctx);
+  enforce(LIMITS.readMinute, reviewer.id, ctx.now);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (!batch.restrictedReference) throw new HttpError(404, "not_found");
+  return privateReferenceImage(ctx.env, batch.id, proposal.media[kind]);
+}
+
+export async function restrictedCompletenessImage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
+  const reviewer = await requireReviewer(ctx);
+  enforce(LIMITS.readMinute, reviewer.id, ctx.now);
+  const batch = await openBatch(ctx, batchId, reviewer.id);
+  if (!batch.restrictedReference || !isTriageBatch(batch)) throw new HttpError(404, "not_found");
+  const image = await completenessImage(ctx.env.DB, batch.id, reviewer.id, itemId);
+  return privateReferenceImage(ctx.env, batch.id, image);
 }
 
 export async function decide(ctx: Ctx, id: number): Promise<Response> {
@@ -320,6 +343,10 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     .prepare("SELECT id, value, text, proposal_sha256 FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
     .bind(proposal.id, reviewer.id)
     .first<{ id: string; value: string; text: string | null; proposal_sha256: string }>();
+  if (batch.restrictedReference && isTriageBatch(batch) && triageable(proposal) &&
+    existing?.proposal_sha256 !== proposal.contentSha256 && !isTriageValue(normalized.value)) {
+    throw new HttpError(409, "not_open", "answer triage before correcting this line");
+  }
   // Volunteer lines: a decision is final (only a reviewer's first decision on a line could count). So is a blind
   // second pass: typed before the reviewer could see the candidate, it must not change once they can.
   if (existing && (isConsensus(batch) || taskType(batch.taskType)!.finalDecision?.(proposal))) throw new HttpError(409, "decided", "this line is decided");
@@ -440,7 +467,7 @@ export async function clearSkips(ctx: Ctx, batchId: string): Promise<Response> {
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
-  const batch = await openBatch(ctx, batchId);
+  const batch = await openBatch(ctx, batchId, reviewer.id);
   await ctx.env.DB.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id IN (SELECT id FROM proposals WHERE batch_id = ?2)")
     .bind(reviewer.id, batch.id)
     .run();
@@ -524,9 +551,10 @@ export async function trainingImage(ctx: Ctx, batch: string, page: number): Prom
 }
 
 export async function adminProgress(ctx: Ctx): Promise<Response> {
-  await requireAdmin(ctx);
+  const reviewer = await requireAdmin(ctx);
   const out = [];
   for (const batch of await listBatches(ctx.env.DB, false)) {
+    if (!canReadReference(ctx.env, ctx.url, reviewer.id, batch)) continue;
     if (batch.taskType === PAGE_PASTE_TRAIN) {
       if (isTrainingPaste(batch)) {
         const { counts, reviewers } = await trainingAdminProgress(ctx.env.DB, batch.id);
@@ -562,9 +590,12 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
 }
 
 export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> {
-  await requireAdmin(ctx);
+  const reviewer = await requireAdmin(ctx);
   const batch = await getBatch(ctx.env.DB, batchId);
-  if (!batch) throw new HttpError(404, "not_found");
+  if (!batch || !canReadReference(ctx.env, ctx.url, reviewer.id, batch)) throw new HttpError(404, "not_found");
+  if (batch.restrictedReference && await pendingBlindReference(ctx.env.DB, batch.id, reviewer.id, ctx.now)) {
+    throw new HttpError(409, "not_open", "finish the blind second pass before exporting");
+  }
   if (batch.taskType === PAGE_PASTE_TRAIN) {
     if (!isTrainingPaste(batch)) throw new HttpError(404, "not_found");
     const { counts, file } = await trainingAdmin(ctx.env.DB, batch, ctx.now);
@@ -590,17 +621,17 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   });
 }
 
-async function consensusBatch(ctx: Ctx, batchId: string) {
+async function consensusBatch(ctx: Ctx, batchId: string, reviewerId: string) {
   assertConsensusEnabled(ctx.env);
   const batch = await getBatch(ctx.env.DB, batchId);
-  if (!batch || !isConsensus(batch)) throw new HttpError(404, "not_found");
+  if (!batch || !isConsensus(batch) || !canReadReference(ctx.env, ctx.url, reviewerId, batch)) throw new HttpError(404, "not_found");
   return batch;
 }
 
 /** Admin: a volunteer batch's line states, and each volunteer's gold record and standing (never shown to volunteers). */
 export async function adminVolunteers(ctx: Ctx, batchId: string): Promise<Response> {
-  await requireAdmin(ctx);
-  const batch = await consensusBatch(ctx, batchId);
+  const admin = await requireAdmin(ctx);
+  const batch = await consensusBatch(ctx, batchId, admin.id);
   return json(await volunteerReport(ctx.env.DB, batch));
 }
 
@@ -609,7 +640,7 @@ export async function adminExclusion(ctx: Ctx, batchId: string, reviewerId: stri
   assertSameOrigin(ctx.request);
   const admin = await requireAdmin(ctx);
   enforce(LIMITS.writeMinute, admin.id, ctx.now);
-  const batch = await consensusBatch(ctx, batchId);
+  const batch = await consensusBatch(ctx, batchId, admin.id);
   const body = await readJson(ctx.request);
   if (typeof body.excluded !== "boolean") throw new HttpError(400, "invalid_request", "excluded must be true or false");
   if (!(await getReviewer(ctx.env.DB, reviewerId))) throw new HttpError(404, "not_found");
@@ -643,7 +674,7 @@ async function triagePage(ctx: Ctx, batchId: string, itemId: number) {
   const reviewer = await requireReviewer(ctx);
   if (reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
-  const batch = await openBatch(ctx, batchId);
+  const batch = await openBatch(ctx, batchId, reviewer.id);
   if (!isTriageBatch(batch)) throw new HttpError(404, "not_found");
   if (!(await pageItem(ctx.env.DB, batch.id, itemId))) throw new HttpError(404, "not_found");
   return { reviewer, batch };
@@ -670,6 +701,7 @@ export async function addPageLine(ctx: Ctx, batchId: string, itemId: number): Pr
   const n = normalizeAdded(body.value, body.text);
   if (!n.ok) throw new HttpError(400, "invalid_decision", n.error);
   const id = await addLine(ctx.env.DB, batch.id, itemId, reviewer.id, body.box as number[], n.value, n.text, iso(ctx.now));
+  if (!id) throw new HttpError(409, "not_open");
   return json({ id, value: n.value, text: n.text });
 }
 
@@ -677,7 +709,7 @@ export async function removePageLine(ctx: Ctx, batchId: string, lineId: string):
   assertSameOrigin(ctx.request);
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
-  const batch = await openBatch(ctx, batchId);
+  const batch = await openBatch(ctx, batchId, reviewer.id);
   if (!(await removeLine(ctx.env.DB, batch.id, lineId, reviewer.id, iso(ctx.now)))) throw new HttpError(404, "not_found");
   return json({ ok: true });
 }
@@ -686,6 +718,8 @@ export async function removePageLine(ctx: Ctx, batchId: string, lineId: string):
 export async function finishPage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
   const { reviewer, batch } = await triagePage(ctx, batchId, itemId);
   if ((await currentCheck(ctx.env.DB, itemId, reviewer.id)) !== "missing_lines") throw new HttpError(409, "not_open", "this page is not waiting for missing lines");
-  await recordPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, "lines_added", iso(ctx.now));
+  if (!(await recordPageCheck(ctx.env.DB, batch.id, itemId, reviewer.id, iso(ctx.now)))) {
+    throw new HttpError(409, "not_open");
+  }
   return json({ ok: true });
 }

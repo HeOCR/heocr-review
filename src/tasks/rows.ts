@@ -2,6 +2,8 @@
 import type { BatchRecord, Credit, DecisionRecord, ProposalMedia, ProposalRecord } from "./types";
 
 
+import { ALLOWED_REFERENCE_PROPOSAL, needsRestrictedRoster } from "./restricted_reference";
+
 export interface BatchRow {
   id: string;
   task_type: string;
@@ -9,6 +11,7 @@ export interface BatchRow {
   source_json: string;
   min_reviewers: number;
   status: string;
+  restricted_reference?: number;
   /** From batch_settings (null: no row, the default). */
   pass2_reviewer?: string | null;
   pass2_reviewer_set_at?: string | null;
@@ -55,6 +58,7 @@ export function toBatch(row: BatchRow): BatchRecord & { status: string } {
     source: JSON.parse(row.source_json) as Record<string, unknown>,
     minReviewers: row.min_reviewers,
     status: row.status,
+    restrictedReference: row.restricted_reference === 1 || needsRestrictedRoster(row.id),
     settings: {
       pass2Reviewer: row.pass2_reviewer === "other" ? "other" : "same",
       pass2ReviewerSetAt: row.pass2_reviewer_set_at ?? null,
@@ -103,7 +107,7 @@ export function toDecision(row: DecisionRow): DecisionRecord {
 export const PROPOSAL_COLUMNS = `p.id, p.batch_id, p.external_id, i.external_id AS item_external_id, i.title AS item_title,
   p.category, p.confidence, p.rank, p.payload_json, p.media_json, p.content_sha256, p.active`;
 
-export const BATCH_SQL = `SELECT id, task_type, title, source_json, min_reviewers, status,
+export const BATCH_SQL = `SELECT id, task_type, title, source_json, min_reviewers, status, restricted_reference,
   (SELECT s.pass2_reviewer FROM batch_settings s WHERE s.batch_id = batches.id) AS pass2_reviewer,
   (SELECT s.updated_at FROM batch_settings s WHERE s.batch_id = batches.id) AS pass2_reviewer_set_at,
   (SELECT s.two_typings_groups FROM batch_settings s WHERE s.batch_id = batches.id) AS two_typings_groups,
@@ -146,7 +150,7 @@ export const PHIST_GOLD_EXPORT_SQL = {
 export const POINTED_DROPS_SQL = `SELECT d.decision_id, dec.reviewer_id, (SELECT q.external_id FROM proposals q WHERE q.id = dec.proposal_id) AS trigger_item,
     d.book_id, COUNT(*) AS lines, SUM(p.active) AS restored, MIN(d.dropped_at) AS dropped_at
   FROM pointed_book_drops d JOIN proposals p ON p.id = d.proposal_id LEFT JOIN decisions dec ON dec.id = d.decision_id
-  WHERE d.batch_id = ?1 GROUP BY d.decision_id, d.book_id ORDER BY dropped_at`;
+  WHERE d.batch_id = ?1 AND ${ALLOWED_REFERENCE_PROPOSAL} GROUP BY d.decision_id, d.book_id ORDER BY dropped_at`;
 
 export interface PointedDropRow {
   decision_id: string;
@@ -184,9 +188,9 @@ export const toVerifyVote = (r: VerifyVoteRow) => ({ decisionId: r.decision_id, 
 
 export const EXPORT_SQL = {
   batch: `${BATCH_SQL} WHERE id = ?1`,
-  proposals: `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.batch_id = ?1 ORDER BY p.rank`,
-  decisions: `${DECISION_SQL} WHERE proposal_id IN (SELECT id FROM proposals WHERE batch_id = ?1)`,
+  proposals: `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.batch_id = ?1 AND ${ALLOWED_REFERENCE_PROPOSAL} ORDER BY p.rank`,
+  decisions: `${DECISION_SQL} WHERE proposal_id IN (SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND ${ALLOWED_REFERENCE_PROPOSAL})`,
   credits: `SELECT id AS reviewer_id, display_name, display_name_consented_at FROM reviewers
     WHERE display_name IS NOT NULL AND id IN (SELECT reviewer_id FROM decisions WHERE proposal_id IN
-    (SELECT id FROM proposals WHERE batch_id = ?1))`,
+    (SELECT p.id FROM proposals p WHERE p.batch_id = ?1 AND ${ALLOWED_REFERENCE_PROPOSAL}))`,
 };

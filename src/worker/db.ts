@@ -1,3 +1,4 @@
+import { ALLOWED_REFERENCE_PROPOSAL } from "../tasks/restricted_reference";
 import {
   BATCH_SQL,
   EXPORT_SQL,
@@ -36,7 +37,7 @@ export async function listBatches(db: D1Database, openOnly: boolean) {
 
 export async function getProposal(db: D1Database, id: number): Promise<ProposalRecord | null> {
   const row = await db
-    .prepare(`SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.id = ?1`)
+    .prepare(`SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id WHERE p.id = ?1 AND ${ALLOWED_REFERENCE_PROPOSAL}`)
     .bind(id)
     .first<ProposalRow>();
   return row ? toProposal(row) : null;

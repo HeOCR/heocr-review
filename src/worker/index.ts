@@ -1,3 +1,4 @@
+import { blockedStaticReference } from "./restricted_reference";
 import * as api from "./api";
 import type { Ctx } from "./api";
 import type { Env } from "./env";
@@ -23,6 +24,8 @@ const ROUTES: [string, RegExp, Handler][] = [
   ["POST", /^\/api\/batches\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)\/done$/, (c, b, i) => api.finishPage(c, b!, int(i!))],
   ["DELETE", /^\/api\/batches\/([A-Za-z0-9._-]{1,100})\/added-lines\/(pl-[0-9a-f]{16})$/, (c, b, l) => api.removePageLine(c, b!, l!)],
   ["GET", /^\/api\/proposals\/(\d+)$/, (c, id) => api.showProposal(c, int(id!))],
+  ["GET", /^\/api\/proposals\/(\d+)\/image\/(crop|page)$/, (c, id, kind) => api.restrictedProposalImage(c, int(id!), kind as "crop" | "page")],
+  ["GET", /^\/api\/batches\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)\/image$/, (c, b, i) => api.restrictedCompletenessImage(c, b!, int(i!))],
   ["POST", /^\/api\/proposals\/(\d+)\/decision$/, (c, id) => api.decide(c, int(id!))],
   ["POST", /^\/api\/proposals\/(\d+)\/skip$/, (c, id) => api.skip(c, int(id!))],
   ["PUT", /^\/api\/proposals\/(\d+)\/draft$/, (c, id) => api.saveDraft(c, int(id!))],
@@ -44,7 +47,10 @@ const ROUTES: [string, RegExp, Handler][] = [
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+  if (!url.pathname.startsWith("/api/")) {
+    if (blockedStaticReference(url.pathname)) return json({ error: "not_found" }, 404);
+    return env.ASSETS.fetch(request);
+  }
   const ctx: Ctx = { env, request, url, exec, now: Date.now() };
   try {
     let pathMatched = false;

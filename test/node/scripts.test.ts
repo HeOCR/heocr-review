@@ -1,11 +1,14 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assertNoDevAuth } from "../../scripts/deploy";
+import { assertNoDevAuth, assertNoRestrictedStaticMedia } from "../../scripts/deploy";
 import { assertOpenSource } from "../../scripts/lib/guard";
 import { buildImportSql } from "../../scripts/lib/importsql";
 import { cropRect } from "../../scripts/lib/media";
 import { inline, lit } from "../../scripts/lib/sql";
 import { referenceAuditImporter } from "../../src/tasks/reference_audit/importer";
+import { RESTRICTED_ASSET_PREFIXES } from "../../src/tasks/restricted_reference";
 
 describe("wrangler.jsonc", () => {
   it("never enables the dev sign-in", () => {
@@ -14,6 +17,23 @@ describe("wrangler.jsonc", () => {
     expect(() => assertNoDevAuth(text.replace('"ENVIRONMENT": "production"', '"ENVIRONMENT": "development"'))).toThrow();
     expect(() => assertNoDevAuth(text.replace('"vars": {', '"vars": { "DEV_AUTH_BYPASS": "1",'))).toThrow();
   });
+});
+
+it("excludes protected media from both static asset deployment paths", () => {
+  const ignore = readFileSync("public/.assetsignore", "utf8").split("\n");
+  for (const prefix of RESTRICTED_ASSET_PREFIXES) {
+    expect(ignore).toContain(`/media/${prefix}${prefix.endsWith("-") ? "*" : ""}/`);
+  }
+  const fixture = mkdtempSync(join(tmpdir(), "review-restricted-static-"));
+  try {
+    mkdirSync(join(fixture, "media", "public-fixture"), { recursive: true });
+    expect(() => assertNoRestrictedStaticMedia(fixture)).not.toThrow();
+    expect(() => assertNoRestrictedStaticMedia(fixture, ["public-fixture"])).toThrow(/static asset bundle/);
+    mkdirSync(join(fixture, "media", "private-ref-fixture"));
+    expect(() => assertNoRestrictedStaticMedia(fixture)).toThrow(/static asset bundle/);
+  } finally {
+    rmSync(fixture, { recursive: true });
+  }
 });
 
 describe("import", () => {

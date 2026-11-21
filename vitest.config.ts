@@ -127,6 +127,7 @@ export default defineConfig(async () => {
             cloudflareTest({
               wrangler: { configPath: "./wrangler.jsonc" },
               miniflare: {
+                r2Buckets: ["RESTRICTED_REFERENCE_MEDIA"],
                 bindings: {
                   ENVIRONMENT: "development",
                   DEV_AUTH_BYPASS: "1",

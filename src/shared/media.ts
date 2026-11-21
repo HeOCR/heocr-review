@@ -2,7 +2,9 @@
  * Where an image comes from. Today every crop and page image is a Worker static asset under /media/; the union
  * leaves room for another source (an object store, an IIIF server) without touching the review UI.
  */
-export type ImageRef = { source: "static"; path: string } | { source: "url"; url: string };
+export type ImageRef = { source: "static"; path: string } | { source: "url"; url: string } | { source: "r2"; key: string };
+
+export const PRIVATE_IMAGE_KEY = /^[a-f0-9]{64}\.(?:jpg|png|webp)$/;
 
 /** A box in fractions of an image: [x0, y0, x1, y1], origin top-left. */
 export type Box = [number, number, number, number];
@@ -23,10 +25,12 @@ export function isImageRef(value: unknown): value is ImageRef {
   if (!value || typeof value !== "object") return false;
   const ref = value as Record<string, unknown>;
   if (ref.source === "static") return typeof ref.path === "string" && STATIC_PATH.test(ref.path) && !ref.path.includes("..");
+  if (ref.source === "r2") return typeof ref.key === "string" && PRIVATE_IMAGE_KEY.test(ref.key);
   if (ref.source === "url") return typeof ref.url === "string" && /^https:\/\//.test(ref.url);
   return false;
 }
 
 export function imageUrl(ref: ImageRef): string {
+  if (ref.source === "r2") throw new Error("private image requires an authenticated route");
   return ref.source === "static" ? `/${ref.path}` : ref.url;
 }
