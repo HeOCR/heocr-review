@@ -20,10 +20,11 @@ export interface RankingRow {
   chosen_at: number;
 }
 
-export function rankingExport(batchId: string, rows: RankingRow[], exportedAt: string, fixture: boolean) {
+export function rankingExport(batchId: string, rows: RankingRow[], exportedAt: string, fixture: boolean, armModalities: unknown) {
   return {
     schema: RANKING_EXPORT_SCHEMA, purpose: "generator_development_only", fixture, batch_id: batchId, exported_at: exportedAt,
     license: "CC0-1.0", license_scope: "reviewer_contributions_only",
+    modality_by_arm: armModalities ?? null,
     decisions: rows.map(row => {
       const [leftItem, rightItem] = row.swapped ? [row.item_b, row.item_a] : [row.item_a, row.item_b];
       const [leftArm, rightArm] = row.swapped ? [row.arm_b, row.arm_a] : [row.arm_a, row.arm_b];

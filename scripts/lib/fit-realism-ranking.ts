@@ -1,5 +1,5 @@
 import { wilson } from "../../src/tasks/synth_realism/export";
-import { connectedArms } from "../../src/tasks/synth_realism/ranking";
+import { connectedArms, isRankingModality, type RankingModality } from "../../src/tasks/synth_realism/ranking";
 import { RANKING_EXPORT_SCHEMA } from "../../src/tasks/synth_realism/ranking-export";
 import { object, token } from "../../src/tasks/synth_realism/schema";
 
@@ -110,6 +110,14 @@ export function fitRanking(raw: unknown) {
   if (!object(raw) || raw.schema !== RANKING_EXPORT_SCHEMA || !token(raw.batch_id) || !Array.isArray(raw.decisions)) {
     throw new Error("expected an authenticated ranking contribution export");
   }
+  if (!object(raw.modality_by_arm) || !Object.keys(raw.modality_by_arm).length) {
+    throw new Error("ranking export requires the pinned modality map");
+  }
+  const modalities = new Map<string, RankingModality>();
+  for (const [arm, modality] of Object.entries(raw.modality_by_arm)) {
+    if (!token(arm) || !isRankingModality(modality)) throw new Error("invalid arm modality");
+    modalities.set(arm, modality);
+  }
   const matches: Match[] = [];
   const seen = new Set<string>();
   let correct = 0, scored = 0, bothReal = 0, bothRealLeft = 0;
@@ -123,8 +131,12 @@ export function fitRanking(raw: unknown) {
     if (seen.has(key)) throw new Error("duplicate reviewer comparison");
     seen.add(key);
     const left = row.left_arm_id, right = row.right_arm_id, pickedLeft = row.choice === "left";
+    if ((left !== null && !modalities.has(left)) || (right !== null && !modalities.has(right))) {
+      throw new Error("missing modality for comparison arm");
+    }
     if (left !== null && right !== null) {
       if (left === right || row.control !== "standard" || row.correct !== null) throw new Error("invalid standard pair");
+      if (modalities.get(left) !== modalities.get(right)) throw new Error("ranking export contains a mixed-modality comparison");
       matches.push({ left, right, pickedLeft });
     } else if (left === null && right === null) {
       if (row.control !== "real_real" || row.correct !== null) throw new Error("invalid real/real control");
@@ -142,8 +154,9 @@ export function fitRanking(raw: unknown) {
     schema: "realism_ranking_bradley_terry.v1", batch_id: raw.batch_id, purpose: "generator_development_only",
     fixture: raw.fixture === true, model: "Bradley–Terry with independent Gaussian log-strength priors",
     prior_sd: priorSd, intervals: "Approximate model-based 95% Laplace intervals conditional on the reviewed roster",
-    standard_pairs: matches.length, cross_component_ranks_identifiable: groups.length === 1,
-    components: groups.map(group => fitComponent(group, matches)),
+    standard_pairs: matches.length,
+    cross_component_ranks_identifiable: groups.length === 1 && groups[0]!.length === modalities.size,
+    components: groups.map(group => ({ modality: modalities.get(group[0]!)!, ...fitComponent(group, matches) })),
     controls: {
       real_synth: { answered: scored, correct, accuracy: scored ? correct / scored : null, wilson_95: scored ? wilson(correct, scored) : null },
       real_real: { answered: bothReal, chose_left: bothRealLeft, chose_right: bothReal - bothRealLeft },

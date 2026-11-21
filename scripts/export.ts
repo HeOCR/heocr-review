@@ -57,7 +57,8 @@ function main(): void {
     const batch = toBatch(batchRow);
     const ranking = isRealismRanking(batch);
     const time = new Date().toISOString();
-    const file = ranking ? rankingExport(batchId, one<RankingRow>(RANKING_EXPORT_SQL), time, batch.source.fixture === true)
+    const file = ranking ? rankingExport(batchId, one<RankingRow>(RANKING_EXPORT_SQL), time, batch.source.fixture === true,
+      batch.source.ranking_arm_modalities)
       : realismExport(batchId, one<RealismRow>(REALISM_EXPORT_SQL), time, batch.source.fixture === true);
     const name = ranking ? RANKING_EXPORT_FILE : EXPORT_FILE;
     mkdirSync(out, { recursive: true, mode: 0o700 });
