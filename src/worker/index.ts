@@ -1,3 +1,4 @@
+import { sweepRead, sweepWrite, sweepImage } from "./page-sweep";
 import { handwriting, isHandwritingPath } from "./handwriting";
 import { isCapturePath, registeredCaptures } from "./registered-captures";
 import { blockedAssetPath, RESTRICTED_MEDIA_PATH } from "./restricted_reference";
@@ -19,6 +20,10 @@ const ROUTES: [string, RegExp, Handler][] = [
   ["POST", /^\/api\/me\/terms$/, (c) => api.acceptTerms(c)],
   ["POST", /^\/api\/me\/display-name$/, (c) => api.setDisplayName(c)],
   ["GET", /^\/api\/batches$/, (c) => api.batches(c)],
+  ["GET", /^\/api\/page-sweep\/([A-Za-z0-9._-]{1,100})\/next$/, (c, b) => sweepRead(c, b!)],
+  ["GET", /^\/api\/page-sweep\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)$/, (c, b, p) => sweepRead(c, b!, int(p!))],
+  ["GET", /^\/api\/page-sweep\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)\/image$/, (c, b, p) => sweepImage(c, b!, int(p!))],
+  ["POST", /^\/api\/page-sweep\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)$/, (c, b, p) => sweepWrite(c, b!, int(p!))],
   ["GET", /^\/api\/batches\/([A-Za-z0-9._-]{1,100})\/next$/, (c, b) => api.next(c, b!)],
   ["POST", /^\/api\/batches\/([A-Za-z0-9._-]{1,100})\/skips\/clear$/, (c, b) => api.clearSkips(c, b!)],
   ["POST", /^\/api\/batches\/([A-Za-z0-9._-]{1,100})\/pages\/(\d+)\/check$/, (c, b, i) => api.checkPage(c, b!, int(i!))],

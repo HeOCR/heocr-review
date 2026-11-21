@@ -167,6 +167,7 @@ export interface LvDecision {
   decision_id: string;
   item_id: string;
   reviewer: string;
+  method?: "page_sweep" | "line_unplanted";
   decision: (typeof DECISION_VALUES)[number] | (typeof PASS2_DECISION_VALUES)[number] | (typeof TYPE_DECISION_VALUES)[number];
   /** v1.3 only, and required there. */
   kind?: (typeof KINDS)[number];

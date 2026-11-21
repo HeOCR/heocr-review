@@ -24,6 +24,8 @@ export interface ProposalMedia {
 }
 
 export interface BatchRecord {
+  /** Runtime only: prospective review on the same unplanted draft across both modes. */
+  unplantedReview?: boolean;
   restrictedReference?: boolean;
   id: string;
   taskType: string;
@@ -64,6 +66,7 @@ export interface DecisionRecord {
   /** The proposal content the reviewer saw; a decision on changed content is stale and never exported. */
   proposalSha256: string;
   termsVersion: string;
+  method?: "page_sweep" | "line_unplanted";
 }
 
 export interface Credit {
@@ -169,6 +172,6 @@ export function textProblem(text: unknown): string | null {
 /** A triage batch's page records for the export (migrations/0014_page_completeness.sql). */
 export interface TriagePages {
   pages: { pageId: string; width: number | null; height: number | null }[];
-  checks: { pageId: string; reviewerId: string; answer: "complete" | "missing_lines" | "lines_added"; decidedAt: string; missingAt: string | null }[];
+  checks: { pageId: string; reviewerId: string; answer: "complete" | "missing_lines" | "lines_added"; decidedAt: string; missingAt: string | null; method?: "page_sweep" }[];
   added: { id: string; pageId: string; reviewerId: string; box: [number, number, number, number]; text: string | null; value: "typed" | "unreadable"; decidedAt: string }[];
 }

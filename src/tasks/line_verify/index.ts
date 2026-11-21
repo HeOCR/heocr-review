@@ -403,6 +403,7 @@ export const lineVerify: TaskType = {
               item_id: itemId,
               reviewer: d.reviewerId,
               ...body(d),
+              ...(d.method ? { method: d.method } : {}),
               ...(candidateSha ? { candidate_sha256: candidateSha } : {}),
               ...(drafted ? { prefill_provenance: payloadOf(r.proposal).candidate_provenance } : {}),
               ...(v12 ? { pass } : {}),

@@ -154,3 +154,27 @@ main#app.task .state { padding-inline: 16px; }
   .page-paste-scan { height: min(45dvh, 420px); }
   .page-paste-form textarea { min-height: 8rem; height: 30dvh; font-size: max(16px, 1em); }
 }
+
+/* Both sweep frames share one scale and scroll offset. Paint an opaque surface over each extracted line. */
+.sweep { width: 100%; max-width: none; box-sizing:border-box; padding-inline:.75rem; }
+.sweep-zoom { min-width:36px; min-height:36px; border:1px solid #c1c5cb; }
+.sweep-toolbar { display:flex; gap:.65rem; align-items:center; flex-wrap:wrap; margin-block-end:.5rem; }
+.sweep-toolbar h1 { flex:1; font-size:1rem; margin:0; }
+.sweep-status:empty { display:none; }
+.sweep-panes { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.75rem; }
+.sweep h2 { font-size:.875rem; margin:.25rem 0; }
+.sweep-scroll { direction:ltr; height: min(74vh,950px); overflow:scroll; background:#eee; border:1px solid #c1c5cb; }
+.sweep-frame { position:relative; direction:ltr; }
+.sweep-frame > img { display:block; width:100%; height:100%; max-width:none; user-select:none; }
+.sweep-frame > .sweep-box { position:absolute; box-sizing:border-box; padding:0 2px; background:#fff; color:#101010; border:1px solid #3a5273; overflow:hidden; white-space:nowrap; text-align:center; line-height:1; font-family:Arial,sans-serif; }
+.sweep-frame > .sweep-box:hover,.sweep-frame > .sweep-box:focus-visible { outline:2px solid #bd6800; z-index:1; }
+.sweep-frame > .sweep-done { border-color:#667485; }
+.sweep-frame > .sweep-edited { border:2px solid #147446; }
+.sweep-frame > .sweep-pending,.sweep-frame > .sweep-skipped,.sweep-frame > .sweep-flagged { border:2px solid #b06b18; }
+.sweep-highlight { pointer-events:none; position:absolute; outline:2px solid #bd6800; background:#ffb72d29; }
+.sweep-editor { padding:.5rem; background:#fff; color:#161616; border:2px solid #3a5273; box-shadow:0 4px 16px #0004; }
+.sweep-editor textarea { width:100%; font:inherit; }
+.sweep-inline { position:absolute; z-index:3; width:min(55%,28rem); }
+.sweep-actions { display:flex; flex-wrap:wrap; gap:.25rem; margin-top:.25rem; }
+.sweep-list { list-style:none; padding:0; display:grid; gap:.35rem; }
+.sweep-list button[aria-disabled="true"] { border-color:#147446; }

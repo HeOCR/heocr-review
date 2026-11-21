@@ -84,6 +84,7 @@ function ledgerDecision(d: DecisionRecord, state: "current" | "stale" | "superse
   return {
     decision_id: d.id,
     reviewer: d.reviewerId,
+    ...(d.method ? { method: d.method } : {}),
     decision: d.value,
     ...(d.value === "edited" ? { text: d.text ?? "" } : {}),
     decided_at: d.decidedOn,

@@ -155,6 +155,8 @@ export interface ProposalView {
   itemTitle: string;
   view: ProposalViewBody;
   options: DecisionOption[];
+  /** Every line in this review mode uses the extracted draft. Echo on save to reject stale pre-rollout views. */
+  pageSweepDraft?: true;
   mine: { value: string; text: string | null; decidedAt: string } | null;
   /** page_review: the reviewer's saved unsaved-corrections for this pre-fill (none once they decided the page). */
   draft?: PageDraft | null;
@@ -193,6 +195,7 @@ export interface Progress {
 }
 
 export interface BatchSummary {
+  pageSweep?: { remainingPages: number };
   id: string;
   taskType: string;
   taskLabel: Label;

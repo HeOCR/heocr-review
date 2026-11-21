@@ -20,7 +20,7 @@ export interface TriagePageRow {
 }
 
 /** Every current page check, with the timestamp of its missing-lines answer. */
-export const PAGE_CHECKS_SQL = `SELECT i.external_id AS page_id, c.reviewer_id, c.answer, c.created_at,
+export const PAGE_CHECKS_SQL = `SELECT i.external_id AS page_id, c.reviewer_id, c.answer, c.created_at, c.method,
   (SELECT MAX(e.created_at) FROM page_checks e WHERE e.item_id = c.item_id AND e.reviewer_id = c.reviewer_id AND e.answer = 'missing_lines' AND e.created_at <= c.created_at) AS missing_at
   FROM page_checks c JOIN items i ON i.id = c.item_id WHERE c.batch_id = ?1 AND c.superseded_at IS NULL AND ${allowedReferencePage("i.batch_id", "i.id")}`;
 /** Every added line not removed. */
@@ -33,6 +33,7 @@ export interface PageCheckRow {
   answer: "complete" | "missing_lines" | "lines_added";
   created_at: string;
   missing_at: string | null;
+  method?: string;
 }
 export interface AddedLineRow {
   id: string;
@@ -47,7 +48,7 @@ export interface AddedLineRow {
 export function toTriagePages(pages: TriagePageRow[], checks: PageCheckRow[], added: AddedLineRow[]): TriagePages {
   return {
     pages: pages.map((p) => ({ pageId: p.page_id, width: p.width, height: p.height })),
-    checks: checks.map((c) => ({ pageId: c.page_id, reviewerId: c.reviewer_id, answer: c.answer, decidedAt: c.created_at, missingAt: c.missing_at })),
+    checks: checks.map((c) => ({ pageId: c.page_id, reviewerId: c.reviewer_id, answer: c.answer, decidedAt: c.created_at, missingAt: c.missing_at, ...(c.method === "page_sweep" ? { method: "page_sweep" as const } : {}) })),
     added: added.map((a) => ({
       id: a.id,
       pageId: a.page_id,
