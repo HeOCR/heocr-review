@@ -22,16 +22,7 @@ export function punctuationSwitches(flags: Record<string, string | true>): Punct
   });
 }
 
-type Edit = { start: number; end: number; length: number };
-
-const commonLongAbbreviations = new Set(["פרופ", "וכדומ"]);
-
-function hebrewAbbreviation(left: string): boolean {
-  const token = left.match(/[\u05d0-\u05ea\p{M}׳״'"]+$/u)?.[0] ?? "";
-  const letters = token.replace(/[^\u05d0-\u05ea]/gu, "");
-  // Unmarked short Hebrew tokens can be abbreviations or initials. Leave the ambiguous cases in place.
-  return letters.length > 0 && (letters.length <= 3 || /[׳״'"]/u.test(token) || commonLongAbbreviations.has(letters));
-}
+type Edit = { start: number; end: number; length: number; mark: DraftMark };
 
 function colonIntroducesList(right: string): boolean {
   const tail = right.replace(/^[\p{Cf}([{"'“‘«]+/u, "");
@@ -56,11 +47,11 @@ function spacing(text: string, marks: readonly DraftMark[]) {
     if (!hebrew.test(before + after) ||
        (digit.test(Array.from(left).at(-1) ?? "") && digit.test(Array.from(right)[0] ?? ""))) return match;
     if (mark !== "," && latin.test(before + after)) return match;
-    if (mark === "." && (/[.…]$/u.test(left) || /^[.…]/u.test(right) || hebrewAbbreviation(left))) return match;
+    if (mark === "." && (/[.…]$/u.test(left) || /^[.…]/u.test(right))) return match;
     if (mark === ":" && colonIntroducesList(right)) return match;
     const replacement = /^\S/u.test(right) ? `${mark} ` : mark;
     const start = Array.from(left).length;
-    edits.push({ start, end: start + Array.from(match).length, length: replacement.length });
+    edits.push({ start, end: start + Array.from(match).length, length: replacement.length, mark });
     return replacement;
   });
   return { text: result, edits };
@@ -68,6 +59,21 @@ function spacing(text: string, marks: readonly DraftMark[]) {
 
 export const normalizeDraftCommas = (text: string) => spacing(text, [","]).text;
 export const normalizeDraftPunctuation = (text: string, marks: readonly PunctuationMark[] = []) => spacing(text, marks).text;
+
+/** Count a changed line once per mark, even if the line contains several edits of that mark. */
+export function draftSpacingEffects(texts: string[], marks: readonly PunctuationMark[]) {
+  const byMark: Record<PunctuationMark, number> = { ".": 0, ";": 0, ":": 0, "?": 0, "!": 0 };
+  let lines = 0;
+  for (const text of texts) {
+    const { edits } = spacing(text, marks.length ? marks : [","]);
+    if (!edits.length) continue;
+    lines++;
+    for (const mark of new Set(edits.map(edit => edit.mark))) {
+      if (mark !== ",") byMark[mark]++;
+    }
+  }
+  return { lines, byMark };
+}
 
 function remapSpan(span: Span, edits: Edit[]): Span {
   const boundary = (offset: number, right: boolean) => {

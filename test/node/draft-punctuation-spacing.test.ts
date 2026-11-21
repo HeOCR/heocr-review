@@ -17,14 +17,22 @@ it.each([
   ["שאלו Hello ?World", "Latin run"],
   ["ענתה Hello !שלום", "mixed-script boundary"],
   ["נראה ...אולי", "ellipsis"],
-  ["פגשנו ד״ר .לוין", "Hebrew abbreviation"],
   ["רשימה :(ב) מגבת", "Hebrew enumerator"],
   ["מצרכים :לחם, גבינה", "inline Hebrew list"],
-  ["פגשנו פרופ .כהן", "known unmarked Hebrew abbreviation"],
   ["רשימה :י״א. מגבת", "Hebrew number with gershayim"],
   ["שקט . . .ממשיכים", "spaced ellipsis"],
 ] as const)("leaves %s intact (%s)", (text, reason) => {
   expect(normalizeDraftPunctuation(text, marks), reason).toBe(text);
+});
+
+it.each([
+  ["ניגשנו אל .השער נפתח", "ניגשנו אל. השער נפתח"],
+  ["הרישום נסע .הודעה חדשה", "הרישום נסע. הודעה חדשה"],
+  ["לקחתי דף .העברתי אותו", "לקחתי דף. העברתי אותו"],
+  ["שוחחנו עם ד״ר .7 פגישות נקבעו", "שוחחנו עם ד״ר. 7 פגישות נקבעו"],
+  ["פגשנו פרופ .כהן", "פגשנו פרופ. כהן"],
+])("moves the period after short words and abbreviations in %s", (before, after) => {
+  expect(normalizeDraftPunctuation(before, ["."])).toBe(after);
 });
 
 it("requires explicit per-mark switches and applies only the enabled marks", () => {
@@ -104,8 +112,15 @@ it("counts per-mark changes without editing other marks, histories, plants or as
       { ...row, id: 4, task_type: "line_verify", queue: "review", reviewed: 0, served: 0, planted: 1 },
     ];
     expect(planCommaBackfill(rows).updates).toHaveLength(0);
+    const overlap = { ...rows[0]!, payload_json: JSON.stringify({
+      candidate_text: "דף .נגמר ;הסבר :השער נסגר .סוף",
+    }) };
+    expect(planCommaBackfill([overlap], [".", ":", ";"]).queues["demo/review"]).toMatchObject({
+      changes: 1, changed_lines: 1, changed_by_mark: { ".": 1, ":": 1, ";": 1, "?": 0, "!": 0 },
+    });
     const plan = planCommaBackfill(rows, ["!"]);
-    expect(plan.queues["demo/review"]).toMatchObject({ changes: 1, changed_lines: 1, reviewed: 1, already_served: 1, registered_plant: 1 });
+    expect(plan.queues["demo/review"]).toMatchObject({ changes: 1, changed_lines: 1, reviewed: 1, already_served: 1, registered_plant: 1,
+      changed_by_mark: { ".": 0, ":": 0, ";": 0, "?": 0, "!": 1 } });
     db.exec(guardedCommaUpdate(plan.updates[0]!));
     expect(db.prepare("SELECT json_extract(payload_json,'$.candidate_text') text FROM proposals").get()?.text).toBe("נפתח! זהירות ;חכו");
     expect(db.prepare(commaReadbackSql([1], true)).get()?.original_sha).toBe("sha1");
