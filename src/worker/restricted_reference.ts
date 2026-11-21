@@ -4,6 +4,8 @@ import type { BatchRecord, StoredImage } from "../tasks/types";
 import type { Env } from "./env";
 import { HttpError } from "./http";
 
+export const RESTRICTED_MEDIA_PATH = "/api/restricted-media/v1";
+
 export function canReadReference(env: Env, url: URL, reviewerId: string, batch: BatchRecord): boolean {
   if (!batch.restrictedReference) {
     // Existing legacy data stays in D1. On deployment it cannot be served until its private roster is installed.
@@ -16,7 +18,8 @@ export function canReadReference(env: Env, url: URL, reviewerId: string, batch: 
   return host && !!env.RESTRICTED_REFERENCE_MEDIA && /^rv_[0-9a-f]{8}$/.test(allowed) && allowed === reviewerId;
 }
 
-export function blockedStaticReference(pathname: string): boolean {
+/** Called before forwarding non-API requests to the static asset binding. */
+export function blockedAssetPath(pathname: string): boolean {
   try {
     const segments: string[] = [];
     for (const segment of decodeURIComponent(pathname).replace(/\\/g, "/").split("/")) {
@@ -24,7 +27,9 @@ export function blockedStaticReference(pathname: string): boolean {
       else if (segment && segment !== ".") segments.push(segment);
     }
     const [root, batch] = segments;
-    return root?.toLowerCase() === "media" && !!batch && restrictedStaticDirectory(batch);
+    const namespace = root?.toLowerCase();
+    // Do not let the asset binding resolve aliases of our API namespace.
+    return namespace === "api" || (namespace === "media" && !!batch && restrictedStaticDirectory(batch));
   } catch {
     return true;
   }
@@ -45,6 +50,8 @@ export async function privateReferenceImage(env: Env, batch: string, image: Stor
   return new Response(object.body, { headers: {
     "content-type": `image/${type}`,
     "cache-control": "private, no-store",
+    "cdn-cache-control": "no-store",
+    "cloudflare-cdn-cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "cross-origin-resource-policy": "same-origin",
     "referrer-policy": "no-referrer",

@@ -1,5 +1,5 @@
 import { ALLOWED_REFERENCE_PROPOSAL, allowedReferencePage, isRestrictedDraftVerification, protectedReferenceBatchSql } from "../tasks/restricted_reference";
-import { referenceImage } from "./restricted_reference";
+import { referenceImage, RESTRICTED_MEDIA_PATH } from "./restricted_reference";
 /**
  * Page completeness in triage (migrations/0014_page_completeness.sql; heocr-eval's reference_triage_v1 amendment 1).
  *
@@ -95,7 +95,7 @@ export async function completenessImage(db: D1Database, batch: BatchRecord, revi
 async function pageView(db: D1Database, batch: BatchRecord, item: PageRow, reviewerId: string, mode: "check" | "add"): Promise<PageCheckView> {
   const media = await pageMedia(db, item);
   const image = batch.restrictedReference
-    ? referenceImage(media.image, `/api/batches/${batch.id}/pages/${item.id}/image`)
+    ? referenceImage(media.image, `${RESTRICTED_MEDIA_PATH}/batches/${batch.id}/pages/${item.id}`)
     : media.image;
   const added = mode === "add" ? await addedLines(db, item.id, reviewerId) : [];
   return {

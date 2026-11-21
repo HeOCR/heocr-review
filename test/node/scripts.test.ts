@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { unstable_readConfig } from "wrangler";
 import { assertNoDevAuth, assertNoRestrictedStaticMedia } from "../../scripts/deploy";
 import { assertOpenSource } from "../../scripts/lib/guard";
 import { buildImportSql } from "../../scripts/lib/importsql";
@@ -16,6 +17,13 @@ describe("wrangler.jsonc", () => {
     expect(() => assertNoDevAuth(text)).not.toThrow();
     expect(() => assertNoDevAuth(text.replace('"ENVIRONMENT": "production"', '"ENVIRONMENT": "development"'))).toThrow();
     expect(() => assertNoDevAuth(text.replace('"vars": {', '"vars": { "DEV_AUTH_BYPASS": "1",'))).toThrow();
+  });
+
+  it("runs the route gate before static assets with Workers Cache and preview URLs disabled", () => {
+    const config = unstable_readConfig({ config: "wrangler.jsonc" });
+    expect(config.assets?.run_worker_first).toBe(true);
+    expect(config.cache?.enabled).toBe(false);
+    expect(config.preview_urls).toBe(false);
   });
 });
 
