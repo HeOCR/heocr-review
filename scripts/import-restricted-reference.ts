@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseArgs, str, target } from "./lib/args";
 import { checkWriteBudget, estimateImportWrites } from "./lib/d1budget";
-import { contentSha256 } from "./lib/importsql";
+import { importProposalContent } from "./lib/importsql";
 import { prepareRestrictedReferenceImport, type RestrictedImport, type RestrictedPins } from "./lib/restricted-reference-import";
 import { assertAnonymousR2Denial, buildRestrictedStageSql, disabledR2FixtureUrl, prepareRestrictedMedia, type ObjectReadback } from "./lib/restricted-reference-stage";
 import { lit } from "./lib/sql";
@@ -110,14 +110,16 @@ function verifyStoredRefs(stage: RestrictedImport, prepared: Awaited<ReturnType<
   const pageKeys = new Map(pages?.map((row) => [row.id, row]));
   const lineKeys = new Map(lines?.map((row) => [row.id, row]));
   const plantKeys = new Map(plants?.map((row) => [row.id, row]));
+  const pinnedPlants = new Set(stage.plants.rows.map(row => row.item_id));
   const key = (image: StoredImage | undefined) => image?.ref.source === "r2" ? image.ref.key : undefined;
   if (pageKeys.size !== stage.pins.pages || lineKeys.size !== stage.pins.lines || plantKeys.size !== stage.pins.plants ||
     !stage.bundle.items.every((page) => pageKeys.get(page.externalId)?.page_key === key(prepared.itemImages.get(page.externalId))) ||
     !stage.bundle.proposals.every((line) => {
       const stored = lineKeys.get(line.externalId);
       const media = prepared.media.get(line.externalId);
+      const { originalSha, correction } = importProposalContent(stage.bundle.batch.taskType, line, pinnedPlants.has(line.externalId));
       return stored && stored.parent === line.itemExternalId && stored.rank === line.rank &&
-        stored.content_sha === contentSha256(line.contentKey) && stored.page_key === key(media?.page) && stored.crop_key === key(media?.crop);
+        stored.content_sha === (correction?.contentSha256 ?? originalSha) && stored.page_key === key(media?.page) && stored.crop_key === key(media?.crop);
     }) ||
     !stage.plants.rows.every((plant) => {
       const stored = plantKeys.get(plant.item_id);

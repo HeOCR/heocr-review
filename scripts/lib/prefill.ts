@@ -11,6 +11,7 @@
 import { lineVerifyImporter } from "../../src/tasks/line_verify/importer";
 import { ITEMS_SCHEMA_V13, LLM_PROVENANCE, draftProblems, itemsFileProblems, type LvItemsFile } from "../../src/tasks/line_verify/schema";
 import { contentSha256 } from "./importsql";
+import { commaSpacingRevision, COMMA_AUDIT } from "./draft-comma-spacing";
 
 export interface LiveProposal {
   id: number;
@@ -65,15 +66,19 @@ export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposa
   }
   // A live line may already hold a draft from an earlier swap: compare it with that draft in place.
   const liveDraft = (r: LiveProposal) => {
-    const x = JSON.parse(r.payload_json) as { kind?: string; candidate_text?: string; candidate_provenance?: string };
-    return x.kind === "type" && x.candidate_text && x.candidate_provenance?.startsWith("llm:") ? x.candidate_text : null;
+    const x = JSON.parse(r.payload_json) as { kind?: string; candidate_text?: string; candidate_provenance?: string;
+      [COMMA_AUDIT]?: { content_sha256: string; fields: {candidate_text?: string} } };
+    const audit = x[COMMA_AUDIT];
+    const candidate = audit?.fields.candidate_text ?? x.candidate_text;
+    return { candidate: x.kind === "type" && candidate && x.candidate_provenance?.startsWith("llm:") ? candidate : null,
+      hash: audit?.content_sha256 ?? r.content_sha256 };
   };
   const differ = [...plain.values()]
     .filter((p) => {
       const r = liveBy.get(p.externalId)!;
-      const draft = liveDraft(r);
-      const key = draft === null ? p.contentKey : { ...(p.contentKey as Record<string, unknown>), candidate_text: draft };
-      return contentSha256(key) !== r.content_sha256;
+      const { candidate, hash } = liveDraft(r);
+      const key = candidate === null ? p.contentKey : { ...(p.contentKey as Record<string, unknown>), candidate_text: candidate };
+      return contentSha256(key) !== hash;
     })
     .map((p) => p.externalId);
   if (differ.length) throw new Error(`${differ.length} line(s) differ from the live batch beyond the drafts: ${differ.slice(0, 5).join(", ")}`);
@@ -94,7 +99,14 @@ export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposa
       plan.rejected.push({ item_id: payload.item_id, problems: bad });
       continue;
     }
-    if (row.content_sha256 === contentSha256(p.contentKey)) {
+    const old = JSON.parse(row.payload_json) as Record<string, unknown>;
+    const audit = old[COMMA_AUDIT] as { fields: Record<string, unknown> } | undefined;
+    const raw = { ...old, ...audit?.fields, candidate_text: payload.candidate_text, candidate_provenance: payload.candidate_provenance } as Record<string, unknown>;
+    delete raw[COMMA_AUDIT];
+    const sourceSha = contentSha256(p.contentKey);
+    const corrected = commaSpacingRevision("line_verify", raw, sourceSha);
+    const newSha = corrected?.contentSha256 ?? sourceSha;
+    if (row.content_sha256 === newSha) {
       plan.already++;
       continue;
     }
@@ -103,12 +115,11 @@ export function planPrefillSwap(raw: unknown, batchId: string, live: LiveProposa
       continue;
     }
     provenances.add(payload.candidate_provenance);
-    const old = JSON.parse(row.payload_json) as Record<string, unknown>;
     plan.updates.push({
       id: row.id,
       item_id: payload.item_id,
-      payload_json: JSON.stringify({ ...old, candidate_text: payload.candidate_text, candidate_provenance: payload.candidate_provenance }),
-      content_sha256: contentSha256(p.contentKey),
+      payload_json: JSON.stringify(corrected?.payload ?? raw),
+      content_sha256: newSha,
       old_payload_json: row.payload_json,
       old_content_sha256: row.content_sha256,
     });

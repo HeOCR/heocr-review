@@ -383,18 +383,23 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   } else {
     decisionId = randomId("hr-");
     const now = iso(ctx.now);
-    await db.batch([
+    // Draft maintenance can advance the proposal between the API read and this transaction.
+    // Apply all writes only while the reviewed revision is still current.
+    const writes = await db.batch([
       db
-        .prepare("UPDATE decisions SET superseded_at = ?3 WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL")
-        .bind(proposal.id, reviewer.id, now),
+        .prepare(`UPDATE decisions SET superseded_at = ?3 WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL
+          AND EXISTS (SELECT 1 FROM proposals WHERE id=?1 AND content_sha256=?4)`)
+        .bind(proposal.id, reviewer.id, now, proposal.contentSha256),
       db
         .prepare(
           `INSERT INTO decisions (id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at, decided_on)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9 FROM proposals WHERE id=?2 AND content_sha256=?6`,
         )
         .bind(decisionId, proposal.id, reviewer.id, normalized.value, normalized.text, proposal.contentSha256, TERMS_VERSION, now, day(ctx.now)),
-      db.prepare("DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2").bind(reviewer.id, proposal.id),
+      db.prepare(`DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2
+        AND EXISTS (SELECT 1 FROM proposals WHERE id=?2 AND content_sha256=?3)`).bind(reviewer.id, proposal.id, proposal.contentSha256),
     ]);
+    if (writes[1]?.meta.changes !== 1) throw new HttpError(409, "stale_draft");
   }
   if (volunteerBefore) await recordVolunteerDecision(db, batch, proposal, decisionId, reviewer.id, admin, volunteerBefore, iso(ctx.now));
   if (gold) await recordGoldDecision(db, proposal, decisionId, reviewer.id, normalized, iso(ctx.now));
