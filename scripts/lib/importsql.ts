@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
-import { canonicalJson, type ImportBundle } from "../../src/tasks/import";
+import { canonicalJson, type ImportBundle, type ImportProposal } from "../../src/tasks/import";
 import type { ProposalMedia, StoredImage } from "../../src/tasks/types";
 import { lit } from "./sql";
+import { commaSpacingRevision, COMMA_AUDIT } from "./draft-comma-spacing";
 
 export function contentSha256(contentKey: unknown): string {
   return createHash("sha256").update(canonicalJson(contentKey), "utf8").digest("hex");
+}
+
+export function importProposalContent(task: string, proposal: ImportProposal, planted = false) {
+  const originalSha = contentSha256(proposal.contentKey);
+  const correction = planted ? null : commaSpacingRevision(task, proposal.payload, originalSha);
+  return { originalSha, correction };
 }
 
 /**
@@ -21,6 +28,7 @@ interface ImportOptions {
   after?: string[];
   addOnly?: boolean;
   itemImages?: ReadonlyMap<string, StoredImage>;
+  planted?: ReadonlySet<string>;
 }
 
 export function buildImportStatements(
@@ -49,9 +57,20 @@ export function buildImportStatements(
   }
   for (const p of bundle.proposals) {
     const itemId = `(SELECT id FROM items WHERE batch_id = ${b} AND external_id = ${lit(p.itemExternalId)})`;
+    const { originalSha, correction } = importProposalContent(batch.taskType, p, opts.planted?.has(p.externalId));
+    const payload = lit(JSON.stringify(correction?.payload ?? p.payload));
+    const content = lit(correction?.contentSha256 ?? originalSha);
+    // A re-import can encounter a prior answer or saved edit on the raw proposal. Keep that revision.
+    const keep = `EXISTS (SELECT 1 FROM decisions WHERE proposal_id=proposals.id)
+      OR EXISTS (SELECT 1 FROM drafts WHERE proposal_id=proposals.id)`;
+    const pinned = `EXISTS (SELECT 1 FROM triage_plants WHERE proposal_id=proposals.id)`;
+    const sameSource = `(proposals.content_sha256=${lit(originalSha)} OR json_extract(proposals.payload_json,'$.${COMMA_AUDIT}.content_sha256')=${lit(originalSha)})`;
+    const update = (column: string, raw: string) => !correction ? `excluded.${column}` :
+      `CASE WHEN ${pinned} OR ((${keep}) AND ${sameSource}) THEN proposals.${column}
+        WHEN ${keep} THEN ${raw} ELSE excluded.${column} END`;
     out.push(
-      `INSERT INTO proposals (batch_id, item_id, external_id, category, confidence, rank, payload_json, media_json, content_sha256, active, gate_kind, gate_ref) VALUES (${b}, ${itemId}, ${lit(p.externalId)}, ${lit(p.category)}, ${lit(p.confidence)}, ${p.rank}, ${lit(JSON.stringify(p.payload))}, ${lit(JSON.stringify(media.get(p.externalId) ?? {}))}, ${lit(contentSha256(p.contentKey))}, 1, ${p.gate ? lit(p.gate.kind) : "NULL"}, ${p.gate?.ref ? lit(p.gate.ref) : "NULL"})
-  ON CONFLICT (batch_id, external_id) DO UPDATE SET item_id = excluded.item_id, category = excluded.category, confidence = excluded.confidence, rank = excluded.rank, payload_json = excluded.payload_json, media_json = excluded.media_json, content_sha256 = excluded.content_sha256, active = 1, gate_kind = excluded.gate_kind, gate_ref = excluded.gate_ref;`,
+      `INSERT INTO proposals (batch_id, item_id, external_id, category, confidence, rank, payload_json, media_json, content_sha256, active, gate_kind, gate_ref) VALUES (${b}, ${itemId}, ${lit(p.externalId)}, ${lit(p.category)}, ${lit(p.confidence)}, ${p.rank}, ${payload}, ${lit(JSON.stringify(media.get(p.externalId) ?? {}))}, ${content}, 1, ${p.gate ? lit(p.gate.kind) : "NULL"}, ${p.gate?.ref ? lit(p.gate.ref) : "NULL"})
+  ON CONFLICT (batch_id, external_id) DO UPDATE SET item_id = excluded.item_id, category = excluded.category, confidence = excluded.confidence, rank = excluded.rank, payload_json = ${update("payload_json", lit(JSON.stringify(p.payload)))}, media_json = excluded.media_json, content_sha256 = ${update("content_sha256", lit(originalSha))}, active = 1, gate_kind = excluded.gate_kind, gate_ref = excluded.gate_ref;`,
     );
   }
   // Proposals the bundle no longer has are deactivated. A list of every id would pass D1's statement size limit for a

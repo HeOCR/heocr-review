@@ -123,6 +123,7 @@ export function buildRestrictedStageSql(stage: RestrictedImport, prepared: Restr
     VALUES (${b}, 'line_verify', ${lit(bundle.batch.title)}, ${lit(JSON.stringify(bundle.batch.source))}, 1, 'closed', ${importedAt}, 1);`];
   statements.push(...buildImportStatements(bundle, prepared.media, {
     minReviewers: 1, importedAt: now, itemImages: prepared.itemImages,
+    planted: new Set(stage.plants.rows.map(row => row.item_id)),
   }).slice(1));
   statements.push(`INSERT INTO restricted_reference_pages (batch_id, item_id, first_allowed, blind_allowed)
     SELECT batch_id, id, 1, 0 FROM items WHERE batch_id=${b};`);
