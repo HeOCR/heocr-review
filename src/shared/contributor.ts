@@ -4,10 +4,11 @@ export type ContributorKind = typeof contributorKinds[number];
 export const captureModes = ["flat", "angle", "shadow", "crumpled", "scribbled", "folded"] as const;
 export type CaptureMode = typeof captureModes[number];
 export type ContributorSplit = "train" | "dev" | "eval_open";
-export type AgeBand = "under_13" | "13_15" | "16_17";
-export type Licence = "cc0_open" | "private_eval_only";
+export const ageBands = ["10_12", "13_15", "16_17"] as const;
+export type AgeBand = typeof ageBands[number];
 export type Language = "he" | "en";
 export type ConsentCopy = { text: string; sha256: string };
+export type FormField = { id: string; label: string; value: string };
 
 export type ContributorNext = {
   id: string;
@@ -15,9 +16,9 @@ export type ContributorNext = {
   page: string;
 } & (
   { kind: "print"; mode: CaptureMode; sheet: string } |
-  { kind: "form"; sheet: string; persona: number } |
+  { kind: "form"; sheet: string; fields: FormField[]; referenceSha256: string } |
   { kind: "line"; crop: string; candidate: string } |
-  { kind: "handwriting"; prompt: string; rights: string }
+  { kind: "handwriting"; prompt: string; rights: string; referenceSha256: string }
 );
 
 export type ContributorQueue = { kind: ContributorKind; done: number; total: number; next: ContributorNext | null };
@@ -27,7 +28,7 @@ export type ContributorProfile = {
   ageBand: AgeBand;
   state: "guardian" | "assent" | "ready" | "withdrawn";
   receipt: string | null;
-  licence: Licence;
+  licence: "cc0_open";
   version: string;
   copy: Record<Language, ConsentCopy>;
   queues: ContributorQueue[];
