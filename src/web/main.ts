@@ -1,3 +1,4 @@
+import { contributorTitle, contributorView } from "./views/contributor";
 import { PAGE_SWEEP_BATCHES } from "../shared/page-sweep";
 import { pageSweepView } from "./views/page-sweep";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
@@ -66,7 +67,9 @@ function renderNav(): void {
   const link = (href: string, ic: IconName | null, label: string) =>
     h("a", { href: `#${href}`, "aria-label": label, ...(current === href ? { "aria-current": "page" } : {}) }, ic ? icon(ic, { sm: true }) : null, h("span", {}, label));
   if (!me) return nav.replaceChildren(link("conventions", "conventions", t("conv")));
-  const links = [link("tasks", "tasks", t("tasks")), link("conventions", "conventions", t("conv"))];
+  const links = me.contributorWriter ? [link("contributor", "tasks", contributorTitle())] :
+    [link("tasks", "tasks", t("tasks")), link("conventions", "conventions", t("conv"))];
+  if (config?.contributorEnabled && !me.contributorWriter) links.push(link("contributor", "tasks", contributorTitle()));
   if (me.isAdmin) links.push(link("admin", null, t("admin")));
   links.push(link("settings", "settings", t("settings")));
   nav.replaceChildren(...links);
@@ -97,6 +100,7 @@ function setPrefs(next: Prefs): void {
   applyPrefs(prefs);
   renderNav();
   renderFoot();
+  if (location.hash === "#contributor" || me?.contributorWriter && location.hash !== "#settings") void route();
 }
 
 /** The typing conventions (eval's registered Hebrew sheet: what to type for marks that have no key). */
@@ -119,7 +123,8 @@ function signedIn(next: MeResponse): void {
 function signedOut(): void {
   me = null;
   renderNav();
-  show("doc", signInView(config, signedIn));
+  const invited = config.contributorEnabled === true && location.hash === "#contributor";
+  show("doc", signInView(config, signedIn, invited));
 }
 
 /** The terms changed mid-session: show them over the review, then put the review back as it was. */
@@ -150,6 +155,7 @@ async function route(): Promise<void> {
   if (hash === "conventions") return show("doc", conventionsView());
   if (!me) return signedOut();
   if (hash === "settings") return show("doc", settingsView(me, prefs, { changed: (next) => ((me = next), renderNav()), prefsChanged: setPrefs, signedOut }));
+  if (me.contributorWriter || hash === "contributor" && config.contributorEnabled) return show("doc", contributorView(me.reviewerId, config.contributorEnabled === true));
   if (hash === "admin" && me.isAdmin) return show("legacy", adminView());
   if (!me.termsCurrent) {
     return show("doc", termsView(me, (next) => signedIn(next)));

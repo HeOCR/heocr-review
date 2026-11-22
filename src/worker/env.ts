@@ -10,6 +10,11 @@ export interface Env {
   REGISTERED_CAPTURE_ROSTER_SHA256?: string;
   /** Private TRAIN capture storage. Never bind this to the restricted eval bucket. */
   TRAIN_CAPTURE_MEDIA?: R2Bucket;
+  CONTRIBUTOR_APP_ENABLED?: string;
+  CONTRIBUTOR_CONFIG_SHA256?: string;
+  /** Optional and separately provisioned for non-TRAIN writer assignments. */
+  CONTRIBUTOR_DEV_MEDIA?: R2Bucket;
+  CONTRIBUTOR_EVAL_MEDIA?: R2Bucket;
   TRAIN_CAPTURE_ENABLED?: string;
   TRAIN_CAPTURE_ROSTER_SHA256?: string;
   FM01_CAPTURE_ENABLED?: string;

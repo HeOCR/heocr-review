@@ -1,3 +1,4 @@
+import { contributor, guardContributorLegacy, isContributorAPI } from "./contributor";
 import { sweepRead, sweepWrite, sweepImage } from "./page-sweep";
 import { handwriting, isHandwritingPath } from "./handwriting";
 import { isCapturePath, registeredCaptures } from "./registered-captures";
@@ -58,9 +59,8 @@ const ROUTES: [string, RegExp, Handler][] = [
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (isCapturePath(url.pathname)) return registeredCaptures(request, env, url.pathname);
-  if (isHandwritingPath(url.pathname)) return handwriting(request, env, url.pathname);
-  if (!url.pathname.startsWith("/api/")) {
+  const capture = isCapturePath(url.pathname), privateHandwriting = isHandwritingPath(url.pathname);
+  if (!capture && !privateHandwriting && !url.pathname.startsWith("/api/")) {
     if (blockedAssetPath(url.pathname)) return json({ error: "not_found" }, 404, {
       "cdn-cache-control": "no-store",
       "cloudflare-cdn-cache-control": "no-store",
@@ -69,12 +69,18 @@ export async function handle(request: Request, env: Env, exec: ExecutionContext)
   }
   const ctx: Ctx = { env, request, url, exec, now: Date.now() };
   try {
+    if (isContributorAPI(url.pathname)) return await contributor(ctx);
+    if (capture || privateHandwriting) {
+      await guardContributorLegacy(ctx);
+      return capture ? registeredCaptures(request, env, url.pathname) : handwriting(request, env, url.pathname);
+    }
     let pathMatched = false;
     for (const [method, pattern, handler] of ROUTES) {
       const m = pattern.exec(url.pathname);
       if (!m) continue;
       pathMatched = true;
       if (method !== request.method) continue;
+      await guardContributorLegacy(ctx);
       return await handler(ctx, ...m.slice(1));
     }
     throw pathMatched ? new HttpError(405, "method_not_allowed") : new HttpError(404, "not_found");

@@ -1,3 +1,5 @@
+import { isContributorWriter } from "./contributor";
+import { canonicalContributorOrigin } from "./contributor/config";
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
 import { canSweep, pendingSweepPages, usesUnplantedReview } from "./page-sweep";
 import { canReadReference, draftSweepPin, privateReferenceImage, referenceReviewerAllowed } from "./restricted_reference";
@@ -91,6 +93,7 @@ export async function config(ctx: Ctx): Promise<Response> {
     devAuth: devAuthEnabled(ctx.env, ctx.request),
     termsVersion: TERMS_VERSION,
     termsStatus: TERMS_STATUS,
+    ...(ctx.env.CONTRIBUTOR_APP_ENABLED === "1" && canonicalContributorOrigin(ctx.env, ctx.url) ? { contributorEnabled: true } : {}),
   };
   return json(body);
 }
@@ -112,7 +115,7 @@ export async function signIn(ctx: Ctx, providerId: string): Promise<Response> {
     .run();
   const reviewer = (await getReviewer(ctx.env.DB, id))!;
   if (reviewer.blocked) throw new HttpError(403, "blocked");
-  return json(me(ctx.env, reviewer), 200, { "set-cookie": await createSessionCookie(ctx.env, id, ctx.now) });
+  return json(await meFor(ctx, reviewer), 200, { "set-cookie": await createSessionCookie(ctx.env, id, ctx.now) });
 }
 
 export async function signOut(ctx: Ctx): Promise<Response> {
@@ -120,8 +123,13 @@ export async function signOut(ctx: Ctx): Promise<Response> {
   return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() });
 }
 
+async function meFor(ctx: Ctx, reviewer: ReviewerRow): Promise<MeResponse> {
+  const result = me(ctx.env, reviewer);
+  return await isContributorWriter(ctx, reviewer.id) ? {...result, contributorWriter: true, displayName: null, isAdmin: false} : result;
+}
+
 export async function getMe(ctx: Ctx): Promise<Response> {
-  return json(me(ctx.env, await requireReviewer(ctx)));
+  return json(await meFor(ctx, await requireReviewer(ctx)));
 }
 
 /** Accept the contribution terms (and optionally opt in to a credit name). */
@@ -183,7 +191,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
   const list = await listBatches(ctx.env.DB, true);
   const out: BatchSummary[] = [];
   for (const b of list) {
-    if (!canReadReference(ctx.env, ctx.url, reviewer.id, b)) continue;
+    if (b.source.contributor_scope === "train" || !canReadReference(ctx.env, ctx.url, reviewer.id, b)) continue;
     if (b.taskType === PAGE_PASTE_TRAIN) {
       if (isAdmin(ctx.env, reviewer.id) && isTrainingPaste(b)) {
         const { total, completed, own } = await trainingProgress(ctx.env.DB, b.id, reviewer.id);
@@ -228,7 +236,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
 
 async function openBatch(ctx: Ctx, id: string, reviewerId: string) {
   const batch = await getBatch(ctx.env.DB, id);
-  if (!batch || batch.status !== "open" || !taskType(batch.taskType) ||
+  if (!batch || batch.status !== "open" || batch.source.contributor_scope === "train" || !taskType(batch.taskType) ||
     !canReadReference(ctx.env, ctx.url, reviewerId, batch)) throw new HttpError(404, "not_found");
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   return usesUnplantedReview(ctx.env, ctx.url, reviewerId, batch) ? { ...batch, unplantedReview: true } : batch;
