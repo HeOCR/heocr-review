@@ -1,3 +1,5 @@
+import { enforceReferenceRoute, referenceConsensusActive, referenceFilter, referenceLane } from "./reference-consensus";
+import { normalizeLineDecision } from "../tasks/line_verify";
 import { isContributorWriter } from "./contributor";
 import { canonicalContributorOrigin } from "./contributor/config";
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
@@ -220,14 +222,17 @@ export async function batches(ctx: Ctx): Promise<Response> {
     const type = taskType(b.taskType);
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
+    const referenceReview = await referenceConsensusActive(ctx.env.DB, b);
+    const filter = referenceReview ? await referenceFilter(ctx.env.DB, b, false) : null;
     out.push({
+      ...(referenceReview ? { referenceTyping: true as const } : {}),
       id: b.id,
       taskType: b.taskType,
       taskLabel: type.label,
       title: b.title,
-      progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
+      progress: isConsensus(b) ? await consensusProgress(ctx.env.DB, b, reviewer.id, true) : await progressFor(ctx.env.DB, b, reviewer.id, ctx.now, filter, isAdmin(ctx.env, reviewer.id)),
       subsets: await subsetsOf(ctx.env.DB, b.id),
-      ...(canSweep(ctx.env, ctx.url, reviewer.id, b) ? { pageSweep: { remainingPages: await pendingSweepPages(ctx.env.DB, b.id, reviewer.id) } } : {}),
+      ...(!referenceReview && canSweep(ctx.env, ctx.url, reviewer.id, b) ? { pageSweep: { remainingPages: await pendingSweepPages(ctx.env.DB, b.id, reviewer.id) } } : {}),
       ...(isTriageBatch(b) ? { triage: (await triageCounts(ctx.env.DB, b, reviewer.id, ctx.now))! } : {}),
     });
   }
@@ -251,6 +256,14 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   const params = new URL(ctx.request.url).searchParams;
   const subsetId = params.get("subset");
   if (isRestrictedDraftVerification(batch)) {
+    if (await referenceConsensusActive(ctx.env.DB, batch)) {
+      const audit = params.get("queue") === "check";
+      const filter = await referenceFilter(ctx.env.DB, batch, audit);
+      const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, false, false, audit ? "audit" : "ordinary");
+      if (audit || out.proposal) return json(out);
+      const page = await nextPage(ctx.env.DB, batch, reviewer.id, "triage") ?? await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
+      return json({ ...out, page });
+    }
     if (params.get("queue") === "fix" && draftSweepPin(batch) && canSweep(ctx.env, ctx.url, reviewer.id, batch)) {
       const page = await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
       const progress = await progressFor(ctx.env.DB, batch, reviewer.id, ctx.now);
@@ -293,7 +306,7 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
   // A volunteer line: only one this reviewer was served (or decided); the maintainer's: only one that went to them.
   if (isConsensus(batch)) {
     if (!(await lineOpenTo(ctx.env.DB, proposal, reviewerId, isAdmin(ctx.env, reviewerId)))) throw new HttpError(409, "not_open", "this line is not open to you");
-    return { proposal, batch };
+    return { proposal, batch, lane: null };
   }
   // A gated page (a reserve, a blind second pass) is not shown or decided by link before it opens to this reviewer,
   // unless they already decided it (going back to change a decision).
@@ -318,16 +331,22 @@ async function activeProposal(ctx: Ctx, id: number, reviewerId: string) {
       .first<{ ok: number }>();
     if (!done) throw new HttpError(409, "not_open", "this page's blind second pass is open to you: decide it first");
   }
-  return { proposal, batch };
+  const lane = await referenceLane(ctx.env.DB, batch, proposal.id);
+  if (lane === "accepted") {
+    const current = await ctx.env.DB.prepare(`SELECT 1 FROM decisions WHERE proposal_id=?1 AND reviewer_id=?2
+      AND superseded_at IS NULL AND proposal_sha256=?3`).bind(proposal.id, reviewerId, proposal.contentSha256).first();
+    enforceReferenceRoute(lane, !!current);
+  }
+  return { proposal, batch, lane };
 }
 
 export async function showProposal(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.readMinute, reviewer.id, ctx.now);
-  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  const { proposal, batch, lane } = await activeProposal(ctx, id, reviewer.id);
   // ?queue=triage: the line as triage shows it (a plant's text, no attention runs).
   const triage = new URL(ctx.request.url).searchParams.get("queue") === "triage";
-  return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id, triage) });
+  return json({ proposal: await proposalView(ctx.env.DB, batch, proposal, reviewer.id, triage, lane) });
 }
 
 export async function restrictedProposalImage(ctx: Ctx, id: number, kind: "crop" | "page"): Promise<Response> {
@@ -355,15 +374,15 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   // The maintainer's own triage runs to thousands of lines a day: the daily cap is for volunteers (the per-minute one stays).
   if (!isAdmin(ctx.env, reviewer.id)) await enforceWriteDay(ctx.env.DB, reviewer.id, ctx.now);
   const body = await readJson(ctx.request, MAX_PAGE_BODY_BYTES);
-  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  const { proposal, batch, lane } = await activeProposal(ctx, id, reviewer.id);
   const unplanted = batch.unplantedReview === true && triageable(proposal);
   if (unplanted !== (body.pageSweepDraft === true)) throw new HttpError(409, "stale_draft");
   if (typeof body.value !== "string") throw new HttpError(400, "invalid_decision", "value is required");
-  if (isRestrictedDraftVerification(batch) && body.value !== "exact" && body.value !== "edited") {
+  if (lane === "audit" ? body.value !== "typed" : isRestrictedDraftVerification(batch) && body.value !== "exact" && body.value !== "edited") {
     throw new HttpError(400, "invalid_decision", "a draft verification decision must be exact or edited");
   }
   // Triage answers (migrations/0012_triage.sql): only in a triage batch, only on a line with a candidate, never text.
-  const normalized = batch.taskType === "line_verify" && isTriageValue(body.value)
+  const normalized = lane === "audit" ? normalizeLineDecision("", "edited", body.text) : batch.taskType === "line_verify" && isTriageValue(body.value)
     ? isTriageBatch(batch) && triageable(proposal) && (body.text === undefined || body.text === null)
       ? { ok: true as const, value: body.value, text: null }
       : { ok: false as const, error: "a triage answer is for a line with a candidate in a triage batch, without text" }
@@ -380,7 +399,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   }
   // Volunteer lines: a decision is final (only a reviewer's first decision on a line could count). So is a blind
   // second pass: typed before the reviewer could see the candidate, it must not change once they can.
-  if (existing && (isConsensus(batch) || taskType(batch.taskType)!.finalDecision?.(proposal))) throw new HttpError(409, "decided", "this line is decided");
+  if (existing && (lane === "audit" || isConsensus(batch) || taskType(batch.taskType)!.finalDecision?.(proposal))) throw new HttpError(409, "decided", "this line is decided");
   // A volunteer_v1 line (line_verify volunteer resolution): decisions are final, and only its routing step's
   // reviewers may decide it (the admin alone at the maintainer step; anyone else at the fourth).
   const admin = isAdmin(ctx.env, reviewer.id);
@@ -410,17 +429,22 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     const writes = await db.batch([
       db
         .prepare(`UPDATE decisions SET superseded_at = ?3 WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL
-          AND EXISTS (SELECT 1 FROM proposals WHERE id=?1 AND content_sha256=?4)`)
+          AND EXISTS (SELECT 1 FROM proposals WHERE id=?1 AND content_sha256=?4)
+          AND NOT EXISTS(SELECT 1 FROM current_reference_consensus_lines WHERE proposal_id=?1 AND lane IN ('audit','accepted'))`)
         .bind(proposal.id, reviewer.id, now, proposal.contentSha256),
       db
         .prepare(
           `INSERT INTO decisions (id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at, decided_on, method)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals WHERE id=?2 AND content_sha256=?6`,
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals WHERE id=?2 AND content_sha256=?6
+             AND (?11=0 OR (EXISTS(SELECT 1 FROM current_reference_consensus_lines WHERE proposal_id=?2 AND lane='audit')
+               AND NOT EXISTS(SELECT 1 FROM decisions WHERE proposal_id=?2 AND reviewer_id=?3 AND superseded_at IS NULL)))
+             AND (?11=1 OR NOT EXISTS(SELECT 1 FROM current_reference_consensus_lines
+               WHERE proposal_id=?2 AND lane IN ('audit','accepted'))) `,
         )
         .bind(decisionId, proposal.id, reviewer.id, normalized.value, normalized.text, proposal.contentSha256, TERMS_VERSION, now, day(ctx.now),
-          unplanted ? "line_unplanted" : "line"),
+          unplanted ? "line_unplanted" : "line", Number(lane === "audit")),
       db.prepare(`DELETE FROM skips WHERE reviewer_id = ?1 AND proposal_id = ?2
-        AND EXISTS (SELECT 1 FROM proposals WHERE id=?2 AND content_sha256=?3)`).bind(reviewer.id, proposal.id, proposal.contentSha256),
+        AND EXISTS (SELECT 1 FROM decisions WHERE id=?3)`).bind(reviewer.id, proposal.id, decisionId),
     ]);
     if (writes[1]?.meta.changes !== 1) throw new HttpError(409, "stale_draft");
   }
@@ -440,7 +464,8 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     decisionId,
     value: normalized.value,
     text: normalized.text,
-    progress: await progressFor(db, batch, reviewer.id, ctx.now, null, isAdmin(ctx.env, reviewer.id)),
+    progress: await progressFor(db, batch, reviewer.id, ctx.now,
+      lane ? await referenceFilter(db, batch, lane === "audit") : null, isAdmin(ctx.env, reviewer.id)),
   });
 }
 

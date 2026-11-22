@@ -165,7 +165,7 @@ async function route(): Promise<void> {
     const linked = /^p\/(\d{1,12})$/.exec(hash);
     // #b/<batch>, or #b/<batch>/s/<subset> to work through one subset of it (a filter on the queue), or in a triage
     // batch #b/<batch>/q/fix for the desktop fix queue (the triage queue is the default).
-    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100})|\/q\/(triage|fix))?$/.exec(hash);
+    const chosen = /^b\/([A-Za-z0-9._-]{1,100})(?:\/s\/([A-Za-z0-9._-]{1,100})|\/q\/(triage|fix|check))?$/.exec(hash);
     let batch: BatchSummary | undefined;
     if (linked) {
       try {
@@ -190,7 +190,7 @@ async function route(): Promise<void> {
     const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
     const startAt = linked ? Number(linked[1]) : undefined;
     const queue = batch.triage ? ((chosen?.[3] as "triage" | "fix" | undefined) ?? "triage")
-      : batch.pageSweep && chosen?.[3] === "fix" ? "fix" : undefined;
+      : batch.pageSweep && chosen?.[3] === "fix" ? "fix" : batch.referenceTyping && chosen?.[3] === "check" ? "check" : undefined;
     const sweep = batch.pageSweep && !linked && !chosen?.[3] && desktopSweep();
     const view: ReviewScreen = sweep ? pageSweepView(batch, hooks) :
       batch.taskType === PAGE_PASTE_TRAIN ? pagePasteTrainView(batch, hooks)
@@ -203,7 +203,10 @@ async function route(): Promise<void> {
           : batch.taskType === "line_verify"
             ? lineVerifyView(batch, hooks, startAt, queue)
             : reviewView(batch, hooks, startAt);
-    const head = sweep ? [] : batch.triage ? [queueNav(batch, linked ? undefined : queue)] :
+    const head = sweep ? [] : batch.triage ? [queueNav(batch, linked ? undefined : queue === "check" ? undefined : queue)] :
+      batch.referenceTyping ? [h("nav", { class: "subsetnav small" },
+        h("a", { href: `#b/${encodeURIComponent(batch.id)}` }, t("batch")),
+        h("a", { href: `#b/${encodeURIComponent(batch.id)}/q/check` }, t("type_line")))] :
       batch.pageSweep && desktopSweep() ? [sweepLink(batch)] :
       batch.subsets.length ? [subsetNav(batch, linked ? undefined : (subset?.id ?? ""))] : [];
     show("task", ...head.map((n) => h("div", { class: "batchhead" }, n)), view.el);

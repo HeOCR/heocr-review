@@ -1,3 +1,4 @@
+import { MACHINE_ACCEPTED } from "./reference-consensus";
 import { ALLOWED_REFERENCE_PROPOSAL, allowedReferencePage, isRestrictedDraftVerification, protectedReferenceBatchSql } from "../tasks/restricted_reference";
 import { referenceImage, RESTRICTED_MEDIA_PATH } from "./restricted_reference";
 /**
@@ -21,7 +22,7 @@ const PAGE_ANSWERED = `NOT EXISTS (SELECT 1 FROM proposals p WHERE p.item_id = i
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2
     AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND NOT ${PENDING_SQL("d")}))`;
 const DRAFTS_ANSWERED = `NOT EXISTS (SELECT 1 FROM proposals p WHERE p.batch_id = i.batch_id
-  AND p.active = 1 AND ${PASS1_SQL} AND ${ALLOWED_REFERENCE_PROPOSAL}
+  AND p.active = 1 AND ${PASS1_SQL} AND ${ALLOWED_REFERENCE_PROPOSAL} AND NOT ${MACHINE_ACCEPTED}
   AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2
     AND d.superseded_at IS NULL AND ${CONTENT_MATCH_SQL} AND d.value IN ('exact','edited')))`;
 const CURRENT = (answer: string) =>

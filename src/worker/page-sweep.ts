@@ -1,3 +1,4 @@
+import { CONSENSUS_ON, referenceConsensusActive } from "./reference-consensus";
 import { PAGE_SWEEP_BATCHES, type SweepLine, type SweepPage } from "../shared/page-sweep";
 import { imageUrl, type Box } from "../shared/media";
 import { sha256Hex } from "../shared/sha256";
@@ -37,7 +38,7 @@ async function access(c: Ctx, batchId: string, write: boolean) {
   const reviewer = await readSession(c.env, c.request, c.now);
   if (!reviewer) throw new HttpError(401, "sign_in_required");
   const [user, batch] = await Promise.all([getReviewer(c.env.DB, reviewer), getBatch(c.env.DB, batchId)]);
-  if (!user || user.blocked || batch?.status !== "open" || !canSweep(c.env, c.url, reviewer, batch)) throw missing();
+  if (!user || user.blocked || batch?.status !== "open" || (!canSweep(c.env, c.url, reviewer, batch) || await referenceConsensusActive(c.env.DB, batch))) throw missing();
   if (write && user.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
   enforce(write ? LIMITS.writeMinute : LIMITS.readMinute, reviewer, c.now);
   return { reviewer, batch };
@@ -55,7 +56,7 @@ function pageScope(batch: BatchRecord) {
       AND json_extract(b.source_json,'$.restricted_review')='${DRAFT_VERIFICATION}'
       AND json_extract(b.source_json,'$.${pin.field}')=?4`
     : "s.mode='triage' AND ?4 IS NULL";
-  return `i.batch_id=?1 AND i.id=?2 AND ${sweepRoster}
+  return `i.batch_id=?1 AND i.id=?2 AND ${sweepRoster} AND NOT ${CONSENSUS_ON}
     AND EXISTS(SELECT 1 FROM batches b JOIN batch_settings s ON s.batch_id=b.id
       WHERE b.id=i.batch_id AND b.status='open' AND s.pointed_books='keep' AND ${condition})`;
 }

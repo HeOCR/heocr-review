@@ -1,4 +1,5 @@
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
+import type { ReferenceLane } from "./reference-consensus";
 import { referenceImage, RESTRICTED_MEDIA_PATH } from "./restricted_reference";
 /** Which proposal a reviewer sees next, and progress counts. */
 import type { NextResponse, PageDraft, PageDraftRow, Progress, ProposalView } from "../shared/api";
@@ -113,6 +114,8 @@ export interface SubsetFilter {
   id: string;
   ids: number[];
   strata: number;
+  preserveOrder?: boolean;
+  omitPages?: boolean;
 }
 
 /**
@@ -208,13 +211,13 @@ const wantsDecision = (volunteer: { admin: boolean } | null, settled: string) =>
     ? `${volunteerOpen(volunteer.admin)} AND ${NOT_GOLD}`
     : `(SELECT COUNT(*) FROM decisions d WHERE d.proposal_id = p.id AND ${settled}) < ${needed(3)}`;
 
-const openSql = (volunteerPages: boolean, volunteer: { admin: boolean } | null, settled: string) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
+const openSql = (volunteerPages: boolean, volunteer: { admin: boolean } | null, settled: string, preserveOrder: boolean) => `SELECT ${PROPOSAL_COLUMNS} FROM proposals p JOIN items i ON i.id = p.item_id
   WHERE p.batch_id = ?1 AND p.active = 1 AND ${eligible(6, 7)} AND ${inFilter(8, volunteerPages)}
     AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.proposal_id = p.id AND d.reviewer_id = ?2 AND ${settled})
     AND NOT EXISTS (SELECT 1 FROM skips s WHERE s.proposal_id = p.id AND s.reviewer_id = ?2)
     AND ${wantsDecision(volunteer, settled)}
-  ORDER BY EXISTS (SELECT 1 FROM assignments a WHERE a.proposal_id = p.id AND a.reviewer_id <> ?2 AND a.assigned_at > ?4),
-    p.rank
+  ORDER BY ${preserveOrder ? "(SELECT CAST(o.key AS INTEGER) FROM json_each(?8) o WHERE o.value=p.id)" :
+    "EXISTS (SELECT 1 FROM assignments a WHERE a.proposal_id=p.id AND a.reviewer_id<>?2 AND a.assigned_at>?4), p.rank"}
   LIMIT ?5`;
 
 /**
@@ -257,7 +260,7 @@ export async function progressFor(
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();
-  const pages = verification ? await verificationPageProgress(db, batch.id, reviewerId) : { total: 0, done: 0 };
+  const pages = verification && !filter?.omitPages ? await verificationPageProgress(db, batch.id, reviewerId) : { total: 0, done: 0 };
   return {
     total: (filter ? filter.strata : (row?.total ?? 0)) + pages.total,
     covered: (row?.covered ?? 0) + pages.done,
@@ -283,7 +286,7 @@ async function asTriaged(db: D1Database, batch: BatchRecord, p: ProposalRecord, 
   return { ...view, candidate: shown, runs: [] };
 }
 
-export async function proposalView(db: D1Database, batch: BatchRecord, p: ProposalRecord, reviewerId: string, triage = false): Promise<ProposalView> {
+export async function proposalView(db: D1Database, batch: BatchRecord, p: ProposalRecord, reviewerId: string, triage = false, lane: ReferenceLane | null = null): Promise<ProposalView> {
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
   const verification = isRestrictedDraftVerification(batch);
@@ -298,6 +301,12 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
       page: referenceImage(p.media.page, `${RESTRICTED_MEDIA_PATH}/proposals/${p.id}/page`),
     },
   } : p);
+  if (lane === "audit" && rawView.kind === "line_verify") {
+    return { id: p.id, batchId: p.batchId, externalId: p.externalId, itemTitle: p.itemTitle,
+      view: { ...rawView, mode: "type", pass: 2, draft: false, candidate: "", runs: [], precheck: null,
+        provenance: { id: "", label: { he: "", en: "" } }, draftVerification: true },
+      options: [], mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null };
+  }
   const masked = batch.restrictedReference ? !mine : triage;
   const options = type.optionsFor?.(p) ?? type.options;
   return {
@@ -339,11 +348,12 @@ export async function nextFor(
   filter: SubsetFilter | null = null,
   admin = false,
   triage = false,
+  lane: ReferenceLane | null = null,
 ): Promise<NextResponse> {
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
     .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null,
-      settledDecision(isTriageBatch(batch) || isRestrictedDraftVerification(batch))))
+      settledDecision(isTriageBatch(batch) || isRestrictedDraftVerification(batch)), filter?.preserveOrder ?? false))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const open = results.map(toProposal);
@@ -367,7 +377,7 @@ export async function nextFor(
     .flatMap((r) => kinds.map((k) => r.media[k]))
     .filter((m) => m !== undefined)
     .map((m) => imageUrl(m.ref));
-  return { proposal: await proposalView(db, batch, first, reviewerId, triage), progress, prefetch: [...new Set(prefetch)] };
+  return { proposal: await proposalView(db, batch, first, reviewerId, triage, lane), progress, prefetch: [...new Set(prefetch)] };
 }
 
 /** How many lines each triage queue still holds for the reviewer (the app's two entries into a triage batch). */
