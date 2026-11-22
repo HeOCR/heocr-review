@@ -189,7 +189,7 @@ const MORE: [string, StringKey, StringKey, IconName, string][] = [
  * editing (correct, different, niqqud_mismatch), on any screen; "fix" serves the reviewer's "different" lines and the
  * lines without a candidate in the usual screen, on a desktop only (a phone is told how many wait there).
  */
-export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number, queue?: "triage" | "fix"): ReviewScreen {
+export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?: number, queue?: "triage" | "fix" | "check"): ReviewScreen {
   const root = h("div", { class: "taskroot" });
   const desktopMq = matchMedia(DESKTOP_QUERY);
   const history: number[] = [];
@@ -508,7 +508,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const mineText = p.mine && ["edited", "pointed_print", "typed", "misaligned"].includes(p.mine.value) && p.mine.text !== null ? p.mine.text : null;
     // "" on a blind pass; a typed line's draft (v.draft) starts the box until the reviewer has saved their own text.
     const start = asMisaligned ? (p.mine?.value === "misaligned" ? (mineText ?? "") : "") : (mineText ?? v.candidate);
-    area.value = readDraft(p.id) ?? start;
+    const sourceOnly = typing && v.draftVerification;
+    area.value = sourceOnly ? start : (readDraft(p.id) ?? start);
     const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
     pointed.checked = p.mine?.value === "pointed_print";
     const changes = h("p", { class: "changes", role: "status" });
@@ -516,7 +517,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const update = () => {
       // A line is one line: a pasted line break becomes a space.
       if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
-      writeDraft(p.id, area.value);
+      if (!sourceOnly) writeDraft(p.id, area.value);
       if (typing || asMisaligned) return; // nothing to compare with: the candidate is never sent on a blind pass
       changes.replaceChildren(...changesLine(v.candidate, area.value));
       preview.replaceChildren(compare(v.candidate, area.value, "", "").codes);
@@ -889,7 +890,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       });
     }
     // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
-    else if (current.view.draftVerification) {
+    else if (current.view.draftVerification && !typing) {
       for (const key of ["KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) delete actions[key];
     } else if (typing) {
       for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = () => startEdit();

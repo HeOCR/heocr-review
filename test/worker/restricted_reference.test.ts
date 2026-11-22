@@ -391,3 +391,59 @@ it("requires the approved capture roster pin for verification, media, decisions 
   expect((await ownerRequest("POST", `${queue}/pages/${itemId}/check`, pin, confirm)).status).toBe(200);
   expect((await ownerRequest("GET", exportPath, pin)).status).toBe(200);
 });
+
+it("uses sealed line order and blank audit typing while keeping real answers and page checks", async () => {
+  const { owner, admin, req } = await fixtureUsers();
+  const { batch, front } = await fixtureLine();
+  const all = (await env.DB.prepare(`SELECT id,item_id,content_sha256 FROM proposals
+    WHERE batch_id=?1 ORDER BY rank,id LIMIT 4`).bind(batch)
+    .all<{ id: number; item_id: number; content_sha256: string }>()).results;
+  const [prior, audit, accepted, difficult] = all;
+  expect(all).toHaveLength(4);
+  const sourcePin = "b".repeat(64);
+  const projection = "c".repeat(64);
+  const box = "[120,360,1080,540]";
+  await env.DB.batch([
+    env.DB.prepare("UPDATE batches SET source_json=json_set(source_json,'$.restricted_review',?2,'$.items_sha256',?3) WHERE id=?1")
+      .bind(batch, DRAFT_VERIFICATION, sourcePin),
+    env.DB.prepare("UPDATE batch_settings SET mode='standard' WHERE batch_id=?1").bind(batch),
+    env.DB.prepare("DELETE FROM triage_plants WHERE batch_id=?1").bind(batch),
+    env.DB.prepare("UPDATE proposals SET active=0 WHERE batch_id=?1 AND id NOT IN (?2,?3,?4,?5)")
+      .bind(batch, prior!.id, audit!.id, accepted!.id, difficult!.id),
+    ...[...new Set(all.map(p => p.item_id))].map(id =>
+      env.DB.prepare("INSERT OR IGNORE INTO restricted_reference_pages (batch_id,item_id) VALUES (?1,?2)").bind(batch, id)),
+    ...all.map(p => env.DB.prepare(`UPDATE proposals SET media_json=?2,
+      payload_json=json_set(payload_json,'$.candidate_text','טיוטה','$.box',json(?3)) WHERE id=?1`).bind(p.id, images, box)),
+    env.DB.prepare("INSERT INTO reference_consensus_runs VALUES (?1,?2,?3,?4,4,0)").bind(projection, batch, sourcePin, "d".repeat(64)),
+    ...([["ordinary", 1], ["audit", 0], ["accepted", 0], ["ordinary", 0]] as const).map(([lane, position], i) => {
+      const p = all[i]!;
+      return env.DB.prepare("INSERT INTO reference_consensus_lines VALUES (?1,?2,?3,?4,?5,?5,?6,?7,?8)")
+        .bind(projection, p.id, p.item_id, p.content_sha256, key, box, lane, position);
+    }),
+  ]);
+  const root = `/api/batches/${batch}`;
+  const decision = (id: number) => `/api/proposals/${id}/decision`;
+  expect((await req("POST", decision(prior!.id), owner.cookie, host, { value: "exact" })).status).toBe(200);
+  await env.DB.prepare("UPDATE reference_consensus_runs SET active=1 WHERE projection_sha256=?1").bind(projection).run();
+  expect((await req("GET", `${root}/next?queue=check`, admin.cookie)).status).toBe(404);
+  expect(await (await req("GET", `${root}/next`)).json()).toMatchObject({ proposal: { id: difficult!.id } });
+  expect((await req("GET", `/api/proposals/${accepted!.id}`)).status).toBe(404);
+  const blind = await req("GET", `${root}/next?queue=check`);
+  expect(blind.headers.get("cache-control")).toBe("no-store");
+  const body = await blind.json();
+  expect(body).toMatchObject({ proposal: { id: audit!.id, view: { mode: "type", pass: 2, candidate: "", runs: [] } },
+    progress: { total: 1, remainingForMe: 1 }, prefetch: [] });
+  expect(JSON.stringify(body)).not.toContain("טיוטה");
+  expect(await (await req("GET", `/api/proposals/${audit!.id}`)).json()).toMatchObject({ proposal: { view: { candidate: "" } } });
+  expect((await req("POST", decision(audit!.id), owner.cookie, host, { value: "exact" })).status).toBe(400);
+  expect((await req("POST", `${root}/pages/${front.item_id}/check`, owner.cookie, host, confirm)).status).toBe(409);
+  expect((await req("POST", decision(audit!.id), owner.cookie, host, { value: "typed", text: "טיוטה" })).status).toBe(200);
+  expect((await req("POST", decision(audit!.id), owner.cookie, host, { value: "typed", text: "טקסט אחר" })).status).toBe(409);
+  expect((await req("POST", decision(difficult!.id), owner.cookie, host, { value: "exact" })).status).toBe(200);
+  expect(await (await req("GET", `${root}/next`)).json()).toMatchObject({ proposal: null, page: { mode: "check" } });
+  const decisions = await env.DB.prepare("SELECT proposal_id,value,text,superseded_at FROM decisions WHERE reviewer_id=?1")
+    .bind(owner.id).all<{ proposal_id: number }>();
+  expect(decisions.results).toHaveLength(3);
+  expect(decisions.results).toContainEqual({ proposal_id: prior!.id, value: "exact", text: null, superseded_at: null });
+  expect(decisions.results).toContainEqual({ proposal_id: audit!.id, value: "edited", text: "טיוטה", superseded_at: null });
+});

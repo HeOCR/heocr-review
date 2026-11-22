@@ -198,6 +198,7 @@ export interface Progress {
 
 export interface BatchSummary {
   pageSweep?: { remainingPages: number };
+  referenceTyping?: true;
   realismMode?: "ranking";
   id: string;
   taskType: string;
