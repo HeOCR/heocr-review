@@ -38,11 +38,24 @@ The TRAIN runtime roster is `train_phone_captures.v1` JSON with `pack_sha256`, `
 
 Choose the page, capture condition and actual device A or B. The form suggests the next missing page and condition. This intake also supports DNG container detection and uses the same 24 MiB file limit. Each page and condition gets one photo regardless of device. The restricted bucket holds a digest-only scope claim so exact duplicates cannot land in both buckets. During private readback, verify each pictured page against the approved TRAIN source manifest before any training or calibration handoff. The selected page and file hash need to be checked against the pictured source.
 
+## Office forms capture intake
+
+The office form packs use the same private TRAIN bucket and separate digest namespaces under `train-form-captures/v1/<pack>/<roster-sha256>/`. Leave the eval and gazette routes bound to their original rosters. Each form roster uses schema `train_form_captures.v1` and binds the pack or blank digest index, source manifest, and issuer-reference hashes. Every page row binds its displayed ID, form ID, form-relative leaf, issuer PDF hash, one-based issuer page, and allowed slots.
+
+| TRAIN pack | Form | Flag and roster pin | Selection |
+| --- | --- | --- | --- |
+| TRN-FM01 | `/registered-captures/train/fm01` | `FM01_CAPTURE_ENABLED`, `FM01_CAPTURE_ROSTER_SHA256` | Print page P01–P66 and its typed or handwritten slot |
+| TRN-FM01-G | `/registered-captures/train/fm01-g` | `FM01_G_CAPTURE_ENABLED`, `FM01_G_CAPTURE_ROSTER_SHA256` | Form and leaf from the TYPED practice margin, then V1, V2, or V3 |
+
+Stage each exact roster as `roster.json` in its own namespace. Keep all flags off while staging. The same allowlisted reviewer, original-byte receipts, retake checks, and photo quality prompts apply. The digest-only reservation refuses reuse of an original across packs. Use the matching pack in the metadata summary command below.
+
+For TRN-FM01-G, match the visible practice margin and photographed page to the pinned issuer leaf. Transcribe the fields and boilerplate visible in the capture. Compare boilerplate against `source_boilerplate_native_lines` and any `source_boilerplate_raster` on that leaf, accounting for bidi and PDF line grouping. Keep the photographed wording and flag `boilerplate_drift` with the affected region and kind of change. Record the practice margin as provenance. Keep unreadable text pending review or retake. Hand off approved metadata-free working copies after consent, provenance checks, and digest-bound TRAIN CLEAN.
+
 ## Camera metadata and working copies
 
 Ask every photographer to turn off camera location tagging before shooting. Preserve exact camera bytes, including any embedded EXIF. Keep eval originals in restricted storage and TRAIN originals in the private TRAIN store. Any original that still has GPS stays with those restricted originals. Upload receipts and serving routes expose no extracted EXIF. Operators can use a private scratch mirror for hash verification and should remove it after verified staging.
 
-After closing intake, run `npx tsx scripts/capture-exif-summary.ts <eval|train> <private-bucket-mirror> <roster-sha256>` on the matching private roster and active slot receipts and originals. It verifies the active hashes and emits per-roster counts for device models, resolution, compression, EXIF and GPS presence. GPS values are never written. An unreadable image or malformed EXIF can leave GPS presence unknown. Keep per-photo intake and retake logs within the originals store.
+After closing intake, run `npx tsx scripts/capture-exif-summary.ts <eval|train|TRN-FM01|TRN-FM01-G> <private-bucket-mirror> <roster-sha256>` on the matching private roster and active slot receipts and originals. It verifies the active hashes and emits per-roster counts for device models, resolution, compression, EXIF and GPS presence. GPS values are never written. An unreadable image or malformed EXIF can leave GPS presence unknown. Keep per-photo intake and retake logs within the originals store.
 
 Add `--working-copies` to generate oriented PNGs under the same scoped mirror's `working/` prefix. The output contains pixels and hash lineage only. It omits EXIF, XMP and all other ancillary PNG chunks. The wrapper reports counts for any image it could not decode. Unavailable copies remain pending a decoder that can produce metadata-free pixels. Give workers, scorers and reports only the aggregate metadata summary. Use the sanitized copies as image inputs, and keep eval copies restricted and TRAIN copies within the private TRAIN flow.
 

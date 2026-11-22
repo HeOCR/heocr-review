@@ -1,4 +1,4 @@
-import { CAPTURE_API, TRAIN_CAPTURE_API } from "../shared/registered-captures";
+import type { FormCapturePack } from "../shared/registered-captures";
 import { randomId } from "./crypto";
 
 // The feature remains disabled until the private roster and this interface copy are approved.
@@ -37,8 +37,8 @@ const label = (key: keyof typeof copy) => copy[key].join(" / ");
 const common = ["phone", "camera_mode", "printer", "paper"] as const;
 const perFile = ["orientation", "angle", "lighting"] as const;
 
-const js = (train: boolean) => `
-const api=${JSON.stringify(train ? TRAIN_CAPTURE_API : CAPTURE_API)}, train=${train}, copy=${JSON.stringify(copy)};
+const js = (api: string, train: boolean) => `
+const api=${JSON.stringify(api)}, train=${train}, copy=${JSON.stringify(copy)};
 const label=key=>copy[key].join(" / ");
 const common=${JSON.stringify(common)}, perFile=${JSON.stringify(perFile)};
 const form=document.querySelector('form'), files=document.querySelector('#files');
@@ -214,7 +214,7 @@ form.addEventListener('submit',async event=>{
 });
 start();`;
 
-export function captureForm(train: boolean) {
+export function captureForm(api: string, train: boolean, pack?: FormCapturePack) {
   const nonce = randomId("", 16);
   const fields = common.map(key => `<label for="${key}">${label(key)}<input id="${key}" dir="auto" required maxlength="160"></label>`).join("");
   const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label("title")}</title>
@@ -222,10 +222,10 @@ export function captureForm(train: boolean) {
   label,fieldset{display:block;margin:.65rem 0}input,button,select{font:inherit;max-width:100%;padding:.45rem}label input:not([type=checkbox]),select{display:block}
   input:not([type=file],[type=checkbox]),select{box-sizing:border-box;width:100%}legend,code{overflow-wrap:anywhere}button,select{min-height:44px}
   canvas{max-width:min(100%,22rem);height:auto;border:1px solid #a8b7c4}p:empty,[hidden]{display:none}</style></head>
-  <body><main><h1>${label("title")} · ${label(train ? "train" : "eval")}</h1><p id="progress" dir="auto"></p>
+  <body><main><h1>${label("title")} · ${label(train ? "train" : "eval")}${pack ? ` · <bdi>${pack}</bdi>` : ""}</h1><p id="progress" dir="auto"></p>
   <form hidden>${fields}<label for="files">${label("files")}<input id="files" type="file" accept=".jpg,.jpeg,.png,.heic,.heif${train ? ",.dng" : ""}" multiple></label>
   <div id="files-to-upload"></div><button disabled>${label("submit")}</button></form><p id="status" role="status"></p></main>
-  <script nonce="${nonce}">${js(train)}</script></body></html>`;
+  <script nonce="${nonce}">${js(api, train)}</script></body></html>`;
   return new Response(html, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "private, no-store", "cdn-cache-control": "no-store",
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",

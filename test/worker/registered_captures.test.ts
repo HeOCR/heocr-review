@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
-import { CAPTURE_API, CAPTURE_FORM, captureRoot, TRAIN_CAPTURE_API, TRAIN_CAPTURE_FORM, trainCaptureRoot } from "../../src/shared/registered-captures";
+import {
+  CAPTURE_API, CAPTURE_FORM, captureRoot, formCapturePaths, formCaptureRoot, FORM_CAPTURE_ROSTER_SCHEMA,
+  TRAIN_CAPTURE_API, TRAIN_CAPTURE_FORM, trainCaptureRoot, type FormCapturePack,
+} from "../../src/shared/registered-captures";
 import type { Env } from "../../src/worker/env";
 import { hex } from "../../src/worker/crypto";
 import { handle } from "../../src/worker/index";
@@ -221,4 +224,73 @@ it("reserves exact bytes in a single scope even when opposing uploads race", asy
     trainMedia.head(f.trainRoot + "/originals/" + digest),
   ]);
   expect(objects.filter(Boolean)).toHaveLength(1);
+});
+
+it("isolates both office form rosters, flags, and exact originals from each other and other capture paths", async () => {
+  const f = await fixture("office-forms");
+  const image = raw("iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAIAAADZSiLoAAAAEElEQVR4nGMQDDgCQQxYWACUVgpOYYB0RAAAAABJRU5ErkJggg==");
+  async function stage(pack: FormCapturePack) {
+    const gemini = pack === "TRN-FM01-G";
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      schema: FORM_CAPTURE_ROSTER_SCHEMA, pack,
+      pack_sha256: "1".repeat(64), source_manifest_sha256: "2".repeat(64), issuer_reference_sha256: "3".repeat(64),
+      pages: Array.from({ length: gemini ? 33 : 66 }, (_, i) => {
+        const leaf = (gemini ? i : Math.floor(i / 2)) + 1;
+        const slots = gemini ? ["V1", "V2", "V3"] : [i % 2 ? "HANDWRITING" : "TYPED"];
+        return { page_id: gemini ? "FORM-P" + leaf : "P" + (i + 1), form_id: "FORM", form_leaf: leaf,
+          issuer_pdf_sha256: "4".repeat(64), issuer_page_index: leaf, slots: slots.map(slot => ({ slot, condition: slot })) };
+      }),
+    }));
+    const pin = await sha(bytes);
+    const root = formCaptureRoot(pack, pin);
+    await trainMedia.put(root + "/roster.json", bytes);
+    return { bytes, pin, root, ...formCapturePaths[pack] };
+  }
+  const fm = await stage("TRN-FM01");
+  const gem = await stage("TRN-FM01-G");
+  const pins = { FM01_CAPTURE_ROSTER_SHA256: fm.pin, FM01_G_CAPTURE_ROSTER_SHA256: gem.pin };
+  expect((await f.request(fm.form, { config: pins })).status).toBe(404);
+  expect((await f.request(gem.form, { config: pins })).status).toBe(404);
+  const config = { ...pins, FM01_CAPTURE_ENABLED: "1", FM01_G_CAPTURE_ENABLED: "1" };
+  expect((await f.request(gem.form, { config: { ...config, FM01_G_CAPTURE_ENABLED: "0" } })).status).toBe(404);
+  expect((await f.request(gem.form, { config, who: f.other })).status).toBe(404);
+  expect((await f.request(gem.form, { config, who: null })).status).toBe(404);
+  expect((await f.request(gem.api, { config, origin: "https://heocr-review.heocr.workers.dev", production: true })).status).toBe(404);
+  const gemForm = await f.request(gem.form, { config });
+  expect(await gemForm.text()).toContain("<bdi>TRN-FM01-G</bdi>");
+  expect(gemForm.headers.get("cache-control")).toContain("no-store");
+  expect(await (await f.request(fm.api + "?cursor=55", { config })).json()).toMatchObject({
+    roster_sha256: fm.pin, next: null, pages: Array.from({ length: 11 }, (_, i) => ({ page_id: "P" + (56 + i) })),
+  });
+  expect(await (await f.request(gem.api + "?cursor=22", { config })).json()).toMatchObject({
+    roster_sha256: gem.pin, next: null, pages: Array.from({ length: 11 }, (_, i) => ({
+      page_id: "FORM-P" + (23 + i), slots: ["V1", "V2", "V3"].map(slot => ({ slot, current: null })),
+    })),
+  });
+  const misplacedEval = gem.root + "/roster.json";
+  await media.put(misplacedEval, gem.bytes);
+  expect((await f.request(gem.api, { config })).status).toBe(404);
+  await media.delete(misplacedEval);
+  const wrongRoot = formCaptureRoot("TRN-FM01-G", fm.pin);
+  await trainMedia.put(wrongRoot + "/roster.json", fm.bytes);
+  expect((await f.request(gem.api, { config: { ...config, FM01_G_CAPTURE_ROSTER_SHA256: fm.pin } })).ok).toBe(false);
+
+  const send = (target: typeof fm, page: string, slot: string, body = image) => f.request(target.api + "/upload", {
+    config, body, headers: {
+      "x-capture-roster": target.pin, "x-capture-page": page, "x-capture-slot": slot,
+      "x-capture-device": "B", "x-capture-filename": "IMG_0001.PNG",
+      "x-capture-log": encodeURIComponent(JSON.stringify(captureLog)),
+    },
+  });
+  expect((await send(gem, "FORM-P1", "TYPED")).status).toBe(400);
+  const saved = await send(gem, "FORM-P1", "V1");
+  const digest = await sha(image);
+  expect(saved.status).toBe(201);
+  expect(await saved.json()).toMatchObject({ page_id: "FORM-P1", slot: "V1", sha256: digest });
+  expect(new Uint8Array(await (await trainMedia.get(gem.root + "/originals/" + digest))!.arrayBuffer())).toEqual(image);
+  expect((await send(fm, "P1", "TYPED")).status).toBe(409);
+  expect((await f.trainUpload({ bytes: image })).status).toBe(409);
+  expect((await f.upload({ bytes: image })).status).toBe(409);
+  expect(await media.head(gem.root + "/originals/" + digest)).toBeNull();
+  expect((await f.request(gem.api + "/originals/" + digest, { config })).status).toBe(404);
 });

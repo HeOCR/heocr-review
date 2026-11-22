@@ -12,6 +12,10 @@ export interface Env {
   TRAIN_CAPTURE_MEDIA?: R2Bucket;
   TRAIN_CAPTURE_ENABLED?: string;
   TRAIN_CAPTURE_ROSTER_SHA256?: string;
+  FM01_CAPTURE_ENABLED?: string;
+  FM01_CAPTURE_ROSTER_SHA256?: string;
+  FM01_G_CAPTURE_ENABLED?: string;
+  FM01_G_CAPTURE_ROSTER_SHA256?: string;
   /** "production" | "development". Only "development" (from .dev.vars) can enable the dev sign-in. */
   ENVIRONMENT: string;
   GOOGLE_CLIENT_ID?: string;
