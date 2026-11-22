@@ -5,6 +5,13 @@ export const TRAIN_CAPTURE_API = "/api/registered-captures/train/v1";
 export const TRAIN_CAPTURE_FORM = "/registered-captures/train";
 export const CAPTURE_ROSTER_SCHEMA = "registered_phone_captures.v1";
 export const TRAIN_CAPTURE_ROSTER_SCHEMA = "train_phone_captures.v1";
+export const FORM_CAPTURE_ROSTER_SCHEMA = "train_form_captures.v1";
+export const formCapturePacks = ["TRN-FM01", "TRN-FM01-G"] as const;
+export type FormCapturePack = typeof formCapturePacks[number];
+export const formCapturePaths = {
+  "TRN-FM01": { form: TRAIN_CAPTURE_FORM + "/fm01", api: "/api/registered-captures/train/fm01/v1" },
+  "TRN-FM01-G": { form: TRAIN_CAPTURE_FORM + "/fm01-g", api: "/api/registered-captures/train/fm01-g/v1" },
+} as const;
 export const CAPTURE_DIGEST = /^[a-f0-9]{64}(?![\s\S])/;
 const pageKey = /^[A-Z0-9][A-Z0-9-]{0,79}(?![\s\S])/;
 const batchKey = /^private-ref-capture-[a-z0-9][a-z0-9._-]{0,78}(?![\s\S])/;
@@ -93,6 +100,61 @@ export function trainCaptureRoster(value: unknown): TrainCaptureRoster {
 
 export function trainCaptureRoot(sha256: string) {
   return "train-phone-captures/v1/" + sha256;
+}
+
+type FormCapturePage = {
+  page_id: string;
+  form_id: string;
+  form_leaf: number;
+  issuer_pdf_sha256: string;
+  issuer_page_index: number;
+  slots: TrainSlot[];
+};
+
+export type FormCaptureRoster = {
+  schema: typeof FORM_CAPTURE_ROSTER_SCHEMA;
+  pack: FormCapturePack;
+  pack_sha256: string;
+  source_manifest_sha256: string;
+  issuer_reference_sha256: string;
+  pages: FormCapturePage[];
+};
+
+/** One office upload roster can never be used by another pack or the eval path. */
+export function formCaptureRoster(value: unknown, pack: FormCapturePack): FormCaptureRoster {
+  const roster = value as FormCaptureRoster | null;
+  const gemini = pack === "TRN-FM01-G";
+  const ids = new Set<string>();
+  const locators = new Map<string, string>();
+  const assigned = new Set<string>();
+  function requireScope(ok: unknown): asserts ok {
+    if (!ok) throw new Error("invalid form capture roster");
+  }
+  requireScope(roster?.schema === FORM_CAPTURE_ROSTER_SCHEMA && roster.pack === pack &&
+    [roster.pack_sha256, roster.source_manifest_sha256, roster.issuer_reference_sha256]
+      .every(digest => typeof digest === "string" && CAPTURE_DIGEST.test(digest)) &&
+    Array.isArray(roster.pages) && roster.pages.length > 0 && roster.pages.length <= (gemini ? 33 : 66));
+  for (const p of roster.pages) {
+    requireScope(p && typeof p.page_id === "string" && pageKey.test(p.page_id) && !ids.has(p.page_id) &&
+      typeof p.form_id === "string" && /^[A-Za-z0-9][A-Za-z0-9-]{0,39}$/.test(p.form_id) &&
+      Number.isSafeInteger(p.form_leaf) && p.form_leaf > 0 &&
+      typeof p.issuer_pdf_sha256 === "string" && CAPTURE_DIGEST.test(p.issuer_pdf_sha256) &&
+      Number.isSafeInteger(p.issuer_page_index) && p.issuer_page_index > 0 && Array.isArray(p.slots));
+    const formLeaf = p.form_id + "/" + p.form_leaf;
+    const locator = p.issuer_pdf_sha256 + "/" + p.issuer_page_index;
+    requireScope(!locators.has(formLeaf) || locators.get(formLeaf) === locator);
+    const slots = gemini ? ["V1", "V2", "V3"] : [p.slots[0]?.slot];
+    requireScope(p.slots.length === slots.length && (gemini || slots[0] === "TYPED" || slots[0] === "HANDWRITING") &&
+      p.slots.every((s, i) => s?.slot === slots[i] && field(s.condition, 160) && !assigned.has(formLeaf + "/" + s.slot)));
+    for (const s of p.slots) assigned.add(formLeaf + "/" + s.slot);
+    ids.add(p.page_id);
+    locators.set(formLeaf, locator);
+  }
+  return roster;
+}
+
+export function formCaptureRoot(pack: FormCapturePack, sha256: string) {
+  return "train-form-captures/v1/" + pack + "/" + sha256;
 }
 
 export const captureLogFields = ["phone", "camera_mode", "printer", "paper", "orientation", "angle", "lighting"] as const;

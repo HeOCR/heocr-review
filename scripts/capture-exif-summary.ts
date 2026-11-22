@@ -4,20 +4,24 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import sharp from "sharp";
 import {
-  CAPTURE_DIGEST, captureRoot, captureRoster, trainCaptureRoot, trainCaptureRoster,
+  CAPTURE_DIGEST, captureRoot, captureRoster, formCaptureRoot, formCaptureRoster, trainCaptureRoot, trainCaptureRoster,
+  type FormCapturePack,
 } from "../src/shared/registered-captures";
 import { captureMetadata, makeCaptureWorkingPng } from "./lib/capture-exif";
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+type CaptureScope = "eval" | "train" | FormCapturePack;
 
 /** Read exact originals from a private mirror and optionally stage metadata-free working copies. */
-export async function summarizeCaptureExif(bucket: string, scope: "eval" | "train", pin: string, workingCopies = false) {
+export async function summarizeCaptureExif(bucket: string, scope: CaptureScope, pin: string, workingCopies = false) {
   if (!CAPTURE_DIGEST.test(pin)) throw new Error("invalid roster digest");
-  const root = join(bucket, scope === "train" ? trainCaptureRoot(pin) : captureRoot(pin));
+  const root = join(bucket, scope === "eval" ? captureRoot(pin) :
+    scope === "train" ? trainCaptureRoot(pin) : formCaptureRoot(scope, pin));
   const rosterBytes = await readFile(join(root, "roster.json"));
   if (sha256(rosterBytes) !== pin) throw new Error("roster digest mismatch");
   const raw: unknown = JSON.parse(rosterBytes.toString("utf8"));
-  const { pages } = scope === "train" ? trainCaptureRoster(raw) : captureRoster(raw);
+  const { pages } = scope === "eval" ? captureRoster(raw) :
+    scope === "train" ? trainCaptureRoster(raw) : formCaptureRoster(raw, scope);
   const summary = {
     scope, roster_sha256: pin, expected: 0, active: 0,
     exif: { present: 0, absent: 0, unreadable: 0 }, orientations: {} as Record<string, number>,
@@ -88,9 +92,9 @@ export async function summarizeCaptureExif(bucket: string, scope: "eval" | "trai
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [scope, bucket, pin, mode, ...extra] = process.argv.slice(2);
-  if ((scope !== "eval" && scope !== "train") || !bucket || !pin || extra.length ||
+  if ((scope !== "eval" && scope !== "train" && scope !== "TRN-FM01" && scope !== "TRN-FM01-G") || !bucket || !pin || extra.length ||
     (mode !== undefined && mode !== "--working-copies")) {
-    console.error("Usage: tsx scripts/capture-exif-summary.ts <eval|train> <private-bucket-mirror> <roster-sha256> [--working-copies]");
+    console.error("Usage: tsx scripts/capture-exif-summary.ts <eval|train|TRN-FM01|TRN-FM01-G> <private-bucket-mirror> <roster-sha256> [--working-copies]");
     process.exitCode = 1;
   } else {
     try {

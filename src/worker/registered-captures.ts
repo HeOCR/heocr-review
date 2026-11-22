@@ -1,7 +1,8 @@
 import {
   CAPTURE_API, CAPTURE_DIGEST, CAPTURE_FORM, captureLog, captureRoot, captureRoster,
+  formCapturePaths, formCaptureRoot, formCaptureRoster, formCapturePacks,
   TRAIN_CAPTURE_API, TRAIN_CAPTURE_FORM, trainCaptureRoot, trainCaptureRoster,
-  type CaptureLog,
+  type CaptureLog, type FormCapturePack,
 } from "../shared/registered-captures";
 import { readSession } from "./auth/session";
 import { captureImageType } from "./capture-image";
@@ -14,6 +15,12 @@ import { captureForm } from "./registered-capture-form";
 
 const maxCaptureBytes = 24 * 1024 * 1024;
 const pagesPerRequest = 11;
+type Scope = "eval" | "train" | FormCapturePack;
+const routes = [
+  { scope: "eval", form: CAPTURE_FORM, api: CAPTURE_API },
+  { scope: "train", form: TRAIN_CAPTURE_FORM, api: TRAIN_CAPTURE_API },
+  ...formCapturePacks.map(scope => ({ scope, ...formCapturePaths[scope] })),
+] as const;
 type Receipt = {
   sha256: string;
   mime: string;
@@ -29,6 +36,7 @@ type Intake = {
   pages: { page_id: string; slots: { slot: string; condition: string }[] }[];
   pin: string;
   root: string;
+  scope: Scope;
   train: boolean;
   scopeClaims: R2Bucket;
 };
@@ -37,29 +45,32 @@ export function isCapturePath(path: string) {
   return path === CAPTURE_FORM || path.startsWith(CAPTURE_FORM + "/") || path.startsWith("/api/registered-captures/");
 }
 
-async function intake(request: Request, env: Env, now: number, train: boolean): Promise<Intake> {
-  const pin = train ? env.TRAIN_CAPTURE_ROSTER_SHA256 : env.REGISTERED_CAPTURE_ROSTER_SHA256;
+async function intake(request: Request, env: Env, now: number, scope: Scope): Promise<Intake> {
+  const settings = {
+    eval: [env.REGISTERED_CAPTURE_ENABLED, env.REGISTERED_CAPTURE_ROSTER_SHA256],
+    train: [env.TRAIN_CAPTURE_ENABLED, env.TRAIN_CAPTURE_ROSTER_SHA256],
+    "TRN-FM01": [env.FM01_CAPTURE_ENABLED, env.FM01_CAPTURE_ROSTER_SHA256],
+    "TRN-FM01-G": [env.FM01_G_CAPTURE_ENABLED, env.FM01_G_CAPTURE_ROSTER_SHA256],
+  };
+  const [enabled, pin] = settings[scope];
+  const train = scope !== "eval";
   const scopeClaims = env.RESTRICTED_REFERENCE_MEDIA;
   const bucket = train ? env.TRAIN_CAPTURE_MEDIA : scopeClaims;
-  const enabled = train ? env.TRAIN_CAPTURE_ENABLED : env.REGISTERED_CAPTURE_ENABLED;
   if (enabled !== "1" || !pin || !CAPTURE_DIGEST.test(pin) || !bucket || !scopeClaims) throw new HttpError(404, "not_found");
   const id = await readSession(env, request, now);
   if (!id || !referenceReviewerAllowed(env, new URL(request.url), id)) throw new HttpError(404, "not_found");
   const reviewer = await getReviewer(env.DB, id);
   if (!reviewer || reviewer.blocked) throw new HttpError(404, "not_found");
-  const root = train ? trainCaptureRoot(pin) : captureRoot(pin);
+  const root = scope === "eval" ? captureRoot(pin) : scope === "train" ? trainCaptureRoot(pin) : formCaptureRoot(scope, pin);
   const object = await bucket.get(root + "/roster.json");
   if (!object || object.size > 64 * 1024) throw new HttpError(404, "not_found");
   if (train && await scopeClaims.head(root + "/roster.json")) throw new HttpError(404, "not_found");
   const bytes = await object.arrayBuffer();
   if (hex(await crypto.subtle.digest("SHA-256", bytes)) !== pin) throw new HttpError(404, "not_found");
   const roster: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
-  if (train) {
-    const checked = trainCaptureRoster(roster);
-    return { bucket, pages: checked.pages, pin, root, train, scopeClaims };
-  }
-  const checked = captureRoster(roster);
-  return { bucket, pages: checked.pages, pin, root, train, scopeClaims };
+  const checked = scope === "eval" ? captureRoster(roster) :
+    scope === "train" ? trainCaptureRoster(roster) : formCaptureRoster(roster, scope);
+  return { bucket, pages: checked.pages, pin, root, scope, train, scopeClaims };
 }
 
 async function readSlot(c: Intake, page: Intake["pages"][number], slot: string) {
@@ -101,11 +112,11 @@ function captureLogHeader(request: Request, retake: boolean) {
   } catch { return null; }
 }
 
-// Private, digest-only reservation across the two buckets. A rename or concurrent
-// upload cannot cause the same camera bytes to be archived in both scopes.
+// Private, digest-only reservation across packs. A rename or concurrent upload
+// cannot reserve the same camera bytes in more than one pack.
 async function claimCaptureScope(c: Intake, sha256: string) {
   const key = "phone-capture-scope/v1/" + sha256;
-  const scope = c.train ? "train" : "eval";
+  const scope = c.scope;
   const claim = await c.scopeClaims.put(key, "", {
     onlyIf: { etagDoesNotMatch: "*" }, customMetadata: { scope },
   });
@@ -179,16 +190,16 @@ async function upload(c: Intake, request: Request, now: number) {
 export async function registeredCaptures(request: Request, env: Env, path: string) {
   try {
     const now = Date.now();
-    const train = path === TRAIN_CAPTURE_FORM || path === TRAIN_CAPTURE_FORM + "/" ||
-      path === TRAIN_CAPTURE_API || path === TRAIN_CAPTURE_API + "/upload";
-    const form = train ? TRAIN_CAPTURE_FORM : CAPTURE_FORM;
-    const api = train ? TRAIN_CAPTURE_API : CAPTURE_API;
+    const route = routes.find(({ form, api }) =>
+      path === form || path === form + "/" || path === api || path === api + "/upload");
+    if (!route) throw new HttpError(404, "not_found");
+    const { form, api, scope } = route;
     const isForm = request.method === "GET" && (path === form || path === form + "/");
     const isStatus = request.method === "GET" && path === api;
     const isUpload = request.method === "POST" && path === api + "/upload";
     if (!isForm && !isStatus && !isUpload) throw new HttpError(404, "not_found");
-    const c = await intake(request, env, now, train);
-    if (isForm) return captureForm(train);
+    const c = await intake(request, env, now, scope);
+    if (isForm) return captureForm(api, c.train, scope === "eval" || scope === "train" ? undefined : scope);
     if (isStatus) return await status(c, new URL(request.url));
     if (isUpload) return await upload(c, request, now);
     throw new HttpError(404, "not_found");
