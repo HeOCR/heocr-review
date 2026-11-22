@@ -1,4 +1,4 @@
-import { captureModes, type AgeBand, type CaptureMode, type ConsentCopy, type ContributorSplit, type Language, type Licence } from "../../shared/contributor";
+import { ageBands, captureModes, type AgeBand, type CaptureMode, type ConsentCopy, type ContributorSplit, type FormField, type Language } from "../../shared/contributor";
 import { hex } from "../crypto";
 import type { Env } from "../env";
 import { HttpError } from "../http";
@@ -13,7 +13,7 @@ type Copy = Record<Language, ConsentCopy>;
 type CommonTask = { id: string; page: string };
 export type Task = CommonTask & (
   { kind: "print"; mode: CaptureMode; sheetSha256: string } |
-  { kind: "form"; pack: "TRN-FM01"; variant: "worksheet"; sheetSha256: string; persona: number } |
+  { kind: "form"; pack: "TRN-FM01"; variant: "worksheet"; sheetSha256: string; referenceSha256: string } |
   { kind: "line"; proposalId: number; proposalSha256: string; cropSha256: string } |
   { kind: "handwriting"; sentences: string[]; promptSha256: string; rights: string }
 );
@@ -24,7 +24,7 @@ export type Writer = {
 export type Manifest = {
   schema: "heocr.contributor.v1";
   approval: { evalSplitSha256: string; leadGo: string };
-  policy: { version: string; licence: Licence; guardian: Copy; assent: Copy };
+  policy: { version: string; licence: "cc0_open"; guardian: Copy; assent: Copy };
   writers: Writer[];
 };
 export const gone = () => new HttpError(404, "not_found");
@@ -58,7 +58,7 @@ function validTask(task: Task, split: ContributorSplit) {
   if (split !== "train") return false;
   if (task.kind === "print") return captureModes.includes(task.mode) && digest.test(task.sheetSha256);
   if (task.kind === "form") return task.pack === "TRN-FM01" && task.variant === "worksheet" &&
-    digest.test(task.sheetSha256) && Number.isInteger(task.persona) && task.persona >= 1 && task.persona <= 99;
+    digest.test(task.sheetSha256) && digest.test(task.referenceSha256);
   return task.kind === "line" && Number.isSafeInteger(task.proposalId) && task.proposalId > 0 &&
     digest.test(task.proposalSha256) && digest.test(task.cropSha256);
 }
@@ -67,7 +67,7 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
   const policy = m?.policy;
   if (m?.schema !== "heocr.contributor.v1" || !digest.test(m.approval?.evalSplitSha256 ?? "") ||
     !opaque.test(m.approval?.leadGo ?? "") || !policy || typeof policy.version !== "string" || !opaque.test(policy.version) ||
-    !["cc0_open", "private_eval_only"].includes(policy.licence) ||
+    policy.licence !== "cc0_open" ||
     !isCopy(policy.guardian) || !isCopy(policy.assent) || !Array.isArray(m.writers) ||
     !m.writers.length || m.writers.length > 64) throw gone();
   for (const copy of [policy.guardian, policy.assent]) {
@@ -77,8 +77,7 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
   for (const w of m.writers) {
     if (!w || !writerKey.test(w.id) || writers.has(w.id) || !account.test(w.writerAccount) || writerAccounts.has(w.writerAccount) ||
       !account.test(w.guardianAccount) || w.guardianAccount === w.writerAccount ||
-      !["under_13", "13_15", "16_17"].includes(w.ageBand) || !["train", "dev", "eval_open"].includes(w.split) ||
-      policy.licence === "private_eval_only" && w.split !== "eval_open" ||
+      !ageBands.includes(w.ageBand) || !["train", "dev", "eval_open"].includes(w.split) ||
       !Array.isArray(w.tasks) || !w.tasks.length || w.tasks.length > 100 ||
       !w.tasks.every(t => validTask(t, w.split)) || new Set(w.tasks.map(t => t.id)).size !== w.tasks.length) throw gone();
     writers.add(w.id);
@@ -101,14 +100,43 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
   return m;
 }
 
+async function pinnedJSON(bucket: R2Bucket, key: string, pin: string, maxBytes: number): Promise<unknown> {
+  const object = await bucket.get(`${contributorRoot}${key}/${pin}.json`);
+  if (!object || object.size > maxBytes) throw gone();
+  const data = new Uint8Array(await object.arrayBuffer());
+  if (await hash(data) !== pin) throw gone();
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(data));
+  } catch {
+    throw gone();
+  }
+}
+
 export async function contributorManifest(env: Env): Promise<Manifest> {
   const pin = env.CONTRIBUTOR_CONFIG_SHA256;
   if (!pin || !digest.test(pin) || !env.TRAIN_CAPTURE_MEDIA) throw gone();
-  const object = await env.TRAIN_CAPTURE_MEDIA.get(`${contributorRoot}config/${pin}.json`);
-  if (!object || object.size > 256 * 1024) throw gone();
-  const data = new Uint8Array(await object.arrayBuffer());
-  if (await hash(data) !== pin) throw gone();
-  let value: unknown;
-  try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(data)); } catch { throw gone(); }
-  return parseContributorManifest(value);
+  return parseContributorManifest(await pinnedJSON(env.TRAIN_CAPTURE_MEDIA, "config", pin, 256 * 1024));
+}
+
+type FormReference = {
+  schema: "heocr.contributor.form_reference.v1";
+  page: string;
+  worksheetSha256: string;
+  fields: FormField[];
+};
+
+function fieldText(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max &&
+    value === value.trim() && !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+export async function formFields(env: Env, task: Extract<Task, { kind: "form" }>): Promise<FormField[]> {
+  if (!env.TRAIN_CAPTURE_MEDIA) throw gone();
+  const ref = await pinnedJSON(env.TRAIN_CAPTURE_MEDIA, "form-references", task.referenceSha256, 32 * 1024) as FormReference | null;
+  if (ref?.schema !== "heocr.contributor.form_reference.v1" || ref.page !== task.page ||
+      ref.worksheetSha256 !== task.sheetSha256 || !Array.isArray(ref.fields) || !ref.fields.length || ref.fields.length > 60 ||
+      !ref.fields.every(f => f && typeof f.id === "string" && opaque.test(f.id) &&
+        fieldText(f.label, 160) && fieldText(f.value, 240)) ||
+      new Set(ref.fields.map(f => f.id)).size !== ref.fields.length) throw gone();
+  return ref.fields.map(({ id, label, value }) => ({ id, label, value }));
 }

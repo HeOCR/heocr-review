@@ -1,5 +1,5 @@
 import {
-  CONTRIBUTOR_API, type CaptureMode, type ContributorKind, type ContributorNext, type ContributorProfile,
+  CONTRIBUTOR_API, type CaptureMode, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField,
 } from "../../shared/contributor";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h } from "../dom";
@@ -23,25 +23,16 @@ const modes: Record<CaptureMode, Pair> = {
   folded: ["קפלו פעם אחת, פתחו את הדף וצלמו כך שהקפל נראה.", "Fold the page once, unfold it, and take a photo with the crease visible."],
 };
 const bands: Record<ContributorProfile["ageBand"], Pair> = {
-  under_13: ["מתחת ל־13", "Under 13"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"],
+  "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"],
 };
 const btn = (label: string, action: () => void, primary = false) =>
   h("button", {type:"button", class: primary ? "act primary" : "act", onclick:action}, label);
 
 export const contributorTitle = () => text("משימות תרומה", "Contributor tasks");
 
-function fictionalPersona(number: number) {
-  const sample = String(number).padStart(2, "0");
-  const values: [Pair, string][] = [
-    [["שם","Name"], text("דמות לדוגמה ", "Sample Person ") + sample],
-    [["כתובת","Address"], text("רחוב הדוגמה ", "Example Street ") + sample],
-    [["מספר זהות לדוגמה","Sample ID"], "000000000"],
-    [["טלפון לדוגמה","Sample phone"], "000-000-00" + sample],
-    [["דוא״ל","Email"], "sample" + sample + "@example.invalid"],
-    [["תאריך לדוגמה","Sample date"], "01/01/2010"],
-  ];
+function fictionalPersona(fields: FormField[]) {
   return h("aside",{class:"contributor-persona"},h("h3",{},text("פרטים מומצאים לטופס","Fictional details for this form")),
-    h("dl",{},...values.flatMap(([label,value])=>[h("dt",{},tr(label)),h("dd",{},bdi(value))])));
+    h("dl",{},...fields.flatMap(({label,value})=>[h("dt",{},bdi(label)),h("dd",{},bdi(value))])));
 }
 
 export function contributorView(account: string, enabled: boolean) {
@@ -56,6 +47,8 @@ export function contributorView(account: string, enabled: boolean) {
   function error(err:unknown) {
     if (err instanceof ApiFailure && err.code==="consent_changed") {
       notice(text("הנוסח השתנה. טענו מחדש ובדקו את הגרסה החדשה.","The wording changed. Reload to read the new version."));
+    } else if (err instanceof ApiFailure && err.code==="contributor_reference_changed") {
+      notice(text("דף ההעתקה השתנה. טענו מחדש והשתמשו בגרסה העדכנית.","The assigned text changed. Reload and use the current version."));
     } else if (err instanceof ApiFailure && err.status===413) {
       notice(text("הקובץ גדול מדי. בחרו תמונה עד 16 מגה־בייט.","That file is too large. Choose a photo up to 16 MB."));
     } else if (err instanceof ApiFailure && err.code==="contributor_photo_format") {
@@ -137,7 +130,9 @@ export function contributorView(account: string, enabled: boolean) {
         return;
       }
       void action(button,async ()=>{
-        const response=await fetch(submitUrl(task),{method:"POST",headers:{"x-contributor-privacy":"confirmed"},body:file});
+        const headers: Record<string,string>={"x-contributor-privacy":"confirmed"};
+        if (task.kind==="form" || task.kind==="handwriting") headers["x-contributor-reference"]=task.referenceSha256;
+        const response=await fetch(submitUrl(task),{method:"POST",headers,body:file});
         const value=await response.json() as ContributorProfile & {error?:string};
         if (!response.ok) throw new ApiFailure(response.status,value.error??"error");
         return value;
@@ -177,8 +172,8 @@ export function contributorView(account: string, enabled: boolean) {
     }
     const download=h("a",{class:"act",href:task.sheet,download:""},text("הורדה והדפסה","Download and print"));
     if (task.kind==="form") return h("section",{class:"card contributor-task"},title,
-      h("p",{},text("הדפיסו את הטופס ומלאו אותו ביד. השתמשו רק בפרטים המומצאים שלמטה.","Print the worksheet and fill it in by hand. Use only the fictional details below.")),
-      download,fictionalPersona(task.persona),upload(task));
+      h("p",{},text("הדפיסו את הטופס והעתיקו אליו ביד את הפרטים שלמטה בדיוק. אל תמציאו או תשנו פרטים.","Print the worksheet and copy the details below exactly by hand. Do not make up or change any entries.")),
+      download,fictionalPersona(task.fields),upload(task));
     return h("section",{class:"card contributor-task"},title,
       h("p",{},tr(modes[task.mode])),download,upload(task));
   }

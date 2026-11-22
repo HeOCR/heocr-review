@@ -11,7 +11,7 @@ Keep enrolment and account matching outside public channels.
 Capture, handwriting and other intake switches are independent. For local
 testing use invented inputs and a disposable Wrangler state. Production config
 stays off until the lead approves activation, eval pins the writer assignments
-and Shay approves the exact bilingual wording and licence.
+and Shay approves the exact bilingual wording.
 
 ## Private manifest
 
@@ -23,13 +23,14 @@ environment. The manifest uses:
 - `schema: "heocr.contributor.v1"` and
   `approval: {evalSplitSha256, leadGo}`, with the private eval split SHA and
   lead approval record ID.
-- `policy: {version, licence, guardian, assent}`. Each language key `he` and
+- `policy: {version, licence: "cc0_open", guardian, assent}`. Each language key `he` and
   `en` under both roles has `{text, sha256}`. Each SHA covers the exact UTF-8
-  text shown before agreement. A licence or version change requires renewed
-  agreement. Draft wording below stays outside the runtime manifest.
+  text shown before agreement. A version change requires renewed agreement. Draft wording below stays outside the runtime manifest.
 - `writers: [{id, writerAccount, guardianAccount, ageBand, split, tasks}]`.
   Generate a random `cw-` ID with 16 random bytes in hex. Use existing
-  `rv_` pseudonyms, `under_13`, `13_15`, or `16_17` and an eval-assigned
+  `rv_` pseudonyms and an organiser-confirmed age band (`10_12`, `13_15` or
+  `16_17`). Confirm age eligibility with the guardian and keep only the band.
+  Use an eval-assigned
   `train`, `dev`, or `eval_open`. Preserve writer ID and split across
   revisions. Preflight the proposed 30 EVAL and six DEV writers with eval
   before allocation, preserving writer and prompt disjointness.
@@ -40,9 +41,10 @@ environment. The manifest uses:
   use `flat`, `angle`, `shadow`, `crumpled`, `scribbled`, or `folded`
   per capture slot.
 - `form`: `{kind:"form", pack:"TRN-FM01", variant:"worksheet", sheetSha256,
-  persona}`. Resolve `page` against the approved TRAIN worksheet roster and
-  pin that exact leaf's print PDF. `persona` selects one of 99 fictional cards
-  generated in the browser. The form has no real user details.
+  referenceSha256}`. Resolve `page` against the approved TRAIN worksheet roster.
+  Pin that exact leaf's PDF and its fictional field-value reference. The card
+  displays the exact values in the reference's order. Writers copy those
+  values verbatim.
 - `line`: `{kind:"line", proposalId, proposalSha256, cropSha256}`. Use the
   existing `line_verify` proposals from a private, approved TRAIN batch with
   a `contributor-train-` ID and `source_json.contributor_scope="train"`.
@@ -56,17 +58,40 @@ environment. The manifest uses:
 
 Put exact PDFs in `contributor-v1/sheets/<sha256>.pdf` and exact line crops
 in `contributor-v1/line-crops/<sha256>.jpg` in the private TRAIN bucket.
+Store the form reference JSON in the same private TRAIN bucket at
+`contributor-v1/form-references/<sha256>.json`. The SHA covers the exact UTF-8
+file bytes. This invented example illustrates the reference shape:
+
+```json
+{
+  "schema": "heocr.contributor.form_reference.v1",
+  "page": "P01",
+  "worksheetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "fields": [
+    {"id": "sample-email", "label": "דוא״ל", "value": "sample@example.invalid"}
+  ]
+}
+```
+
+Check that each field label refers to the intended printed field and every
+value is fictional. Change the assignment ID if a completed slot needs a
+different reference. Keep each accepted reference available by its original
+hash for QA and exact labels. Check captured text against the assigned
+reference before admitting data. A missing or mistyped value needs a retake
+or a corrected verified transcription of what appears in the photo.
+
 Use distinct private `CONTRIBUTOR_DEV_MEDIA` and `CONTRIBUTOR_EVAL_MEDIA`
 bindings when those splits are authorised. Print, forms, and line verification
-are TRAIN tasks. DEV and EVAL writers get handwriting only. The private-eval-only
-licence accepts EVAL writers only. Those submissions remain private and are
-ineligible for an OPEN release regardless of the eval split assignment.
+are TRAIN tasks. DEV and EVAL writers get handwriting only. Contributions
+remain in private quarantine until authorised for downstream use.
 
 ## Upload, withdrawal and approval
 
 The app stores the original bytes in private quarantine and keeps opaque
 writer/task IDs, digests, decisions and consent receipts in D1. Each result
-carries the two accepted wording hashes and the licence version. It discards
+carries the two accepted wording hashes and the licence version. A form or
+handwriting submission also records the reference SHA shown to the writer. The
+upload requires that SHA so an old page cannot submit against revised labels. It discards
 client filenames and never exposes originals through download routes. This
 intake accepts JPEG and PNG and rejects common identifying metadata fields.
 Ask participants to turn off camera location and choose JPEG on phones that
@@ -98,19 +123,17 @@ a disposable database and buckets.
 
 ## Consent copy for Shay to review
 
-These are two alternative drafts. Choose one policy and approve both languages
-and both roles before pinning. Agree the retention period and the timing of
-any public release before approval.
-
-### CC0-open option
+Shay selected CC0 1.0 and ages 10–17. Approve the exact guardian and writer
+wording in both languages before pinning. Agree the retention period and the
+timing of any public release before approval.
 
 **Guardian, English**
 
-I am the writer's parent or legal guardian. I give permission for them to
-choose whether to take part in the HeOCR writing and scanning project. We use
+I am the writer's parent or legal guardian, and they are 10–17 years old.
+I give permission for them to choose whether to take part in the HeOCR writing and scanning project. We use
 an age band and project code. The writer should photograph the assigned page
 alone, with no faces, real names, contact details or location information.
-Worksheet details are fictional. Approved contributions may be shared publicly
+The writer will copy the assigned fictional worksheet details exactly. Approved contributions may be shared publicly
 under CC0 1.0, allowing people to copy and reuse them. The team checks materials
 before any release. Use the withdrawal code to contact heocrproject@gmail.com
 to stop participation and request removal of copies the team controls.
@@ -118,10 +141,10 @@ Public copies other people already obtained may remain available.
 
 **הורה או אפוטרופוס**
 
-אני הורה או אפוטרופוס של הכותב או הכותבת. אני מאשר/ת להם לבחור אם להשתתף
+אני הורה או אפוטרופוס של הכותב או הכותבת, וגילם 10–17. אני מאשר/ת להם לבחור אם להשתתף
 במיזם הכתיבה והסריקה של HeOCR. אנחנו משתמשים בקבוצת גיל ובקוד מיזם.
 מצלמים רק את הדף שהוקצה, בלי פנים, שמות אמיתיים, פרטי קשר או נתוני מיקום.
-את הטפסים ממלאים בפרטים מומצאים. חומרים שיאושרו עשויים להתפרסם במסגרת
+לטפסים מעתיקים בדיוק את הפרטים המומצאים שניתנו. חומרים שיאושרו עשויים להתפרסם במסגרת
 CC0 1.0, המאפשרת להעתיק אותם ולהשתמש בהם שוב. הצוות בודק את החומרים לפני
 פרסום. כדי להפסיק להשתתף ולבקש הסרה של עותקים שבשליטת הצוות, אפשר לשלוח
 את קוד ההסרה לכתובת heocrproject@gmail.com. עותקים שאנשים אחרים כבר קיבלו
@@ -130,8 +153,8 @@ CC0 1.0, המאפשרת להעתיק אותם ולהשתמש בהם שוב. הצ
 **Writer, English**
 
 I can choose whether to help. I will write and photograph only my assigned
-pages. I will use pretend details for forms and leave my real name, other
-people, and location out of the photo. If the team approves my work, it may be
+pages. I will copy the pretend details I was given for forms exactly and
+leave my real name, other people, and location out of the photo. If the team approves my work, it may be
 shared publicly and people can reuse it. I can stop and ask for help removing
 the team's copies. Copies other people already have may stay available.
 I want to take part.
@@ -139,46 +162,10 @@ I want to take part.
 **הכותב או הכותבת**
 
 אני יכול/ה לבחור אם להשתתף. אכתוב ואצלם רק את הדפים שקיבלתי. אשתמש בפרטים
-מומצאים בטפסים ולא אכלול בצילום שם אמיתי, אנשים אחרים או מיקום. אם הצוות
+מומצאים בטפסים ואעתיק אותם בדיוק כפי שקיבלתי. לא אכלול בצילום שם אמיתי, אנשים אחרים או מיקום. אם הצוות
 יאשר את העבודה שלי, היא עשויה להתפרסם ואנשים יוכלו להשתמש בה שוב. אפשר
 להפסיק ולבקש עזרה בהסרת העותקים של הצוות. עותקים שכבר הגיעו לאחרים עשויים
 להישאר זמינים. אני רוצה להשתתף.
 
 CC0 explains the permanence of the public waiver and fallback licence in its
 [legal code](https://creativecommons.org/publicdomain/zero/1.0/legalcode.en).
-
-### Private-evaluation-only option
-
-**Guardian, English**
-
-I am the writer's parent or legal guardian. I give permission for them to
-choose whether to contribute to HeOCR's private evaluation. Only authorised
-team members may use the contributions to check how the system reads writing.
-The work stays private and is excluded from training and public release. We
-use an age band and project code. Photograph only the assigned page. Leave out
-faces, real names, contact details and location information. Use the
-withdrawal code and email heocrproject@gmail.com to stop participation and
-request removal of the team's copies.
-
-**הורה או אפוטרופוס**
-
-אני הורה או אפוטרופוס של הכותב או הכותבת. אני מאשר/ת להם לבחור אם לתרום
-לבדיקה פרטית של HeOCR. רק חברי צוות מורשים ישתמשו בחומרים כדי לבדוק כיצד
-המערכת קוראת כתב. החומרים יישארו פרטיים ולא ישמשו לאימון או לפרסום. אנחנו
-משתמשים בקבוצת גיל ובקוד מיזם. מצלמים רק את הדף שהוקצה, בלי פנים, שמות
-אמיתיים, פרטי קשר או נתוני מיקום. כדי להפסיק להשתתף ולבקש הסרה של
-עותקי הצוות, אפשר לשלוח את קוד ההסרה לכתובת heocrproject@gmail.com.
-
-**Writer, English**
-
-I can choose whether to help. I will write and photograph only the pages
-I was given. I will leave my real name, other people, and location out of the
-photo. Only the project team will see my work for a private check. I can stop
-and ask the team to remove its copies. I want to take part.
-
-**הכותב או הכותבת**
-
-אני יכול/ה לבחור אם להשתתף. אכתוב ואצלם רק את הדפים שקיבלתי. לא אכלול
-בצילום שם אמיתי, אנשים אחרים או מיקום. רק צוות המיזם יראה את העבודה שלי
-לצורך בדיקה פרטית. אפשר להפסיק ולבקש מהצוות להסיר את העותקים שלו.
-אני רוצה להשתתף.

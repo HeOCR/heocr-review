@@ -13,7 +13,7 @@ import { randomId } from "../crypto";
 import { assertSameOrigin, HttpError, json, readBytes, readJson } from "../http";
 import { enforce, LIMITS } from "../ratelimit";
 import {
-  canonicalContributorOrigin, contributorManifest, contributorRoot, gone, hash, invalid, submissionBucket,
+  canonicalContributorOrigin, contributorManifest, contributorRoot, formFields, gone, hash, invalid, submissionBucket,
   type Manifest, type Task, type Writer,
 } from "./config";
 
@@ -28,6 +28,8 @@ const enrollmentFields = `writer_id, writer_account, guardian_account, age_band,
   guardian_version, guardian_sha256, assent_version, assent_sha256, withdrawn_at, purged_at`;
 const current = (a: Access) => a.manifest.policy;
 const consentKey = (a: Access) => current(a).version + ":" + current(a).licence;
+const referencePin = (task: Task) => task.kind === "form" ? task.referenceSha256 :
+  task.kind === "handwriting" ? task.promptSha256 : null;
 const maxPhoto = 16 * 1024 * 1024;
 const privateHeaders = {
   "cache-control": "private, no-store",
@@ -117,9 +119,10 @@ async function nextView(a: Access, task: Task): Promise<ContributorNext> {
   const path=`${CONTRIBUTOR_API}/writers/${a.writer.id}/tasks/${task.id}`;
   switch(task.kind) {
     case "print": return {...base,kind:task.kind,mode:task.mode,sheet:path+"/sheet"};
-    case "form": return {...base,kind:task.kind,persona:task.persona,sheet:path+"/sheet"};
+    case "form": return {...base,kind:task.kind,sheet:path+"/sheet",
+      fields:await formFields(a.ctx.env,task),referenceSha256:task.referenceSha256};
     case "line": return {...base,kind:task.kind,crop:path+"/crop",candidate:candidateOf(await line(a,task))};
-    case "handwriting": return {...base,kind:task.kind,prompt:task.sentences.join("\n"),rights:task.rights};
+    case "handwriting": return {...base,kind:task.kind,prompt:task.sentences.join("\n"),rights:task.rights,referenceSha256:task.promptSha256};
   }
 }
 async function profile(a: Access): Promise<ContributorProfile> {
@@ -213,19 +216,20 @@ async function asset(a: Access, task: Task, action: string) {
 async function save(a: Access, task: Task, digest: string, key: string|null, review: string|null) {
   const policy=current(a);
   const w=a.writer;
+  const ref=referencePin(task);
   const result=await a.ctx.env.DB.prepare(`
     INSERT INTO contributor_submissions
-      (writer_id,task_id,kind,policy_version,policy_licence,guardian_sha256,assent_sha256,content_sha256,storage_key,review_result_json,uploaded_at)
-    SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,? FROM contributor_enrolments
+      (writer_id,task_id,kind,policy_version,policy_licence,guardian_sha256,assent_sha256,reference_sha256,content_sha256,storage_key,review_result_json,uploaded_at)
+    SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,?,? FROM contributor_enrolments
     WHERE writer_id=? AND writer_account=? AND guardian_account=? AND split=? AND withdrawn_at IS NULL
       AND guardian_version=? AND guardian_sha256=? AND assent_version=? AND assent_sha256=?
     ON CONFLICT DO NOTHING
-  `).bind(task.id,task.kind,policy.version,policy.licence,digest,key,review,now(a.ctx),
+  `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
     w.id,w.writerAccount,w.guardianAccount,w.split,consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256).run();
   if (result.meta.changes===1) return true;
-  const saved=await a.ctx.env.DB.prepare("SELECT content_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
-    .bind(w.id,task.id).first<{content_sha256:string}>();
-  if (saved?.content_sha256===digest) return false;
+  const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
+    .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();
+  if (saved?.content_sha256===digest && saved.reference_sha256===ref) return false;
   throw new HttpError(409,"contributor_slot_conflict");
 }
 async function submit(a: Access, task: Task) {
@@ -241,6 +245,9 @@ async function submit(a: Access, task: Task) {
     await save(a,task,await hash(`${a.writer.id}\n${task.id}\n${review}`),null,review);
   } else {
     if (request.headers.get("x-contributor-privacy")!=="confirmed") throw invalid();
+    const ref=referencePin(task);
+    if (ref && request.headers.get("x-contributor-reference")!==ref) throw new HttpError(409,"contributor_reference_changed");
+    if (task.kind==="form") await formFields(a.ctx.env,task);
     const bytes=await readBytes(request,maxPhoto,"invalid_contributor_image");
     const mime=contributorPhotoType(bytes);
     if (!mime) throw new HttpError(400,"contributor_photo_format");
