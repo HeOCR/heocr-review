@@ -14,7 +14,7 @@ export interface Prefs {
   exactSide: ExactSide;
 }
 
-export const DEFAULT_PREFS: Prefs = { theme: "system", lang: "he", exactSide: "start" };
+export const DEFAULT_PREFS: Prefs = { theme: "light", lang: "he", exactSide: "start" };
 const KEY = "heocr-review.prefs.v1";
 
 type Store = Pick<Storage, "getItem" | "setItem">;
@@ -32,7 +32,7 @@ export function loadPrefs(s: Store | null = store()): Prefs {
     if (!raw) return { ...DEFAULT_PREFS };
     const v = JSON.parse(raw) as Partial<Prefs>;
     return {
-      theme: v.theme === "light" || v.theme === "dark" ? v.theme : "system",
+      theme: v.theme === "light" || v.theme === "dark" || v.theme === "system" ? v.theme : DEFAULT_PREFS.theme,
       lang: v.lang === "en" ? "en" : "he",
       exactSide: v.exactSide === "end" ? "end" : "start",
     };

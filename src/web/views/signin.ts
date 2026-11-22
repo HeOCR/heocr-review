@@ -29,7 +29,7 @@ function loadGis(): Promise<Gis> {
 }
 
 /** Sign-in (design SPEC §4.6): one heading, two sentences, Google's own button (not restyled), the policy links. */
-export function signInView(config: ConfigResponse, done: (me: MeResponse) => void): DocumentFragment {
+export function signInView(config: ConfigResponse, done: (me: MeResponse) => void, invited = false): DocumentFragment {
   const msg = h("p", { class: "msg", role: "status" });
   const button = h("div", { class: "gsi" });
   const fail = (e: unknown) => {
@@ -73,10 +73,13 @@ export function signInView(config: ConfigResponse, done: (me: MeResponse) => voi
       h("button", { type: "submit" }, "Sign in"),
     );
   }
+  const title = invited ? (lang() === "he" ? "משימות תרומה ל־HeOCR" : "Contribute to HeOCR") : t("signin_h");
+  const intro = invited ? (lang() === "he" ? "משתתפים שהוזמנו וההורים או האפוטרופוסים שלהם נכנסים כל אחד מחשבונו." :
+    "Invited writers and their guardians each sign in with their own account.") : t("signin_p");
   const page = document.createDocumentFragment();
   page.append(
-    h("h1", {}, t("signin_h")),
-    h("p", {}, t("signin_p")),
+    h("h1", {}, title),
+    h("p", {}, intro),
     button,
     ...(dev ? [dev] : []),
     msg,

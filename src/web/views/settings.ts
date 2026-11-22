@@ -51,7 +51,7 @@ export function settingsView(me: MeResponse, prefs: Prefs, hooks: SettingsHooks)
       choice("set_lang", [["he", "lang_he"], ["en", "lang_en"]], p.lang, (lang) => set({ lang })),
       // "start" is the right in Hebrew and the left in English: the labels name the physical side.
       choice("set_side", p.lang === "he" ? [["start", "side_r"], ["end", "side_l"]] : [["end", "side_r"], ["start", "side_l"]], p.exactSide, (exactSide) => set({ exactSide })),
-      credit(),
+      ...(me.contributorWriter ? [] : [credit()]),
       h("div", { class: "row" }, h("button", { type: "button", class: "act", onclick: () => void post("/api/auth/logout").then(hooks.signedOut, hooks.signedOut) }, icon("sign-out"), t("signout"))),
     );
   };

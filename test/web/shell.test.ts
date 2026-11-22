@@ -43,9 +43,9 @@ describe("preferences (kept on this device only)", () => {
     },
   };
 
-  it("defaults to following the system, Hebrew, and Exact on the start side", () => {
+  it("defaults to light, Hebrew, and Exact on the start side", () => {
     expect(loadPrefs(memory())).toEqual(DEFAULT_PREFS);
-    expect(DEFAULT_PREFS).toEqual({ theme: "system", lang: "he", exactSide: "start" });
+    expect(DEFAULT_PREFS).toEqual({ theme: "light", lang: "he", exactSide: "start" });
   });
 
   it("round-trips through storage", () => {

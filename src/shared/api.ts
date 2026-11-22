@@ -8,6 +8,7 @@ export interface ConfigResponse {
   devAuth: boolean;
   termsVersion: string;
   termsStatus: string;
+  contributorEnabled?: boolean;
 }
 
 export interface MeResponse {
@@ -16,6 +17,7 @@ export interface MeResponse {
   termsCurrent: boolean;
   displayName: string | null;
   isAdmin: boolean;
+  contributorWriter?: boolean;
 }
 
 export interface Label {
