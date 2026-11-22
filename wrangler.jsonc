@@ -34,6 +34,10 @@
     {
       "binding": "RESTRICTED_REFERENCE_MEDIA",
       "bucket_name": "heocr-review-protected"
+    },
+    {
+      "binding": "TRAIN_CAPTURE_MEDIA",
+      "bucket_name": "heocr-review-train-captures"
     }
   ],
   "d1_databases": [
