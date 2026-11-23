@@ -16,6 +16,7 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = { theme: "light", lang: "he", exactSide: "start" };
 const KEY = "heocr-review.prefs.v1";
+const CONTRIBUTOR_LANGUAGE_KEY = "heocr-review.contributor.language.v1";
 
 type Store = Pick<Storage, "getItem" | "setItem">;
 function store(): Store | null {
@@ -50,6 +51,18 @@ export function savePrefs(p: Prefs, s: Store | null = store()): boolean {
   } catch {
     return false;
   }
+}
+
+export function contributorLanguage(s: Store | null = store()): Lang {
+  try {
+    return s?.getItem(CONTRIBUTOR_LANGUAGE_KEY) === "en" ? "en" : "he";
+  } catch {
+    return "he";
+  }
+}
+
+export function saveContributorLanguage(language: Lang, s: Store | null = store()): void {
+  try { s?.setItem(CONTRIBUTOR_LANGUAGE_KEY, language); } catch { /* The current page keeps the chosen language. */ }
 }
 
 /** Apply to the page: data-theme on <html> (absent = follow the system), the language, and body.swap. */

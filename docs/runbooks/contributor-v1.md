@@ -8,6 +8,9 @@ only. Invited account holders without assignments can copy their account
 code from the contributor link and share it privately with the organiser.
 Keep enrolment and account matching outside public channels.
 
+The invitation link opens the Hebrew sign-in screen. After signing in, a
+writer can switch to English and will see only the queues assigned below.
+
 Capture, handwriting and other intake switches are independent. For local
 testing use invented inputs and a disposable Wrangler state. Production config
 stays off until the lead approves activation, eval pins the writer assignments
@@ -35,8 +38,14 @@ environment. The manifest uses:
   revisions. Preflight the proposed 30 EVAL and six DEV writers with eval
   before allocation, preserving writer and prompt disjointness.
 - All tasks have an opaque `id` and printable `page`. Keep IDs stable across
-  revisions to preserve the slot receipt. List tasks in the desired order.
-  Only the first unfinished task in each kind accepts a new submission.
+  revisions to preserve the slot receipt. `writers[].tasks` is the allow-list
+  for that writer. A queue appears only when its kind occurs in the list.
+  First occurrence determines queue order, and only the first unfinished task
+  of that kind can accept a new submission. For the starter group, assign the
+  chosen two or three tasks from the TRN-PRINT-01 print-and-capture pack, an
+  exact fictional form worksheet, and a handwriting copy sheet. Omit other
+  work from that writer's list. Each photo task shows the guide for its
+  assigned capture condition.
 - `print`: `{kind:"print", mode, sheetSha256}`. Assign TRAIN PDF pages and
   use `flat`, `angle`, `shadow`, `crumpled`, `scribbled`, or `folded`
   per capture slot.
