@@ -27,10 +27,10 @@ async function main() {
     str(flags, "ratification-sha256"), str(flags, "items-sha256"));
   const reviewer = str(flags, "reviewer");
   if (!/^rv_[a-f0-9]{8}$/.test(reviewer)) throw new Error("use an existing reviewer id");
-  const readLive = () => matchReferenceRows(plan, d1Query<LiveReferenceLine>(destination, liveReferenceSql(plan, reviewer))[0] ?? []);
+  const readLive = () => d1Query<LiveReferenceLine>(destination, liveReferenceSql(plan, reviewer))[0] ?? [];
   const run = () => d1Query<Run>(destination,
     `SELECT projection_sha256,ratification_sha256,items_sha256,rows_expected,active FROM reference_consensus_runs WHERE batch_id=${lit(plan.batch)}`)[0]?.[0];
-  const before = readLive();
+  const before = matchReferenceRows(plan, readLive());
   const exists = run();
   if (exists && (exists.projection_sha256 !== plan.projectionPin || exists.ratification_sha256 !== plan.approvalPin ||
       exists.items_sha256 !== plan.itemsPin || exists.rows_expected !== before.length)) throw new Error("a different projection already owns the batch");
@@ -68,23 +68,25 @@ async function main() {
     } finally {
       try { unlinkSync(stage); } finally { rmdirSync(scratch); }
     }
-    checkStage(readLive());
+    checkStage(matchReferenceRows(plan, readLive()));
     // The last statement activates the complete stage only while the exact live media and source still match.
-    d1Query(destination, referenceActivateSql(plan));
+    d1Query(destination, referenceActivateSql(plan, reviewer));
     if (run()?.active !== 1) throw new Error("staged rows were not activated");
   }
 
   const active = run()?.active === 1;
-  const current = readLive();
+  const live = readLive();
+  const current = matchReferenceRows(plan, live);
   if (active) checkStage(current);
   console.log(JSON.stringify({
     active, projection_sha256: plan.projectionPin, scoped_lines: current.length,
     current_human: current.filter(x => x.db.human).length,
+    outside_scope_current_human: live.length - current.length,
     untouched_auto_accepts: current.filter(x => x.lane === "accepted" && !x.db.human).length,
     ordinary_pending: current.filter(x => x.lane === "ordinary" && !x.db.human && !x.db.skipped).length,
     blind_typing_pending: current.filter(x => x.lane === "audit" && !x.db.human && !x.db.skipped).length,
     skipped: current.filter(x => x.lane !== "accepted" && x.db.skipped && !x.db.human).length,
-    pending_page_checks: new Set(current.filter(x => !x.db.page_complete).map(x => x.db.item_id)).size,
+    pending_page_checks: new Set(live.filter(x => !x.page_complete).map(x => x.item_id)).size,
   }));
 }
 

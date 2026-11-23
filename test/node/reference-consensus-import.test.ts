@@ -46,10 +46,8 @@ it("refuses tampered approvals and acceptance duplicated in the human queue", ()
     .toThrow(/membership/);
 });
 
-it("holds a changed geometry stage, then activates exact routing without writing a human answer", () => {
-  const { freeze, projection, approval } = envelopes();
-  const plan = readReferencePlan(projection, freeze, approval, digest(approval), items);
-  using db = new DatabaseSync(":memory:");
+function fixtureDb() {
+  const db = new DatabaseSync(":memory:");
   const migrations = new URL("../../migrations/", import.meta.url);
   for (const name of readdirSync(migrations).sort()) db.exec(readFileSync(new URL(name, migrations), "utf8"));
   db.prepare(`INSERT INTO batches (id,task_type,title,source_json,min_reviewers,status,imported_at,restricted_reference)
@@ -61,16 +59,53 @@ it("holds a changed geometry stage, then activates exact routing without writing
     JSON.stringify({ box, candidate_text: candidate, candidate_provenance: "reference_draft" }),
     JSON.stringify({ page: { ref: { source: "r2", key: page + ".png" } }, crop: { ref: { source: "r2", key: crop + ".jpg" } } }),
     projectionPin);
+  return db;
+}
+
+it("holds a changed geometry stage, then activates exact routing without writing a human answer", () => {
+  const { freeze, projection, approval } = envelopes();
+  const plan = readReferencePlan(projection, freeze, approval, digest(approval), items);
+  using db = fixtureDb();
   const live = () => db.prepare(liveReferenceSql(plan, reviewer)).all() as unknown as LiveReferenceLine[];
   const exact = matchReferenceRows(plan, live());
   db.exec(referenceStageSql(plan, exact));
   expect(db.prepare("SELECT COUNT(*) AS n FROM current_reference_consensus_lines").get()!.n).toBe(0);
   db.exec("UPDATE proposals SET payload_json=json_set(payload_json,'$.box',json('[0,2,9,8]'))");
   expect(() => matchReferenceRows(plan, live())).toThrow(/current draft/);
-  expect(db.prepare(referenceActivateSql(plan)).run().changes).toBe(0);
+  expect(db.prepare(referenceActivateSql(plan, reviewer)).run().changes).toBe(0);
   db.exec("UPDATE proposals SET payload_json=json_set(payload_json,'$.box',json('[1,2,9,8]'))");
-  expect(db.prepare(referenceActivateSql(plan)).run().changes).toBe(1);
-  expect(db.prepare(referenceActivateSql(plan)).run().changes).toBe(0);
+  expect(db.prepare(referenceActivateSql(plan, reviewer)).run().changes).toBe(1);
+  expect(db.prepare(referenceActivateSql(plan, reviewer)).run().changes).toBe(0);
   expect(db.prepare("SELECT lane FROM current_reference_consensus_lines").get()!.lane).toBe("accepted");
   expect(db.prepare("SELECT COUNT(*) AS n FROM decisions").get()!.n).toBe(0);
+});
+
+it("activates a pending-only projection if every excluded line has a current answer at cutover", () => {
+  const { freeze, projection, approval } = envelopes();
+  const plan = readReferencePlan(projection, freeze, approval, digest(approval), items);
+  using db = fixtureDb();
+  db.exec(`INSERT INTO proposals(id,batch_id,item_id,external_id,category,confidence,rank,payload_json,media_json,content_sha256,active)
+    SELECT 2,batch_id,item_id,'line2',category,confidence,1,payload_json,media_json,content_sha256,active
+    FROM proposals WHERE id=1`);
+  const live = () => db.prepare(liveReferenceSql(plan, reviewer)).all() as unknown as LiveReferenceLine[];
+  expect(() => matchReferenceRows(plan, live())).toThrow(/unanswered lines outside/);
+
+  db.prepare("INSERT INTO reviewers (id,created_at,last_seen_at) VALUES (?,'fixture','fixture')").run(reviewer);
+  db.prepare(`INSERT INTO decisions (id,proposal_id,reviewer_id,value,text,proposal_sha256,terms_version,created_at,decided_on)
+    VALUES ('prior-answer',2,?,'edited',?,?,'fixture','fixture','2026-01-01')`).run(reviewer, "תיקון קודם", projectionPin);
+  db.exec(referenceStageSql(plan, matchReferenceRows(plan, live())));
+  const activate = db.prepare(referenceActivateSql(plan, reviewer));
+
+  db.exec("UPDATE decisions SET superseded_at='fixture' WHERE id='prior-answer'");
+  expect(activate.run().changes).toBe(0);
+  db.exec("UPDATE decisions SET superseded_at=NULL,proposal_sha256='stale' WHERE id='prior-answer'");
+  expect(activate.run().changes).toBe(0);
+  db.prepare("UPDATE decisions SET proposal_sha256=? WHERE id='prior-answer'").run(projectionPin);
+  const decisions = db.prepare("SELECT * FROM decisions");
+  const before = decisions.all();
+
+  expect(activate.run().changes).toBe(1);
+  expect(db.prepare("SELECT proposal_id,lane FROM current_reference_consensus_lines").all())
+    .toEqual([{ proposal_id: 1, lane: "accepted" }]);
+  expect(decisions.all()).toEqual(before);
 });
