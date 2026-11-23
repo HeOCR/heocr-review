@@ -7,7 +7,7 @@ const pin = (x: string) => sha.test(x);
 const key = /^[a-zA-Z0-9_.:#-]{1,200}$/;
 const policyReaders = new Map([
   ["36cdefdd17ec1e039757f623b1b3f80d5e4a7a4f6c62097a35cd7f105aa49081", 2],
-  ["ec3dd271e5bbdaaa9c976a4d42ca8fbb294b6d6cc37d923e9c5c40a98c028ed7", 3],
+  ["fdbd11d2cc3f2d61c6e198d65a2f83cf0c1421ef90c20172a2838ca5f85f60e1", 3],
 ]);
 const digest = (x: Buffer | string) => createHash("sha256").update(x).digest("hex");
 

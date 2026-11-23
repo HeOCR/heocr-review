@@ -15,7 +15,8 @@ const page = "c".repeat(64);
 const crop = "d".repeat(64);
 const reviewer = "rv_abcdef12";
 const protocol = "36cdefdd17ec1e039757f623b1b3f80d5e4a7a4f6c62097a35cd7f105aa49081";
-const amended = "ec3dd271e5bbdaaa9c976a4d42ca8fbb294b6d6cc37d923e9c5c40a98c028ed7";
+const amended = "fdbd11d2cc3f2d61c6e198d65a2f83cf0c1421ef90c20172a2838ca5f85f60e1";
+const superseded = "ec3dd271e5bbdaaa9c976a4d42ca8fbb294b6d6cc37d923e9c5c40a98c028ed7";
 const key = { batch_id: batch, protocol_sha256: protocol, batch_ratification_sha256: "e".repeat(64) };
 const box = [1, 2, 9, 8];
 const candidate = "שורה אחת";
@@ -47,6 +48,7 @@ it("binds the registered amendment to three distinct vote files", () => {
   expect(() => openPlan(envelopes([], amended))).toThrow(/reader count/);
   expect(() => openPlan(envelopes([], amended, ["1".repeat(64), ...threeVotes.slice(0, 2)]))).toThrow(/reader count/);
   expect(() => openPlan(envelopes([], "4".repeat(64), threeVotes))).toThrow(/outside ratification/);
+  expect(() => openPlan(envelopes([], superseded, threeVotes))).toThrow(/outside ratification/);
 });
 
 it("refuses tampered approvals and acceptance duplicated in the human queue", () => {
