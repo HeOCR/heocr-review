@@ -1223,5 +1223,89 @@
   "train_paste_export": [
     "ייצוא תמלולי אימון",
     "Export training transcriptions"
-  ]
+  ],
+ "cg_signin_h": [
+  "כניסה ל־HeOCR",
+  "Sign in to HeOCR"
+ ],
+ "cg_print_h": [
+  "מדפיסים את הדף",
+  "Print the page"
+ ],
+ "cg_print_p": [
+  "הורידו והדפיסו רק את הדף של המשימה על נייר A4. בחרו גודל מקורי (100%) כך שמזהה הדף יישאר גלוי.",
+  "Download and print only the assigned page on A4 paper. Use actual size (100%) and check that the page ID is visible."
+ ],
+ "cg_hand_print_p": [
+  "הדפיסו את דף המשפטים של המשימה על נייר A4 והכינו עוד דף ריק ואת כלי הכתיבה.",
+  "Print the assigned sentence sheet on A4 paper. Get a separate blank sheet and something to write with."
+ ],
+ "cg_form_h": [
+  "ממלאים לפי הפרטים לדוגמה",
+  "Copy the sample details"
+ ],
+ "cg_form_p": [
+  "כתבו ביד בכל שדה את הערך המתאים מהכרטיס, בדיוק כפי שהוא מופיע. השתמשו רק בפרטים המומצאים שבכרטיס והשאירו שדות שאין להם ערך ריקים.",
+  "Write each value by hand in its matching field, exactly as shown on the card. Use only the fictional details on the card and leave other fields blank."
+ ],
+ "cg_copy_h": [
+  "מעתיקים בכתב יד",
+  "Copy by hand"
+ ],
+ "cg_copy_p": [
+  "כתבו את מזהה הדף בראש דף תשובות נקי. העתיקו כל משפט לשורה משלו, לפי הסדר, כולל סימני הפיסוק. השאירו מעט רווח בין השורות.",
+  "Write the page ID at the top of a clean answer sheet. Copy the sentences in order, one per line, with punctuation. Leave a little space between lines."
+ ],
+ "cg_photo_h": [
+  "מצלמים את הדף",
+  "Take the photo"
+ ],
+ "cg_photo_p": [
+  "כבו שמירת מיקום במצלמה ונקו את העדשה. כללו את ארבע הפינות ואת מזהה הדף, והקישו על הטקסט במסך כדי למקד את המצלמה.",
+  "Turn off camera location and clean the lens. Include all four corners and the page ID. Tap the text on the screen to focus the camera."
+ ],
+ "cg_flat": [
+  "הניחו את הדף על משטח ישר ומואר. החזיקו את הטלפון ישר מעל הדף.",
+  "Place the page on a flat, well-lit surface. Hold the phone straight above it."
+ ],
+ "cg_angle": [
+  "השאירו את הדף על השולחן והטו מעט את הטלפון. בדקו שגם הצד הרחוק חד.",
+  "Keep the page on the table and tilt the phone slightly. Check that the far edge is still sharp."
+ ],
+ "cg_shadow": [
+  "צרו צל רך על חלק מהדף, למשל עם היד מחוץ לתמונה. השאירו את כל הטקסט קריא.",
+  "Let a soft shadow fall across part of the page, for example by holding a hand outside the frame. Keep all the text readable."
+ ],
+ "cg_crumpled": [
+  "קמטו בעדינות את הדף, פתחו אותו וצלמו את הדף כולו כשהקמטים עדיין נראים.",
+  "Gently crumple the page, open it up and photograph the whole page with the wrinkles visible."
+ ],
+ "cg_scribbled": [
+  "הוסיפו כמה שרבוטים קטנים שלא מסתירים מילים. השתמשו בקווים בלבד, בלי מילים או חתימה.",
+  "Add a few small scribbles where they will leave the words readable. Use lines only, with no words or signature."
+ ],
+ "cg_folded": [
+  "קפלו את הדף פעם אחת, פתחו אותו וצלמו כך שרואים את הקפל.",
+  "Fold the page once, unfold it and take a photo with the crease visible."
+ ],
+ "cg_check_h": [
+  "בודקים את הצילום",
+  "Check the photo"
+ ],
+ "cg_check_p": [
+  "בדקו שרואים רק את הדף, בלי פנים, פרטים אישיים אמיתיים או חפצים ברקע. אם הטקסט מטושטש או שפינה נחתכה, צלמו שוב.",
+  "Check that the image shows only the page, with no faces, real personal details or background objects. Retake it if the text is blurry or a corner is cut off."
+ ],
+ "cg_upload_h": [
+  "מעלים את הצילום",
+  "Upload the photo"
+ ],
+ "cg_upload_p": [
+  "בחרו את הצילום המקורי בפורמט JPEG או PNG, בדקו את התצוגה המקדימה ואשרו שהצילום עומד בבדיקת הפרטיות.",
+  "Choose the original JPEG or PNG photo, review the preview and confirm that the photo passes the privacy check."
+ ],
+ "cg_preview": [
+  "תצוגה מקדימה של הצילום שנבחר",
+  "Preview of the selected photo"
+ ]
 }

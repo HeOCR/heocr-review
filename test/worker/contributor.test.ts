@@ -14,7 +14,7 @@ const jpg = Uint8Array.from([255,216,255,192,0,11,8,0,1,0,1,1,1,17,0,255,217]);
 const writerKey = "cw-" + "1".repeat(32);
 const secondKey = "cw-" + "2".repeat(32);
 
-async function fixture(label: string) {
+async function fixture(label: string, customize?: (manifest: Manifest) => void) {
   const writer = new Client(), guardian = new Client(), stranger = new Client(), second = new Client();
   const writerAccount = await writer.signIn(label + "-writer");
   const guardianAccount = await guardian.signIn(label + "-guardian");
@@ -64,6 +64,7 @@ async function fixture(label: string) {
     ]},{id:secondKey,writerAccount:secondAccount,guardianAccount,ageBand:"16_17",split:"dev",
       tasks:[{id:"h-dev",kind:"handwriting",page:"D-1",sentences:["עוד משפט לדוגמה"],promptSha256:await hash("עוד משפט לדוגמה"),rights:"PD: invented fixture"}]}],
   };
+  customize?.(manifest);
   const bytes=JSON.stringify(manifest);
   const pin=await hash(bytes);
   await bucket.put(contributorRoot+"config/"+pin+".json",bytes);
@@ -123,6 +124,23 @@ it("gates each queue, assets, legacy review and all writes on assigned guardian 
     policy_version:f.manifest.policy.version,policy_licence:"cc0_open",
     guardian_sha256:f.manifest.policy.guardian.en.sha256,assent_sha256:f.manifest.policy.assent.en.sha256,
   });
+});
+
+it("returns only assigned queues in manifest order and rejects unassigned task URLs", async () => {
+  const f = await fixture("allow-list", (manifest) => {
+    const first = manifest.writers[0]!;
+    first.tasks = [first.tasks.find(task => task.kind === "handwriting")!, first.tasks[0]!];
+  });
+  expect((await f.req(null, CONTRIBUTOR_API+"/enrolments")).status).toBe(401);
+  expect((await f.req(null, f.path+"/tasks/photo0/sheet")).status).toBe(401);
+  expect((await f.consent("guardian")).status).toBe(200);
+  const ready = await (await f.consent("assent")).json<ContributorProfile>();
+  expect(ready.queues.map(q => [q.kind, q.total, q.next?.id])).toEqual([
+    ["handwriting", 1, "hand"], ["print", 1, "photo0"],
+  ]);
+  expect((await f.req(f.writer, f.path+"/tasks/form/sheet")).status).toBe(404);
+  expect((await f.req(f.writer, f.path+"/tasks/line/crop")).status).toBe(404);
+  expect((await f.req(f.writer, f.path+"/tasks/photo1/submit", {image:pageImage,ok:true})).status).toBe(404);
 });
 
 it("uses an ordered TRAIN queue, quarantines unchanged bytes and supports idempotent receipt withdrawal",async()=>{

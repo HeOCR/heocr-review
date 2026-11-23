@@ -8,7 +8,7 @@ import { ApiFailure, get } from "./api";
 import { h, mount } from "./dom";
 import { lang, t } from "./i18n";
 import { icon, mark, type IconName } from "./icons";
-import { applyPrefs, loadPrefs, savePrefs, type Prefs } from "./prefs";
+import { applyPrefs, contributorLanguage, loadPrefs, saveContributorLanguage, savePrefs, type Prefs } from "./prefs";
 import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
 import { lineConsensusView } from "./views/consensus";
@@ -25,11 +25,18 @@ import { termsView } from "./views/terms";
 
 const app = document.getElementById("app")!;
 const nav = document.getElementById("nav")!;
+const top = document.querySelector<HTMLElement>(".top")!;
+const foot = document.getElementById("foot")!;
 const where = document.querySelector<HTMLElement>(".top .where")!;
 let config: ConfigResponse;
 let me: MeResponse | null = null;
 let dispose: (() => void) | null = null;
 let prefs: Prefs = loadPrefs();
+let writerLanguage = contributorLanguage();
+const currentHash = () => location.hash.slice(1);
+const contributorRoute = (hash = currentHash()) =>
+  hash === "contributor" || hash === "contributor/settings" || me?.contributorWriter === true;
+const viewPrefs = () => contributorRoute() ? { ...prefs, lang: writerLanguage } : prefs;
 
 /**
  * Screens adopted to the design render in main.doc (general pages) or main.task with body.task (task screens: line
@@ -63,13 +70,26 @@ function setWhere(title: string | null, line: string | null = null): void {
 }
 
 function renderNav(): void {
-  const current = location.hash.replace(/^#/, "");
+  const current = currentHash();
+  const contributor = contributorRoute(current);
+  applyPrefs(viewPrefs());
+  renderFoot();
+  const locked = contributor && !me;
+  top.hidden = foot.hidden = locked;
+  document.body.classList.toggle("contributor-signin", locked);
+  for (const home of top.querySelectorAll<HTMLAnchorElement>(".home, .brand")) home.href = contributor ? "#contributor" : "#";
   const link = (href: string, ic: IconName | null, label: string) =>
     h("a", { href: `#${href}`, "aria-label": label, ...(current === href ? { "aria-current": "page" } : {}) }, ic ? icon(ic, { sm: true }) : null, h("span", {}, label));
+  if (locked) return nav.replaceChildren();
   if (!me) return nav.replaceChildren(link("conventions", "conventions", t("conv")));
-  const links = me.contributorWriter ? [link("contributor", "tasks", contributorTitle())] :
-    [link("tasks", "tasks", t("tasks")), link("conventions", "conventions", t("conv"))];
-  if (config?.contributorEnabled && !me.contributorWriter) links.push(link("contributor", "tasks", contributorTitle()));
+  if (contributor) {
+    const other = lang() === "he" ? "en" : "he";
+    nav.replaceChildren(link("contributor", "tasks", contributorTitle()), link("contributor/settings", "settings", t("settings")),
+      h("button", { type: "button", class: "act quiet", lang: other, onclick: () => setPrefs({ ...prefs, lang: other }) }, other === "en" ? "English" : "עברית"));
+    return;
+  }
+  const links = [link("tasks", "tasks", t("tasks")), link("conventions", "conventions", t("conv"))];
+  if (config?.contributorEnabled) links.push(link("contributor", "tasks", contributorTitle()));
   if (me.isAdmin) links.push(link("admin", null, t("admin")));
   links.push(link("settings", "settings", t("settings")));
   nav.replaceChildren(...links);
@@ -77,8 +97,6 @@ function renderNav(): void {
 
 /** The footer in the interface language (the static page carries both until the app starts). */
 function renderFoot(): void {
-  const foot = document.getElementById("foot");
-  if (!foot) return;
   const sep = () => " · ";
   foot.replaceChildren(
     h("a", { href: "/" }, t("about")),
@@ -94,13 +112,16 @@ function renderFoot(): void {
 }
 
 /** A preference changed in settings: apply it, keep it, and redraw what depends on the language. */
-function setPrefs(next: Prefs): void {
-  prefs = next;
+function setPrefs(next: Prefs, redraw = true): void {
+  const contributor = contributorRoute();
+  if (contributor) {
+    writerLanguage = next.lang;
+    saveContributorLanguage(writerLanguage);
+  }
+  prefs = contributor ? { ...next, lang: prefs.lang } : next;
   savePrefs(prefs);
-  applyPrefs(prefs);
   renderNav();
-  renderFoot();
-  if (location.hash === "#contributor" || me?.contributorWriter && location.hash !== "#settings") void route();
+  if (redraw && contributor) void route();
 }
 
 /** The typing conventions (eval's registered Hebrew sheet: what to type for marks that have no key). */
@@ -121,10 +142,10 @@ function signedIn(next: MeResponse): void {
 }
 
 function signedOut(): void {
+  if (contributorRoute()) history.replaceState(null, "", "#contributor");
   me = null;
   renderNav();
-  const invited = config.contributorEnabled === true && location.hash === "#contributor";
-  show("doc", signInView(config, signedIn, invited));
+  show("doc", signInView(config, signedIn, contributorRoute()));
 }
 
 /** The terms changed mid-session: show them over the review, then put the review back as it was. */
@@ -151,11 +172,14 @@ function needTerms(): Promise<void> {
 
 async function route(): Promise<void> {
   renderNav();
-  const hash = location.hash.replace(/^#/, "");
-  if (hash === "conventions") return show("doc", conventionsView());
+  const hash = currentHash();
+  const contributor = contributorRoute(hash);
+  if (hash === "conventions" && !contributor) return show("doc", conventionsView());
   if (!me) return signedOut();
-  if (hash === "settings") return show("doc", settingsView(me, prefs, { changed: (next) => ((me = next), renderNav()), prefsChanged: setPrefs, signedOut }));
-  if (me.contributorWriter || hash === "contributor" && config.contributorEnabled) return show("doc", contributorView(me.reviewerId, config.contributorEnabled === true));
+  if (hash === "settings" || hash === "contributor/settings") return show("doc", settingsView(me, viewPrefs(), {
+    changed: (next) => ((me = next), renderNav()), prefsChanged: (next) => setPrefs(next, false), signedOut,
+  }, contributor));
+  if (contributor) return show("doc", contributorView(me.reviewerId, config.contributorEnabled === true, signedOut));
   if (hash === "admin" && me.isAdmin) return show("legacy", adminView());
   if (!me.termsCurrent) {
     return show("doc", termsView(me, (next) => signedIn(next)));
@@ -297,7 +321,7 @@ function picker(batches: BatchSummary[]): HTMLElement {
 }
 
 async function start(): Promise<void> {
-  applyPrefs(prefs);
+  applyPrefs(viewPrefs());
   document.querySelector(".top .home")?.append(mark());
   renderFoot();
   config = await get<ConfigResponse>("/api/config");

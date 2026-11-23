@@ -1,9 +1,8 @@
-import {
-  CONTRIBUTOR_API, type CaptureMode, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField,
-} from "../../shared/contributor";
+import { CONTRIBUTOR_API, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h } from "../dom";
 import { lang, t } from "../i18n";
+import { captureGuide } from "./contributor-guide";
 
 type Pair = readonly [he: string, en: string];
 const text = (he: string, en: string) => lang() === "he" ? he : en;
@@ -13,14 +12,6 @@ const names: Record<ContributorKind, Pair> = {
   form: ["מילוי טפסים לדוגמה", "Fill in sample forms"],
   line: ["בדיקת שורות", "Check lines"],
   handwriting: ["כתיבה ביד", "Write by hand"],
-};
-const modes: Record<CaptureMode, Pair> = {
-  flat: ["הניחו את הדף על משטח ישר וצלמו מלמעלה.", "Lay the page flat and take the photo straight above it."],
-  angle: ["הטו את הטלפון מעט. השאירו את כל ארבע הפינות בתמונה.", "Tilt the phone slightly and keep all four corners in view."],
-  shadow: ["צלמו עם צל חלקי על הדף. ודאו שהטקסט עדיין קריא.", "Let a shadow fall over part of the page. Keep the text readable."],
-  crumpled: ["קמטו את הדף, פתחו אותו וצלמו בלי ליישר את הקמטים.", "Crumple the page, open it up, and photograph it with the wrinkles visible."],
-  scribbled: ["הוסיפו כמה שרבוטים בלי מילים או חתימה, ואז צלמו.", "Add a few scribbles with no words or signature, then take the photo."],
-  folded: ["קפלו פעם אחת, פתחו את הדף וצלמו כך שהקפל נראה.", "Fold the page once, unfold it, and take a photo with the crease visible."],
 };
 const bands: Record<ContributorProfile["ageBand"], Pair> = {
   "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"],
@@ -35,7 +26,7 @@ function fictionalPersona(fields: FormField[]) {
     h("dl",{},...fields.flatMap(({label,value})=>[h("dt",{},bdi(label)),h("dd",{},bdi(value))])));
 }
 
-export function contributorView(account: string, enabled: boolean) {
+export function contributorView(account: string, enabled: boolean, signedOut: () => void) {
   const root=h("section",{class:"contributor"});
   const notices=h("p",{class:"contributor-notice",role:"status"});
   let p: ContributorProfile | null=null;
@@ -45,7 +36,9 @@ export function contributorView(account: string, enabled: boolean) {
   const submitUrl=(task:ContributorNext)=>url()+"/tasks/"+task.id+"/submit";
   function notice(message:string) { notices.textContent=message; }
   function error(err:unknown) {
-    if (err instanceof ApiFailure && err.code==="consent_changed") {
+    if (err instanceof ApiFailure && err.status===401) {
+      signedOut();
+    } else if (err instanceof ApiFailure && err.code==="consent_changed") {
       notice(text("הנוסח השתנה. טענו מחדש ובדקו את הגרסה החדשה.","The wording changed. Reload to read the new version."));
     } else if (err instanceof ApiFailure && err.code==="contributor_reference_changed") {
       notice(text("דף ההעתקה השתנה. טענו מחדש והשתמשו בגרסה העדכנית.","The assigned text changed. Reload and use the current version."));
@@ -116,13 +109,28 @@ export function contributorView(account: string, enabled: boolean) {
       save);
   }
   function upload(task:ContributorNext) {
-    const photo=h("input",{type:"file",accept:"image/jpeg,image/png","aria-label":text("בחירת צילום","Choose photo")});
+    const photo=h("input",{type:"file",accept:"image/jpeg,image/png",hidden:true});
+    const choose=btn(text("בחירת צילום","Choose photo"),()=>photo.click());
     const privacy=h("input",{type:"checkbox"});
+    const preview=h("img",{class:"contributor-preview",alt:t("cg_preview"),hidden:true});
+    photo.addEventListener("change",()=>{
+      privacy.checked=false;
+      preview.hidden=true;
+      preview.removeAttribute("src");
+      const file=photo.files?.[0];
+      if (!file || file.size>16*1024*1024 || !["image/jpeg","image/png"].includes(file.type)) return;
+      const reader=new FileReader();
+      reader.addEventListener("load",()=>{
+        if (photo.files?.[0]===file && typeof reader.result==="string") preview.src=reader.result;
+      });
+      reader.readAsDataURL(file);
+    });
+    preview.addEventListener("load",()=>{ preview.hidden=false; });
     const button=btn(text("העלאת צילום","Upload photo"),()=>{
       const file=photo.files?.[0];
       if (!file || !privacy.checked) {
         notice(text("בחרו צילום ואשרו שאין בו פרטים אישיים.","Choose a photo and confirm it contains no personal information."));
-        (!file ? photo : privacy).focus();
+        (!file ? choose : privacy).focus();
         return;
       }
       if (file.size > 16*1024*1024) {
@@ -139,13 +147,12 @@ export function contributorView(account: string, enabled: boolean) {
       },text("הצילום נשמר.","Photo saved."));
     },true);
     return h("div",{class:"contributor-upload"},
-      h("p",{class:"small"},text("כבו מיקום במצלמה. צלמו את הדף בלבד, בלי פנים, פרטים אמיתיים או דברים ברקע.","Turn off camera location. Photograph only the page, with no faces, real personal details, or background objects.")),
-      photo,
+      photo,choose,preview,
       h("label",{class:"check"},privacy," ",text("בדקתי שאין בצילום פרטים אישיים אמיתיים.","I checked that the photo contains no real personal information.")),
       button);
   }
   function taskView(task:ContributorNext) {
-    const title=h("h2",{},tr(names[task.kind])," · ",bdi(task.page,"ltr"));
+    const title=h("h2",{"data-contributor-heading":"",tabindex:"-1"},tr(names[task.kind])," · ",bdi(task.page,"ltr"));
     if (task.kind==="line") {
       const crop=h("img",{class:"contributor-line",src:task.crop,alt:text("צילום השורה","Scan of the line"),decoding:"async"});
       const editor=h("textarea",{dir:"rtl",rows:3,"aria-label":text("תיקון השורה","Correct the line")});
@@ -159,8 +166,8 @@ export function contributorView(account: string, enabled: boolean) {
     }
     if (task.kind==="handwriting") {
       const sheet=h("section",{class:"contributor-prompt"},
-        h("h3",{},text("דף כתיבה","Handwriting sheet")," · ",bdi(task.page,"ltr")),
-        h("p",{class:"small"},text("כתבו את מזהה הדף בראש דף התשובות. העתיקו כל משפט לשורה נפרדת בכתב ידכם.","Write the page ID at the top of your answer sheet. Copy each sentence on its own line in your handwriting.")),
+        h("h4",{},text("דף כתיבה","Handwriting sheet")," · ",bdi(task.page,"ltr")),
+        h("p",{class:"contributor-print-help"},t("cg_copy_p")),
         h("ol",{dir:"rtl"},...task.prompt.split("\n").map(sentence=>h("li",{},sentence))), h("p",{class:"small muted"},task.rights));
       const print=btn(text("הדפסת דף כתיבה","Print handwriting sheet"),()=>{
         document.body.classList.add("contributor-printing");
@@ -168,36 +175,43 @@ export function contributorView(account: string, enabled: boolean) {
         window.print();
         document.body.classList.remove("contributor-printing");
       });
-      return h("section",{class:"card contributor-task"},title,sheet,print,upload(task));
+      return h("section",{class:"card contributor-task"},title,captureGuide("flat",[
+        {title:"cg_print_h",instruction:"cg_hand_print_p",illustration:"print",content:[print]},
+        {title:"cg_copy_h",instruction:"cg_copy_p",illustration:"copy",content:[sheet]},
+      ],upload(task)));
     }
     const download=h("a",{class:"act",href:task.sheet,download:""},text("הורדה והדפסה","Download and print"));
-    if (task.kind==="form") return h("section",{class:"card contributor-task"},title,
-      h("p",{},text("הדפיסו את הטופס והעתיקו אליו ביד את הפרטים שלמטה בדיוק. אל תמציאו או תשנו פרטים.","Print the worksheet and copy the details below exactly by hand. Do not make up or change any entries.")),
-      download,fictionalPersona(task.fields),upload(task));
-    return h("section",{class:"card contributor-task"},title,
-      h("p",{},tr(modes[task.mode])),download,upload(task));
+    return h("section",{class:"card contributor-task"},title,captureGuide(task.kind==="print"?task.mode:"flat",[
+      {title:"cg_print_h",instruction:"cg_print_p",illustration:"print",content:[download]},
+      ...(task.kind==="form" ? [{title:"cg_form_h",instruction:"cg_form_p",illustration:"form",content:[fictionalPersona(task.fields)]} as const] : []),
+    ],upload(task)));
   }
   function render() {
     if (!p) return;
     const heading=h("h1",{"data-contributor-heading":"",tabindex:"-1"},contributorTitle());
-    const queues=p.state==="ready" && p.role==="writer" ? p.queues.filter(queue=>queue.total>0) : [];
+    const queues=p.queues.filter(queue=>queue.total>0);
     if (!queues.length) {
       root.replaceChildren(heading,consent(p),notices,...[withdrawal(p)].filter(n=>n!==null));
       return;
     }
     const active=queues.find(q=>q.kind===selected)?.next;
+    const focusHeading=()=>root.querySelector<HTMLElement>(".contributor-task h2, h1")?.focus();
+    if (active) {
+      const back=btn(contributorTitle(),()=>{ selected=null;render();focusHeading(); });
+      const task=taskView(active);
+      root.replaceChildren(back,task,notices,...[withdrawal(p)].filter(n=>n!==null));
+      return;
+    }
     const cards=queues.map(q=>{
       const name=tr(names[q.kind]);
       const count=`${q.done} / ${q.total}`;
       return h("section",{class:"contributor-queue"},
         h("h2",{},name),h("p",{class:"contributor-count"},bdi(count,"ltr")),
         h("progress",{value:q.done,max:q.total,"aria-label":name}),
-        q.next?btn(text("המשך","Continue"),()=>{selected=q.kind;render();root.querySelector<HTMLElement>(".contributor-task h2")?.focus();},selected===q.kind):
+        q.next?btn(text("המשך","Continue"),()=>{selected=q.kind;render();focusHeading();}):
           h("p",{class:"small muted"},text("הושלם","Complete")));
     });
-    root.replaceChildren(heading,h("div",{class:"contributor-grid"},...cards),
-      ...(active ? [taskView(active)] : []),notices,...[withdrawal(p)].filter(n=>n!==null));
-    root.querySelector(".contributor-task h2")?.setAttribute("tabindex","-1");
+    root.replaceChildren(heading,h("div",{class:"contributor-grid"},...cards),notices,...[withdrawal(p)].filter(n=>n!==null));
   }
   async function load() {
     root.replaceChildren(h("h1",{},contributorTitle()),notices);

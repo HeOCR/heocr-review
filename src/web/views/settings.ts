@@ -31,7 +31,7 @@ function choice<V extends string>(label: StringKey, options: [V, StringKey][], v
  * Settings (design SPEC §4.6): appearance, language and the side of Exact are kept on this device; the named credit
  * is stored on the server, only with the consent below (its wording is the consent statement, unchanged).
  */
-export function settingsView(me: MeResponse, prefs: Prefs, hooks: SettingsHooks): HTMLElement {
+export function settingsView(me: MeResponse, prefs: Prefs, hooks: SettingsHooks, contributor: boolean): HTMLElement {
   const msg = h("p", { class: "msg", role: "status" });
   const name = h("input", { type: "text", id: "set-name", maxlength: MAX_DISPLAY_NAME, value: me.displayName ?? "", dir: "auto", autocomplete: "nickname" });
   const consent = h("input", { type: "checkbox" });
@@ -50,8 +50,7 @@ export function settingsView(me: MeResponse, prefs: Prefs, hooks: SettingsHooks)
       choice("set_theme", [["system", "th_sys"], ["light", "th_light"], ["dark", "th_night"]], p.theme, (theme) => set({ theme })),
       choice("set_lang", [["he", "lang_he"], ["en", "lang_en"]], p.lang, (lang) => set({ lang })),
       // "start" is the right in Hebrew and the left in English: the labels name the physical side.
-      choice("set_side", p.lang === "he" ? [["start", "side_r"], ["end", "side_l"]] : [["end", "side_r"], ["start", "side_l"]], p.exactSide, (exactSide) => set({ exactSide })),
-      ...(me.contributorWriter ? [] : [credit()]),
+      ...(contributor ? [] : [choice("set_side", p.lang === "he" ? [["start", "side_r"], ["end", "side_l"]] : [["end", "side_r"], ["start", "side_l"]], p.exactSide, (exactSide) => set({ exactSide })), credit()]),
       h("div", { class: "row" }, h("button", { type: "button", class: "act", onclick: () => void post("/api/auth/logout").then(hooks.signedOut, hooks.signedOut) }, icon("sign-out"), t("signout"))),
     );
   };

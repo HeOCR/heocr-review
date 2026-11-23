@@ -1,6 +1,6 @@
 import { contributorPhotoType } from "./photo";
 import {
-  CONTRIBUTOR_API, contributorKinds, type AgeBand, type ContributorNext, type ContributorProfile,
+  CONTRIBUTOR_API, type AgeBand, type ContributorKind, type ContributorNext, type ContributorProfile,
   type ContributorQueue, type ContributorSplit, type Language,
 } from "../../shared/contributor";
 import { candidateOf } from "../../tasks/line_verify/triage";
@@ -131,8 +131,13 @@ async function profile(a: Access): Promise<ContributorProfile> {
   if (a.role==="writer" && phase==="ready") {
     requireReady(a);
     const done=await completed(a);
-    for (const kind of contributorKinds) {
-      const tasks=a.writer.tasks.filter(t=>t.kind===kind);
+    const assigned = new Map<ContributorKind, Task[]>();
+    for (const task of a.writer.tasks) {
+      const tasks = assigned.get(task.kind);
+      if (tasks) tasks.push(task);
+      else assigned.set(task.kind, [task]);
+    }
+    for (const [kind, tasks] of assigned) {
       const next=tasks.find(t=>!done.has(t.id));
       queues.push({kind,total:tasks.length,done:tasks.filter(t=>done.has(t.id)).length,next:next?await nextView(a,next):null});
     }

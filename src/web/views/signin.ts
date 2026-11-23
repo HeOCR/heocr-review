@@ -73,13 +73,15 @@ export function signInView(config: ConfigResponse, done: (me: MeResponse) => voi
       h("button", { type: "submit" }, "Sign in"),
     );
   }
-  const title = invited ? (lang() === "he" ? "משימות תרומה ל־HeOCR" : "Contribute to HeOCR") : t("signin_h");
-  const intro = invited ? (lang() === "he" ? "משתתפים שהוזמנו וההורים או האפוטרופוסים שלהם נכנסים כל אחד מחשבונו." :
-    "Invited writers and their guardians each sign in with their own account.") : t("signin_p");
   const page = document.createDocumentFragment();
+  if (invited) {
+    page.append(h("section", { class: "contributor-login" },
+      h("h1", {}, t("cg_signin_h")), button, dev, msg));
+    return page;
+  }
   page.append(
-    h("h1", {}, title),
-    h("p", {}, intro),
+    h("h1", {}, t("signin_h")),
+    h("p", {}, t("signin_p")),
     button,
     ...(dev ? [dev] : []),
     msg,
