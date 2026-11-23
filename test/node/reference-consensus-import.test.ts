@@ -15,6 +15,8 @@ const page = "c".repeat(64);
 const crop = "d".repeat(64);
 const reviewer = "rv_abcdef12";
 const protocol = "36cdefdd17ec1e039757f623b1b3f80d5e4a7a4f6c62097a35cd7f105aa49081";
+const amended = "fdbd11d2cc3f2d61c6e198d65a2f83cf0c1421ef90c20172a2838ca5f85f60e1";
+const superseded = "ec3dd271e5bbdaaa9c976a4d42ca8fbb294b6d6cc37d923e9c5c40a98c028ed7";
 const key = { batch_id: batch, protocol_sha256: protocol, batch_ratification_sha256: "e".repeat(64) };
 const box = [1, 2, 9, 8];
 const candidate = "שורה אחת";
@@ -23,19 +25,31 @@ const row = { item_id: "line1", page_id: "page1", proposal_sha256: projectionPin
   disposition: "consensus_preaccepted", audit: false,
   source_verified: true, geometry_verified: true, draft_independent: true };
 
-function envelopes(ordinary: string[] = []) {
-  const freeze = encode({ ...key, schema: "heocr.open_reference_freeze.v1", structural_page_tasks: 1,
+function envelopes(ordinary: string[] = [], method = protocol, votePins = ["1".repeat(64), "2".repeat(64)]) {
+  const binding = { ...key, protocol_sha256: method };
+  const freeze = encode({ ...binding, schema: "heocr.open_reference_freeze.v1", structural_page_tasks: 1,
     rows: [{ ...row, page_sha256: page, box_px: box, crop_ref: crop + ".jpg" }] });
   const counts = { pending: 1, consensus_preaccepted: 1, disagreement: 0, structural: 0, audit: 0 };
-  const vote_files_sha256 = { a: "1".repeat(64), b: "2".repeat(64) };
-  const projection = encode({ ...key, schema: "heocr.open_reference_projection.v1", freeze_sha256: digest(freeze),
+  const vote_files_sha256 = Object.fromEntries(votePins.map((pin, i) => [`reader_${i}`, pin]));
+  const projection = encode({ ...binding, schema: "heocr.open_reference_projection.v1", freeze_sha256: digest(freeze),
     rows: [row], counts, ordinary_queue: ordinary, audit_queue: [], vote_files_sha256 });
-  const approval = encode({ ...key, schema: "heocr.open_reference_evaluator_ratification.v1",
+  const approval = encode({ ...binding, schema: "heocr.open_reference_evaluator_ratification.v1",
     status: "ratified_for_consensus_reference_prep", projection_sha256: digest(projection),
     freeze_sha256: digest(freeze), separate_page_tasks: 1, pending_ordinary_lines: ordinary.length,
     pending_blind_audit_lines: 0, counts, vote_files_sha256 });
   return { freeze, projection, approval };
 }
+
+it("binds the registered amendment to three distinct vote files", () => {
+  const openPlan = ({ projection, freeze, approval }: ReturnType<typeof envelopes>) =>
+    readReferencePlan(projection, freeze, approval, digest(approval), items);
+  const threeVotes = ["1".repeat(64), "2".repeat(64), "3".repeat(64)];
+  expect(openPlan(envelopes([], amended, threeVotes)).agreed).toBe(1);
+  expect(() => openPlan(envelopes([], amended))).toThrow(/reader count/);
+  expect(() => openPlan(envelopes([], amended, ["1".repeat(64), ...threeVotes.slice(0, 2)]))).toThrow(/reader count/);
+  expect(() => openPlan(envelopes([], "4".repeat(64), threeVotes))).toThrow(/outside ratification/);
+  expect(() => openPlan(envelopes([], superseded, threeVotes))).toThrow(/outside ratification/);
+});
 
 it("refuses tampered approvals and acceptance duplicated in the human queue", () => {
   const { freeze, projection, approval } = envelopes();
