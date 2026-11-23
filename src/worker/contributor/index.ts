@@ -1,7 +1,7 @@
 import { contributorPhotoType } from "./photo";
 import {
   CONTRIBUTOR_API, type AgeBand, type ContributorKind, type ContributorNext, type ContributorProfile,
-  type ContributorQueue, type ContributorSplit, type Language,
+  type ContributorQueue, type ContributorSplit, type Language, type PrintCapture,
 } from "../../shared/contributor";
 import { candidateOf } from "../../tasks/line_verify/triage";
 import { isPass2, normalizeLineDecision } from "../../tasks/line_verify";
@@ -13,8 +13,8 @@ import { randomId } from "../crypto";
 import { assertSameOrigin, HttpError, json, readBytes, readJson } from "../http";
 import { enforce, LIMITS } from "../ratelimit";
 import {
-  canonicalContributorOrigin, contributorManifest, contributorRoot, formFields, gone, hash, invalid, submissionBucket,
-  type Manifest, type Task, type Writer,
+  canonicalContributorOrigin, contributorManifest, contributorRoot, formFields, gone, hash, invalid, optionalPrintTask, submissionBucket,
+  type Manifest, type PrintTask, type Task, type Writer,
 } from "./config";
 
 type Enrolment = {
@@ -114,11 +114,18 @@ async function line(a: Access, task: Extract<Task,{kind:"line"}>) {
   if (!eligible) throw gone();
   return proposal;
 }
-async function nextView(a: Access, task: Task): Promise<ContributorNext> {
+const sheetSlots = (a: Access, page: string) => a.writer.tasks.filter((t): t is PrintTask => t.kind === "print" && t.page === page);
+const nextRequired = (tasks: Task[], done: Set<string>) => tasks.find(t => !optionalPrintTask(t) && !done.has(t.id));
+function printView(a: Access, task: PrintTask, done: Set<string>): PrintCapture {
+  return { id: task.id, page: task.page, kind: task.kind, mode: task.mode,
+    sheet: `${CONTRIBUTOR_API}/writers/${a.writer.id}/tasks/${task.id}/sheet`,
+    ...(task.sequence ? { captureSteps: sheetSlots(a, task.page).map(slot => ({ mode: slot.mode, saved: done.has(slot.id) })) } : {}) };
+}
+async function nextView(a: Access, task: Task, done: Set<string>): Promise<ContributorNext> {
   const base={id:task.id,page:task.page};
   const path=`${CONTRIBUTOR_API}/writers/${a.writer.id}/tasks/${task.id}`;
   switch(task.kind) {
-    case "print": return {...base,kind:task.kind,mode:task.mode,sheet:path+"/sheet"};
+    case "print": return printView(a, task, done);
     case "form": return {...base,kind:task.kind,sheet:path+"/sheet",
       fields:await formFields(a.ctx.env,task),referenceSha256:task.referenceSha256};
     case "line": return {...base,kind:task.kind,crop:path+"/crop",candidate:candidateOf(await line(a,task))};
@@ -138,8 +145,12 @@ async function profile(a: Access): Promise<ContributorProfile> {
       else assigned.set(task.kind, [task]);
     }
     for (const [kind, tasks] of assigned) {
-      const next=tasks.find(t=>!done.has(t.id));
-      queues.push({kind,total:tasks.length,done:tasks.filter(t=>done.has(t.id)).length,next:next?await nextView(a,next):null});
+      const required = tasks.filter(t => !optionalPrintTask(t));
+      const next = nextRequired(required, done);
+      const optionalPrint = tasks.filter(optionalPrintTask).filter(t => !done.has(t.id) && !nextRequired(sheetSlots(a, t.page), done))
+        .map(t => printView(a, t, done));
+      queues.push({kind,total:required.length,done:required.filter(t=>done.has(t.id)).length,next:next?await nextView(a,next,done):null,
+        ...(optionalPrint.length ? { optionalPrint } : {})});
     }
   }
   const policy=current(a);
@@ -195,7 +206,11 @@ async function taskFor(a: Access, id: string) {
   const task=a.writer.tasks.find(t=>t.id===id);
   if (!task) throw gone();
   const done=await completed(a);
-  if (!done.has(id) && a.writer.tasks.find(t=>t.kind===task.kind&&!done.has(t.id))?.id!==id) throw gone();
+  if (!done.has(id)) {
+    if (optionalPrintTask(task)) {
+      if (nextRequired(sheetSlots(a, task.page), done)) throw gone();
+    } else if (nextRequired(a.writer.tasks.filter(t => t.kind === task.kind), done)?.id !== id) throw gone();
+  }
   return {task,done:done.has(id)};
 }
 async function asset(a: Access, task: Task, action: string) {
@@ -258,7 +273,8 @@ async function submit(a: Access, task: Task) {
     if (!mime) throw new HttpError(400,"contributor_photo_format");
     const digest=await hash(bytes);
     const key=rootFor(a.writer.id)+randomId("",16);
-    await bucket.put(key,bytes,{httpMetadata:{contentType:mime,cacheControl:"private, no-store"}});
+    await bucket.put(key,bytes,{httpMetadata:{contentType:mime,cacheControl:"private, no-store"},
+      ...(task.kind === "print" ? { customMetadata: { captureVariant: task.mode } } : {})});
     try {
       if (!await save(a,task,digest,key,null)) await bucket.delete(key);
     } catch (error) {

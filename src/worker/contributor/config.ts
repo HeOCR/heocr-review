@@ -1,4 +1,4 @@
-import { ageBands, captureModes, type AgeBand, type CaptureMode, type ConsentCopy, type ContributorSplit, type FormField, type Language } from "../../shared/contributor";
+import { ageBands, captureModes, requiredPrintModes, type AgeBand, type CaptureMode, type ConsentCopy, type ContributorSplit, type FormField, type Language } from "../../shared/contributor";
 import { hex } from "../crypto";
 import type { Env } from "../env";
 import { HttpError } from "../http";
@@ -12,11 +12,14 @@ type Copy = Record<Language, ConsentCopy>;
 
 type CommonTask = { id: string; page: string };
 export type Task = CommonTask & (
-  { kind: "print"; mode: CaptureMode; sheetSha256: string } |
+  { kind: "print"; mode: CaptureMode; sheetSha256: string; sequence?: true } |
   { kind: "form"; pack: "TRN-FM01"; variant: "worksheet"; sheetSha256: string; referenceSha256: string } |
   { kind: "line"; proposalId: number; proposalSha256: string; cropSha256: string } |
   { kind: "handwriting"; sentences: string[]; promptSha256: string; rights: string }
 );
+export type PrintTask = Extract<Task, { kind: "print" }>;
+export const optionalPrintTask = (task: Task): task is PrintTask & { sequence: true; mode: "shadow" } =>
+  task.kind === "print" && task.sequence === true && task.mode === "shadow";
 export type Writer = {
   id: string; writerAccount: string; guardianAccount: string;
   ageBand: AgeBand; split: ContributorSplit; tasks: Task[];
@@ -53,14 +56,30 @@ function validTask(task: Task, split: ContributorSplit) {
   if (task.kind === "handwriting") {
     return Array.isArray(task.sentences) && task.sentences.length >= 1 && task.sentences.length <= 10 &&
       task.sentences.every(s => typeof s === "string" && s.trim().length > 0 && s.length <= 220 && !/[\p{Cc}\p{Cf}]/u.test(s)) &&
-      digest.test(task.promptSha256) && typeof task.rights === "string" && task.rights.startsWith("PD: ") && task.rights.length <= 240;
+      digest.test(task.promptSha256) && typeof task.rights === "string" && /^(PD|CC0-1\.0): \S/.test(task.rights) && task.rights.length <= 240;
   }
   if (split !== "train") return false;
-  if (task.kind === "print") return captureModes.includes(task.mode) && digest.test(task.sheetSha256);
+  if (task.kind === "print") return captureModes.includes(task.mode) && digest.test(task.sheetSha256) &&
+    (task.sequence === undefined || task.sequence === true);
   if (task.kind === "form") return task.pack === "TRN-FM01" && task.variant === "worksheet" &&
     digest.test(task.sheetSha256) && digest.test(task.referenceSha256);
   return task.kind === "line" && Number.isSafeInteger(task.proposalId) && task.proposalId > 0 &&
     digest.test(task.proposalSha256) && digest.test(task.cropSha256);
+}
+
+function validPrintSequences(tasks: Task[]) {
+  const print = tasks.filter(task => task.kind === "print");
+  const pages = new Set(print.filter(task => task.sequence).map(task => task.page));
+  for (const page of pages) {
+    const slots = print.filter(task => task.page === page);
+    const first = slots[0]!;
+    const offset = print.indexOf(first);
+    const n = requiredPrintModes.length;
+    if (slots.length !== n && slots.length !== n + 1) return false;
+    if (!slots.every((task, index) => task.sequence && task === print[offset + index] &&
+      task.sheetSha256 === first.sheetSha256 && task.mode === (index === n ? "shadow" : requiredPrintModes[index]))) return false;
+  }
+  return true;
 }
 export async function parseContributorManifest(data: unknown): Promise<Manifest> {
   const m = data as Manifest | null;
@@ -79,7 +98,8 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
       !account.test(w.guardianAccount) || w.guardianAccount === w.writerAccount ||
       !ageBands.includes(w.ageBand) || !["train", "dev", "eval_open"].includes(w.split) ||
       !Array.isArray(w.tasks) || !w.tasks.length || w.tasks.length > 100 ||
-      !w.tasks.every(t => validTask(t, w.split)) || new Set(w.tasks.map(t => t.id)).size !== w.tasks.length) throw gone();
+      !w.tasks.every(t => validTask(t, w.split)) || new Set(w.tasks.map(t => t.id)).size !== w.tasks.length ||
+      !validPrintSequences(w.tasks)) throw gone();
     writers.add(w.id);
     writerAccounts.add(w.writerAccount);
     guardians.add(w.guardianAccount);

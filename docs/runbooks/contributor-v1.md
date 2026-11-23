@@ -49,6 +49,13 @@ environment. The manifest uses:
 - `print`: `{kind:"print", mode, sheetSha256}`. Assign TRAIN PDF pages and
   use `flat`, `angle`, `shadow`, `crumpled`, `scribbled`, or `folded`
   per capture slot.
+  For new print packs, set `sequence: true` on each slot. For one page and
+  PDF digest, list `flat`, `angle`, `folded`, `crumpled`, and `scribbled`
+  consecutively in that order. Append `shadow` if offering the optional
+  low-light photo. The shadow slot opens after the five required uploads.
+  The writer can proceed to the next sheet and return to the optional photo
+  later. Optional photos contribute zero to the required queue total. Use a
+  distinct task ID per page/variant and keep its assignment immutable.
 - `form`: `{kind:"form", pack:"TRN-FM01", variant:"worksheet", sheetSha256,
   referenceSha256}`. Resolve `page` against the approved TRAIN worksheet roster.
   Pin that exact leaf's PDF and its fictional field-value reference. The card
@@ -61,8 +68,8 @@ environment. The manifest uses:
   approved JPEG crop. The contributor API uses the existing exact/edit
   normalizer and stores decisions separately from public review exports.
 - `handwriting`: `{kind:"handwriting", sentences, promptSha256, rights}`.
-  Use one to ten assigned PD lines, a SHA over their UTF-8 text joined by LF,
-  and a rights locator beginning `PD: `. The print view includes the page ID.
+  Use one to ten assigned PD or CC0 lines, a SHA over their UTF-8 text joined
+  by LF, and a rights locator beginning `PD: ` or `CC0-1.0: `. The print view includes the page ID.
   A prompt digest cannot cross writer splits.
 
 Put exact PDFs in `contributor-v1/sheets/<sha256>.pdf` and exact line crops
@@ -103,6 +110,9 @@ handwriting submission also records the reference SHA shown to the writer. The
 upload requires that SHA so an old page cannot submit against revised labels. It discards
 client filenames and never exposes originals through download routes. This
 intake accepts JPEG and PNG and rejects common identifying metadata fields.
+Each print original has a private R2 `captureVariant` attribute set from its
+server-validated slot. The ordered flow uses the existing per-slot submission
+row. Passing on the optional photo creates no row or R2 object.
 Ask participants to turn off camera location and choose JPEG on phones that
 default to HEIC. Check photos for unwanted content and strip personal metadata
 from derivatives before any use outside quarantine. Gate all release or downstream transfers

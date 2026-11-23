@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
-import { captureModes, CONTRIBUTOR_API, type ContributorProfile } from "../../src/shared/contributor";
-import { parseContributorManifest, contributorRoot, hash, type Manifest } from "../../src/worker/contributor/config";
+import { captureModes, CONTRIBUTOR_API, requiredPrintModes, type ContributorProfile } from "../../src/shared/contributor";
+import { parseContributorManifest, contributorRoot, hash, type Manifest, type PrintTask } from "../../src/worker/contributor/config";
 import type { Env } from "../../src/worker/env";
 import { handle } from "../../src/worker/index";
 import { Client } from "./helpers";
@@ -70,7 +70,7 @@ async function fixture(label: string, customize?: (manifest: Manifest) => void) 
   await bucket.put(contributorRoot+"config/"+pin+".json",bytes);
   const settings:Env={...env,CONTRIBUTOR_APP_ENABLED:"1",CONTRIBUTOR_CONFIG_SHA256:pin,
     ADMIN_REVIEWER_IDS:strangerAccount,CONTRIBUTOR_DEV_MEDIA:env.HANDWRITING_MEDIA};
-  const path=CONTRIBUTOR_API+"/writers/"+writerKey;
+  const path=CONTRIBUTOR_API+"/writers/"+manifest.writers[0]!.id;
   const req=(actor:Client|null,path:string,opts:{method?:string;body?:unknown;image?:Uint8Array<ArrayBuffer>;ok?:boolean;reference?:string;env?:Partial<Env>;host?:string;origin?:string}={})=>
     handle(new Request((opts.host??origin)+path,{method:opts.method??(opts.body||opts.image?"POST":"GET"),
       headers:{origin:opts.origin??opts.host??origin,cookie:actor?.cookie??"",
@@ -169,6 +169,70 @@ it("uses an ordered TRAIN queue, quarantines unchanged bytes and supports idempo
   expect((await f.req(f.stranger,purge,{body:{}})).status).toBe(200);
   expect((await f.bucket.list({prefix:contributorRoot+"quarantine/"+writerKey+"/"})).objects).toHaveLength(0);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_submissions").first("n")).toBe(0);
+});
+
+function printSequence(page: string, sheetSha256: string, withShadow = true): PrintTask[] {
+  const modes = withShadow ? [...requiredPrintModes, "shadow" as const] : requiredPrintModes;
+  return modes.map(mode => ({ kind: "print", page, id: `${page}-${mode}`, mode, sequence: true, sheetSha256 }));
+}
+
+it("enforces each sheet's required photo order and saves the server-assigned variant on originals", async () => {
+  const sequenceWriter = "cw-" + "3".repeat(32);
+  const f = await fixture("photo-sequence", manifest => {
+    const first = manifest.writers[0]!;
+    first.id = sequenceWriter;
+    const pin = (first.tasks[0] as PrintTask).sheetSha256;
+    first.tasks = [...printSequence("P1", pin), ...printSequence("P2", pin, false)];
+  });
+  expect((await f.consent("guardian")).status).toBe(200);
+  const ready = await (await f.consent("assent")).json<ContributorProfile>();
+  const queue = ready.queues[0]!;
+  expect(queue).toMatchObject({ total: 10, done: 0, next: { id: "P1-flat", captureSteps: [...requiredPrintModes,"shadow"].map(mode=>({mode,saved:false})) } });
+  expect(queue.optionalPrint).toBeUndefined();
+  const submit = (id: string, size: number) => {
+    const image = jpg.slice();
+    image[10] = size;
+    return f.req(f.writer, `${f.path}/tasks/${id}/submit`, { image, ok: true });
+  };
+  expect((await submit("P1-folded", 3)).status).toBe(404);
+  expect((await submit("P1-shadow", 6)).status).toBe(404);
+  expect((await submit("P2-flat", 7)).status).toBe(404);
+  expect((await f.req(f.writer, `${f.path}/tasks/P1-angle/sheet`)).status).toBe(404);
+  for (const [index, mode] of requiredPrintModes.entries()) expect((await submit(`P1-${mode}`, index + 1)).status).toBe(200);
+  const after = (await (await f.req(f.writer, f.path)).json<ContributorProfile>()).queues[0]!;
+  expect(after).toMatchObject({ done: 5, total: 10, next: { id: "P2-flat" }, optionalPrint: [{ id: "P1-shadow" }] });
+  expect((await submit("P2-flat", 7)).status).toBe(200);
+  expect((await submit("P1-shadow", 6)).status).toBe(200);
+  const optionalDone = (await (await f.req(f.writer, f.path)).json<ContributorProfile>()).queues[0]!;
+  expect(optionalDone).toMatchObject({ done: 6, total: 10, next: { id: "P2-angle" } });
+  expect(optionalDone.optionalPrint).toBeUndefined();
+
+  const rows = await env.DB.prepare("SELECT task_id,storage_key FROM contributor_submissions WHERE writer_id=?").bind(sequenceWriter)
+    .all<{task_id:string;storage_key:string}>();
+  expect(rows.results).toHaveLength(7);
+  for (const row of rows.results) {
+    const object = await f.bucket.get(row.storage_key);
+    expect(object?.customMetadata).toEqual({ captureVariant: row.task_id.split("-").at(-1) });
+  }
+});
+
+it("rejects incomplete, reordered or mixed-digest capture sequences and accepts original CC0 prompts", async () => {
+  const {manifest} = await fixture("capture-plan");
+  const writer = manifest.writers[0]!;
+  const pin = (writer.tasks[0] as PrintTask).sheetSha256;
+  writer.tasks = printSequence("P1", pin).slice(1);
+  await expect(parseContributorManifest(manifest)).rejects.toThrow();
+  const slots = printSequence("P1", pin);
+  writer.tasks = [slots[1]!, slots[0]!, ...slots.slice(2)];
+  await expect(parseContributorManifest(manifest)).rejects.toThrow();
+  writer.tasks = printSequence("P1", pin);
+  (writer.tasks[4] as PrintTask).sheetSha256 = "b".repeat(64);
+  await expect(parseContributorManifest(manifest)).rejects.toThrow();
+  writer.tasks = printSequence("P1", pin);
+  const hand = manifest.writers[1]!.tasks[0]!;
+  if (hand.kind !== "handwriting") throw new Error("missing fixture prompt");
+  hand.rights = "CC0-1.0: original invented fixture";
+  await expect(parseContributorManifest(manifest)).resolves.toBe(manifest);
 });
 
 it("refuses inconsistent splits, same-account guardians, duplicate conditions, ages below ten and other licences",async()=>{

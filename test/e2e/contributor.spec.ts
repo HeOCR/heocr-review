@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { CONTRIBUTOR_API, type ContributorProfile } from "../../src/shared/contributor";
+import { CONTRIBUTOR_API, requiredPrintModes, type ContributorProfile, type ContributorQueue, type PrintCapture } from "../../src/shared/contributor";
 
 const writer = "cw-" + "a".repeat(32);
 const writerPath = `${CONTRIBUTOR_API}/writers/${writer}`;
@@ -9,11 +9,18 @@ test("contributor invitation shows only sign-in then the Hebrew assigned walkthr
   await page.setViewportSize({ width: 412, height: 915 });
   await page.addInitScript(() => localStorage.setItem("heocr-review.prefs.v1", JSON.stringify({ lang: "en" })));
   const copy = { text: "Invented fixture wording", sha256: "1".repeat(64) };
+  const modes = [...requiredPrintModes, "shadow" as const];
+  let saved = 0;
+  const capture = (mode: PrintCapture["mode"]): PrintCapture => ({ id: mode, kind: "print", page: "TRN-PRINT-01",
+    mode, sheet: `${writerPath}/tasks/${mode}/sheet`, captureSteps: modes.map((mode, index) => ({ mode, saved: index < saved })) });
+  const printQueue = (): ContributorQueue => ({ kind: "print", total: 5, done: Math.min(saved, 5),
+    next: saved < 5 ? capture(requiredPrintModes[saved]!) : null,
+    ...(saved === 5 ? { optionalPrint: [capture("shadow")] } : {}) });
   const profile: ContributorProfile = {
     role: "writer", writer, ageBand: "10_12", state: "ready", receipt: null,
     licence: "cc0_open", version: "fixture", copy: { he: copy, en: copy },
     queues: [
-      { kind: "print", total: 2, done: 0, next: { id: "angle", kind: "print", page: "TRN-PRINT-01", mode: "angle", sheet: `${writerPath}/tasks/angle/sheet` } },
+      printQueue(),
       { kind: "form", total: 1, done: 0, next: { id: "form", kind: "form", page: "F01", sheet: `${writerPath}/tasks/form/sheet`,
         fields: [{ id: "code", label: "קוד לדוגמה", value: "F-123" }], referenceSha256: "2".repeat(64) } },
       { kind: "handwriting", total: 1, done: 0, next: { id: "copy", kind: "handwriting", page: "H01",
@@ -30,11 +37,11 @@ test("contributor invitation shows only sign-in then the Hebrew assigned walkthr
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/enrolments")) return route.fulfill({ json: { enrolments: [{ writer, role: "writer", ageBand: "10_12" }] } });
     if (path === writerPath) return route.fulfill({ json: profile });
-    if (path === `${writerPath}/tasks/angle/submit`) {
+    if (path === `${writerPath}/tasks/${modes[saved]}/submit`) {
       expect(route.request().postDataBuffer()).toEqual(original);
       expect(route.request().headers()["x-contributor-privacy"]).toBe("confirmed");
-      profile.queues[0] = { kind: "print", total: 2, done: 1,
-        next: { id: "crumpled", kind: "print", page: "TRN-PRINT-01", mode: "crumpled", sheet: `${writerPath}/tasks/crumpled/sheet` } };
+      saved++;
+      profile.queues[0] = printQueue();
       return route.fulfill({ json: profile });
     }
     return route.fulfill({ status: 404, json: { error: "not_found" } });
@@ -55,22 +62,27 @@ test("contributor invitation shows only sign-in then the Hebrew assigned walkthr
   await expect(page.locator("#nav a")).toHaveCount(2);
   await expect(page.locator("a[href='#tasks'], a[href='#conventions']")).toHaveCount(0);
   await queues.filter({ hasText: "צילום דפים מודפסים" }).getByRole("button").click();
-  await expect(page.locator(".contributor-guide > li")).toHaveCount(4);
-  await expect(page.locator(".guide-art-angle")).toBeVisible();
-  await expect(page.getByRole("link", { name: "הורדה והדפסה" })).toHaveAttribute("href", `${writerPath}/tasks/angle/sheet`);
-  await expect(page.getByText("הטו מעט את הטלפון", { exact: false })).toBeVisible();
+  await expect(page.locator(".contributor-guide > li")).toHaveCount(7);
+  await expect(page.getByRole("link", { name: "הורדה והדפסה" })).toHaveAttribute("href", `${writerPath}/tasks/flat/sheet`);
+  await expect(page.getByText("בכ־30 מעלות", { exact: false })).toBeVisible();
   await expect(page.getByText("כבו שמירת מיקום", { exact: false })).toBeVisible();
-  const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "בחירת צילום" }).click();
-  await (await chooser).setFiles({ name: "fixture.png", mimeType: "image/png", buffer: original });
-  await expect(page.getByRole("img", { name: "תצוגה מקדימה של הצילום שנבחר" })).toBeVisible();
-  await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "העלאת צילום" }).click();
-  await expect(page.locator(".guide-art-crumpled")).toBeVisible();
+  const current = page.locator("[aria-current='step']");
+  for (const mode of requiredPrintModes) {
+    await expect(current.locator(`.guide-art-${mode}`)).toBeVisible();
+    await expect(page.getByRole("button", { name: "בחירת צילום" })).toHaveCount(1);
+    const chooser = page.waitForEvent("filechooser");
+    await current.getByRole("button", { name: "בחירת צילום" }).click();
+    await (await chooser).setFiles({ name: "fixture.png", mimeType: "image/png", buffer: original });
+    await expect(current.getByRole("img", { name: "תצוגה מקדימה של הצילום שנבחר" })).toBeVisible();
+    await current.getByRole("checkbox").check();
+    await current.getByRole("button", { name: "העלאת צילום" }).click();
+  }
+  await expect(current.locator(".guide-art-shadow")).toBeVisible();
   await expect(page.getByRole("status")).toHaveText("הצילום נשמר.");
-
-  await page.getByRole("button", { name: "משימות תרומה" }).click();
-  await expect(queues.first().locator("progress")).toHaveAttribute("value", "1");
+  await page.getByRole("button", { name: "ממשיכים בלי הצילום הזה" }).click();
+  await expect(queues.first().locator("progress")).toHaveAttribute("value", "5");
+  await expect(queues.first().getByRole("button", { name: /צילום רשות/ })).toBeVisible();
+  expect(saved).toBe(5);
   await queues.filter({ hasText: "מילוי טפסים לדוגמה" }).getByRole("button").click();
   await expect(page.locator(".contributor-guide > li")).toHaveCount(5);
   await expect(page.locator(".contributor-persona")).toContainText("F-123");
