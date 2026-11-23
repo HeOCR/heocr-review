@@ -2,7 +2,7 @@ import { CONTRIBUTOR_API, type ContributorKind, type ContributorNext, type Contr
 import { ApiFailure, get, post } from "../api";
 import { bdi, h } from "../dom";
 import { lang, t } from "../i18n";
-import { captureGuide } from "./contributor-guide";
+import { captureGuide, printSequenceGuide } from "./contributor-guide";
 
 type Pair = readonly [he: string, en: string];
 const text = (he: string, en: string) => lang() === "he" ? he : en;
@@ -31,6 +31,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
   const notices=h("p",{class:"contributor-notice",role:"status"});
   let p: ContributorProfile | null=null;
   let selected: ContributorKind | null=null;
+  let printPage: string | null = null;
   let busy=false;
   const url=()=>`${CONTRIBUTOR_API}/writers/${p!.writer}`;
   const submitUrl=(task:ContributorNext)=>url()+"/tasks/"+task.id+"/submit";
@@ -58,9 +59,10 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
     control.disabled=true;
     notice(t("loading"));
     try {
+      const previousPage=printPage;
       p=await run();
       render();
-      root.querySelector<HTMLElement>("[data-contributor-heading]")?.focus();
+      focusTask(previousPage===printPage);
       notice(confirmation);
     } catch(err) { error(err); }
     finally { busy=false; control.disabled=false; }
@@ -151,7 +153,12 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       h("label",{class:"check"},privacy," ",text("בדקתי שאין בצילום פרטים אישיים אמיתיים.","I checked that the photo contains no real personal information.")),
       button);
   }
-  function taskView(task:ContributorNext) {
+  function focusTask(step = false) {
+    const heading = (step ? root.querySelector<HTMLElement>("[aria-current='step'] h3") : null) ?? root.querySelector<HTMLElement>("[data-contributor-heading]");
+    heading?.setAttribute("tabindex", "-1");
+    heading?.focus();
+  }
+  function taskView(task:ContributorNext, skipOptional?: () => void) {
     const title=h("h2",{"data-contributor-heading":"",tabindex:"-1"},tr(names[task.kind])," · ",bdi(task.page,"ltr"));
     if (task.kind==="line") {
       const crop=h("img",{class:"contributor-line",src:task.crop,alt:text("צילום השורה","Scan of the line"),decoding:"async"});
@@ -181,6 +188,8 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       ],upload(task)));
     }
     const download=h("a",{class:"act",href:task.sheet,download:""},text("הורדה והדפסה","Download and print"));
+    if (task.kind === "print" && task.captureSteps) return h("section", { class: "card contributor-task" }, title,
+      printSequenceGuide(task, download, upload(task), skipOptional ? btn(t("cg_skip_shadow"), skipOptional) : undefined));
     return h("section",{class:"card contributor-task"},title,captureGuide(task.kind==="print"?task.mode:"flat",[
       {title:"cg_print_h",instruction:"cg_print_p",illustration:"print",content:[download]},
       ...(task.kind==="form" ? [{title:"cg_form_h",instruction:"cg_form_p",illustration:"form",content:[fictionalPersona(task.fields)]} as const] : []),
@@ -194,11 +203,13 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       root.replaceChildren(heading,consent(p),notices,...[withdrawal(p)].filter(n=>n!==null));
       return;
     }
-    const active=queues.find(q=>q.kind===selected)?.next;
-    const focusHeading=()=>root.querySelector<HTMLElement>(".contributor-task h2, h1")?.focus();
+    const queue = queues.find(q => q.kind === selected);
+    const optional = queue?.optionalPrint?.find(task => task.page === printPage);
+    const active = optional ?? queue?.next;
     if (active) {
-      const back=btn(contributorTitle(),()=>{ selected=null;render();focusHeading(); });
-      const task=taskView(active);
+      if (active.kind === "print") printPage = active.page;
+      const back=btn(contributorTitle(),()=>{ selected=null;printPage=null;render();focusTask(); });
+      const task=taskView(active, optional ? () => { printPage=null; render(); focusTask(); } : undefined);
       root.replaceChildren(back,task,notices,...[withdrawal(p)].filter(n=>n!==null));
       return;
     }
@@ -208,8 +219,9 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       return h("section",{class:"contributor-queue"},
         h("h2",{},name),h("p",{class:"contributor-count"},bdi(count,"ltr")),
         h("progress",{value:q.done,max:q.total,"aria-label":name}),
-        q.next?btn(text("המשך","Continue"),()=>{selected=q.kind;render();focusHeading();}):
-          h("p",{class:"small muted"},text("הושלם","Complete")));
+        q.next?btn(text("המשך","Continue"),()=>{selected=q.kind;printPage=null;render();focusTask();}):
+          h("p",{class:"small muted"},text("הושלם","Complete")),
+        ...(q.optionalPrint??[]).map(task=>btn(t("cg_open_shadow", {page:task.page}),()=>{selected="print";printPage=task.page;render();focusTask(true);})));
     });
     root.replaceChildren(heading,h("div",{class:"contributor-grid"},...cards),notices,...[withdrawal(p)].filter(n=>n!==null));
   }

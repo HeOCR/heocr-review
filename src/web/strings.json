@@ -1269,24 +1269,24 @@
   "Place the page on a flat, well-lit surface. Hold the phone straight above it."
  ],
  "cg_angle": [
-  "השאירו את הדף על השולחן והטו מעט את הטלפון. בדקו שגם הצד הרחוק חד.",
-  "Keep the page on the table and tilt the phone slightly. Check that the far edge is still sharp."
+  "השאירו את הדף על השולחן והטו את הטלפון בכ־30 מעלות. ודאו שכל הפינות בתמונה ושהצד הרחוק חד.",
+  "Keep the sheet on the table and tilt the phone about 30°. Include all four corners and check that the far edge is sharp."
  ],
  "cg_shadow": [
-  "צרו צל רך על חלק מהדף, למשל עם היד מחוץ לתמונה. השאירו את כל הטקסט קריא.",
-  "Let a soft shadow fall across part of the page, for example by holding a hand outside the frame. Keep all the text readable."
+  "צלמו באור חלש או עם צל רך על חלק מהדף. השאירו את כל הטקסט קריא.",
+  "Use dim light or let a soft shadow fall across part of the sheet. Keep all the text readable."
  ],
  "cg_crumpled": [
-  "קמטו בעדינות את הדף, פתחו אותו וצלמו את הדף כולו כשהקמטים עדיין נראים.",
-  "Gently crumple the page, open it up and photograph the whole page with the wrinkles visible."
+  "קמטו את הדף בעדינות ואז פרשו ושטחו אותו ביד על השולחן. צלמו את הדף כולו כשהקמטים נראים.",
+  "Gently crumple the sheet, then open it up and flatten it by hand on the table. Photograph the entire sheet with the wrinkles visible."
  ],
  "cg_scribbled": [
-  "הוסיפו כמה שרבוטים קטנים שלא מסתירים מילים. השתמשו בקווים בלבד, בלי מילים או חתימה.",
-  "Add a few small scribbles where they will leave the words readable. Use lines only, with no words or signature."
+  "הוסיפו בעט כמה קווים או עיגולים קטנים בשוליים או ברווחים. השאירו את רוב הטקסט קריא והשתמשו בקווים בלבד, בלי מילים או חתימה.",
+  "Use a pen to add a few small strokes or circles in a margin or gap. Keep most of the text readable, and leave out words and signatures."
  ],
  "cg_folded": [
-  "קפלו את הדף פעם אחת, פתחו אותו וצלמו כך שרואים את הקפל.",
-  "Fold the page once, unfold it and take a photo with the crease visible."
+  "קפלו את הדף לחצי פעם אחת. פתחו אותו מחדש וצלמו כשקו הקיפול נראה.",
+  "Fold the sheet in half once. Reopen it and take a photo with the crease visible."
  ],
  "cg_check_h": [
   "בודקים את הצילום",
@@ -1307,5 +1307,45 @@
  "cg_preview": [
   "תצוגה מקדימה של הצילום שנבחר",
   "Preview of the selected photo"
+ ],
+ "cg_sequence_intro": [
+  "צלמו את אותו דף לפי הסדר שלמטה. חמשת הצילומים הראשונים נדרשים. שמרו כל צילום לפני שתשנו את הדף לצילום הבא.",
+  "Photograph the same sheet in the order below. The first five photos are required. Save each photo before changing the sheet for the next one."
+ ],
+ "cg_variant_flat": [
+  "דף שטוח",
+  "Flat sheet"
+ ],
+ "cg_variant_angle": [
+  "צילום בהטיה",
+  "Tilted photo"
+ ],
+ "cg_variant_folded": [
+  "דף מקופל שנפתח",
+  "Folded and reopened"
+ ],
+ "cg_variant_crumpled": [
+  "דף מקומט ופרוש",
+  "Crumpled and flattened"
+ ],
+ "cg_variant_scribbled": [
+  "דף עם שרבוטים",
+  "Pen strokes or circles"
+ ],
+ "cg_variant_shadow": [
+  "אור חלש או צל · רשות",
+  "Dim light or shadow · Optional"
+ ],
+ "cg_variant_saved": [
+  "הצילום נשמר",
+  "Photo saved"
+ ],
+ "cg_skip_shadow": [
+  "ממשיכים בלי הצילום הזה",
+  "Continue without this photo"
+ ],
+ "cg_open_shadow": [
+  "צילום רשות באור חלש או בצל · {page}",
+  "Optional dim-light or shadow photo · {page}"
  ]
 }
