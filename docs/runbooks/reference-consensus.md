@@ -26,8 +26,10 @@ The default is local and read-only. Production readback also requires
 activation, with the fresh private D1 export path and SHA-256 supplied as
 `--backup` and `--backup-sha256` on production. The importer checks the
 D1 budget, stages a replayable immutable set of rows, reads it back, then
-activates only if the complete current roster still matches. It reports
-current human decisions, skips, ordinary and typing queues and page tasks.
+activates only if the exact projected lines still match and every other
+eligible line has a current, digest-matching decision by the allowlisted reviewer.
+It reports human decisions inside and outside the projection, skips,
+ordinary and typing queues and page tasks.
 Re-run without `--apply` for readback. The signed projection remains the
 independent record of automatic agreements and audit membership.
 

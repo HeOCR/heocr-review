@@ -112,13 +112,17 @@ const lineScope = `p.active=1 AND ${ALLOWED_REFERENCE_PROPOSAL}
   AND json_extract(p.payload_json,'$.gold') IS NULL
   AND json_extract(p.media_json,'$.crop.ref.source')='r2' AND json_extract(p.media_json,'$.page.ref.source')='r2'`;
 
+function currentAnswer(reviewer: string) {
+  return `EXISTS(SELECT 1 FROM decisions d WHERE d.proposal_id=p.id AND d.reviewer_id=${lit(reviewer)}
+    AND d.superseded_at IS NULL AND d.proposal_sha256=p.content_sha256)`;
+}
+
 export function liveReferenceSql(plan: ReferencePlan, reviewer: string) {
   const who = lit(reviewer);
   return `SELECT p.id,p.item_id,i.external_id AS item_external,p.external_id,p.content_sha256 AS sha,
     json_extract(p.payload_json,'$.candidate_text') AS candidate,json_extract(p.payload_json,'$.box') AS box,
     json_extract(p.media_json,'$.crop.ref.key') AS crop,json_extract(p.media_json,'$.page.ref.key') AS page,
-    EXISTS(SELECT 1 FROM decisions d WHERE d.proposal_id=p.id AND d.reviewer_id=${who}
-      AND d.superseded_at IS NULL AND d.proposal_sha256=p.content_sha256) AS human,
+    ${currentAnswer(reviewer)} AS human,
     EXISTS(SELECT 1 FROM skips s WHERE s.proposal_id=p.id AND s.reviewer_id=${who}) AS skipped,
     EXISTS(SELECT 1 FROM page_checks pc WHERE pc.item_id=i.id AND pc.reviewer_id=${who}
       AND pc.superseded_at IS NULL AND pc.answer IN ('complete','lines_added')) AS page_complete
@@ -129,8 +133,8 @@ export function liveReferenceSql(plan: ReferencePlan, reviewer: string) {
 
 export function matchReferenceRows(plan: ReferencePlan, live: LiveReferenceLine[]) {
   const byKey = new Map(live.map(row => [row.external_id, row]));
-  check(live.length === plan.rows.length && byKey.size === live.length, "live roster differs");
-  return plan.rows.map(expected => {
+  check(byKey.size === live.length, "live roster differs");
+  const matched = plan.rows.map(expected => {
     const row = byKey.get(expected.item_id);
     check(row && row.item_external === expected.page_id && row.sha === expected.proposal_sha256 &&
       typeof row.candidate === "string" && digest(row.candidate) === expected.draft_sha256 &&
@@ -138,8 +142,11 @@ export function matchReferenceRows(plan: ReferencePlan, live: LiveReferenceLine[
       row.box === JSON.stringify(expected.box_px) &&
       digest(JSON.stringify({ page_sha256: expected.page_sha256, box: expected.box_px })) === expected.geometry_sha256,
     "current draft, page, crop or box changed");
+    byKey.delete(expected.item_id);
     return { ...expected, db: row };
   });
+  check([...byKey.values()].every(row => row.human === 1), "live roster contains unanswered lines outside the projection");
+  return matched;
 }
 
 export function referenceStageSql(plan: ReferencePlan, rows: ReturnType<typeof matchReferenceRows>) {
@@ -154,7 +161,7 @@ export function referenceStageSql(plan: ReferencePlan, rows: ReturnType<typeof m
   return sql.join("\n") + "\n";
 }
 
-export function referenceActivateSql(plan: ReferencePlan) {
+export function referenceActivateSql(plan: ReferencePlan, reviewer: string) {
   const joined = `FROM reference_consensus_lines l JOIN proposals p ON p.id=l.proposal_id AND p.item_id=l.item_id AND p.batch_id=rr.batch_id
     JOIN batches b ON b.id=rr.batch_id WHERE l.projection_sha256=rr.projection_sha256
       AND ${REVIEW_SCOPE} AND ${lineScope} AND json_extract(b.source_json,'$.items_sha256')=rr.items_sha256
@@ -165,6 +172,11 @@ export function referenceActivateSql(plan: ReferencePlan) {
       AND rr.ratification_sha256=${lit(plan.approvalPin)} AND rr.items_sha256=${lit(plan.itemsPin)}
       AND rr.rows_expected=${plan.rows.length} AND rr.active=0
       AND rr.rows_expected=(SELECT COUNT(*) ${joined})
-      AND rr.rows_expected=(SELECT COUNT(*) FROM proposals p JOIN batches b ON b.id=p.batch_id
-        WHERE b.id=rr.batch_id AND ${REVIEW_SCOPE} AND ${lineScope})`;
+      AND NOT EXISTS (
+        SELECT 1 FROM proposals p JOIN batches b ON b.id=p.batch_id
+        WHERE b.id=rr.batch_id AND ${REVIEW_SCOPE} AND ${lineScope}
+          AND NOT ${currentAnswer(reviewer)}
+          AND NOT EXISTS (SELECT 1 FROM reference_consensus_lines l
+            WHERE l.projection_sha256=rr.projection_sha256 AND l.proposal_id=p.id)
+      )`;
 }
