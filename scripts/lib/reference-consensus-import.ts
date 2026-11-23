@@ -5,7 +5,10 @@ import { lit } from "./sql";
 const sha = /^[a-f0-9]{64}$/;
 const pin = (x: string) => sha.test(x);
 const key = /^[a-zA-Z0-9_.:#-]{1,200}$/;
-const policy = "36cdefdd17ec1e039757f623b1b3f80d5e4a7a4f6c62097a35cd7f105aa49081";
+const policyReaders = new Map([
+  ["36cdefdd17ec1e039757f623b1b3f80d5e4a7a4f6c62097a35cd7f105aa49081", 2],
+  ["ec3dd271e5bbdaaa9c976a4d42ca8fbb294b6d6cc37d923e9c5c40a98c028ed7", 3],
+]);
 const digest = (x: Buffer | string) => createHash("sha256").update(x).digest("hex");
 
 interface ProjectionLine {
@@ -39,19 +42,24 @@ function recordEqual<T>(a: Record<string, T>, b: Record<string, T>) {
 export function readReferencePlan(projection: Buffer, freeze: Buffer, ratification: Buffer, approvalPin: string, itemsPin: string) {
   check(pin(approvalPin) && pin(itemsPin) && digest(ratification) === approvalPin, "invalid approval or imported items pin");
   const approved = JSON.parse(ratification.toString()) as Ratification;
+  const readerCount = policyReaders.get(approved.protocol_sha256);
   check(approved.schema === "heocr.open_reference_evaluator_ratification.v1" &&
-    approved.status === "ratified_for_consensus_reference_prep" && approved.protocol_sha256 === policy &&
+    approved.status === "ratified_for_consensus_reference_prep" && readerCount !== undefined &&
     approved.projection_sha256 === digest(projection) && approved.freeze_sha256 === digest(freeze), "projection or freeze is outside ratification");
   const doc = JSON.parse(projection.toString()) as Projection;
   const frozen = JSON.parse(freeze.toString()) as Freeze;
   check(doc.schema === "heocr.open_reference_projection.v1" &&
     frozen.schema === "heocr.open_reference_freeze.v1" && doc.batch_id === frozen.batch_id &&
     doc.batch_id === approved.batch_id && /^private-ref-[a-zA-Z0-9_.-]{1,88}$/.test(doc.batch_id) &&
-    doc.freeze_sha256 === approved.freeze_sha256 && doc.protocol_sha256 === policy && frozen.protocol_sha256 === policy &&
+    doc.freeze_sha256 === approved.freeze_sha256 && doc.protocol_sha256 === approved.protocol_sha256 &&
+    frozen.protocol_sha256 === approved.protocol_sha256 &&
     doc.batch_ratification_sha256 === approved.batch_ratification_sha256 &&
     frozen.batch_ratification_sha256 === approved.batch_ratification_sha256 &&
     frozen.structural_page_tasks === approved.separate_page_tasks &&
     recordEqual(approved.counts, doc.counts) && recordEqual(approved.vote_files_sha256, doc.vote_files_sha256), "approval envelope differs");
+  const votePins = Object.values(approved.vote_files_sha256);
+  check(votePins.length === readerCount && votePins.every(pin) &&
+    new Set(votePins).size === readerCount, "ratified vote files differ from the reader count");
   check(doc.rows.length > 0 && doc.rows.length === frozen.rows.length && doc.rows.length <= 10000 &&
     doc.ordinary_queue.length === approved.pending_ordinary_lines && doc.audit_queue.length === approved.pending_blind_audit_lines,
   "ratified queue totals differ");
