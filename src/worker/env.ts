@@ -10,6 +10,11 @@ export interface Env {
   REGISTERED_CAPTURE_ROSTER_SHA256?: string;
   /** Private TRAIN capture storage. Never bind this to the restricted eval bucket. */
   TRAIN_CAPTURE_MEDIA?: R2Bucket;
+  /** PH1 collection uses a private R2 prefix and a dedicated, export-only verifier. */
+  PH1_CAPTURE_ENABLED?: string;
+  PH1_EVENT_CODE_SHA256?: string;
+  PH1_CONSENT?: string;
+  PH1_OPERATOR_SHA256?: string;
   CONTRIBUTOR_APP_ENABLED?: string;
   CONTRIBUTOR_CONFIG_SHA256?: string;
   CONTRIBUTOR_HANDWRITING_CONFIG_SHA256?: string;
