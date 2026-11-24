@@ -128,6 +128,8 @@ a minimal pseudonymous consent and withdrawal ledger. Repeating the action
 verifies removal again. Track and process any governed downstream copies
 before marking a request complete. Keep the exact retention terms and operator
 process aligned with the approved copy.
+The [handwriting v3 self-enrolment runbook](handwriting-self-enrolment.md#withdrawal-and-release)
+describes its separate enrolment-deletion and publication-pin rules.
 
 Each slot admits one D1 submission. Repeat submissions of the same data are
 idempotent. The manifest caps work at 64 writers and 100 slots per writer, with

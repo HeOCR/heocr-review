@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CONTACT_EMAIL, PRIVACY_VERSION, TERMS_STATUS, TERMS_VERSION } from "../../src/shared/terms";
@@ -6,9 +7,9 @@ import { CONTRIBUTION_LICENCES } from "../../src/tasks/export";
 const page = (name: string) => readFileSync(`public/${name}`, "utf8");
 
 describe("public pages (Google branding URLs)", () => {
-  it("versions are the approved ones: terms 2026-11-18-v1, privacy 2026-11-20-v2", () => {
+  it("versions are the approved ones: terms 2026-11-18-v1, privacy 2026-11-24-v3", () => {
     expect(TERMS_VERSION).toBe("2026-11-18-v1");
-    expect(PRIVACY_VERSION).toBe("2026-11-20-v2");
+    expect(PRIVACY_VERSION).toBe("2026-11-24-v3");
   });
 
   it("home says what it is, who runs it, the contact and the repo, without sign-in or scripts", () => {
@@ -91,6 +92,15 @@ describe("public pages (Google branding URLs)", () => {
   it("publishes the approved synthetic realism notice in both languages", () => {
     expect(page("privacy.html")).toContain("בסקירת המראה הסינתטי נשמרים הכינוי שלך, התמונה שבחרת, הזמן עד הבחירה, הדירוג, התגיות והערה אם כתבת אותה. מנהלי הפרויקט בלבד יכולים לראות ולייצא את הרשומות לצורכי פיתוח מחוללי התמונות.");
     expect(page("privacy.html")).toContain("Synthetic realism review stores your pseudonym, the image you chose, time to choice, rating, tags, and any optional comment. Only project admins can view and export these records for generator development.");
+  });
+
+  it.each([
+    ["en", "dab055a5701b3e7cac53952762526734d388e9bda6b575b7ccf2973155679b3b"],
+    ["he", "8c60d1262062601ffb253139e6e2434e10f11e3797dd19208e7c75950176bf4c"],
+  ])("publishes the exact approved handwriting privacy bytes in %s", (lang, expected) => {
+    const copy = page("privacy.html").split(`id="handwriting-privacy-${lang}">`)[1]?.split("</li>")[0];
+    expect(copy).toBeDefined();
+    expect(createHash("sha256").update(copy!).digest("hex")).toBe(expected);
   });
 
   it("the terms carry the contribution terms", () => {

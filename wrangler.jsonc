@@ -38,6 +38,14 @@
     {
       "binding": "TRAIN_CAPTURE_MEDIA",
       "bucket_name": "heocr-review-train-captures"
+    },
+    {
+      "binding": "CONTRIBUTOR_DEV_MEDIA",
+      "bucket_name": "heocr-review-handwriting-dev"
+    },
+    {
+      "binding": "CONTRIBUTOR_EVAL_MEDIA",
+      "bucket_name": "heocr-review-handwriting-eval"
     }
   ],
   "d1_databases": [

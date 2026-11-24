@@ -4,6 +4,7 @@ import type { Env } from "../env";
 import { HttpError } from "../http";
 
 export const contributorRoot = "contributor-v1/";
+export const quarantinePrefix = (writer: string) => `${contributorRoot}quarantine/${writer}/`;
 const digest = /^[a-f0-9]{64}$/;
 const opaque = /^[A-Za-z0-9_-]{1,64}$/;
 const account = /^rv_[a-f0-9]{8}$/;
@@ -135,7 +136,7 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
   return m;
 }
 
-async function pinnedJSON(bucket: R2Bucket, key: string, pin: string, maxBytes: number): Promise<unknown> {
+export async function pinnedJSON(bucket: R2Bucket, key: string, pin: string, maxBytes: number): Promise<unknown> {
   const object = await bucket.get(`${contributorRoot}${key}/${pin}.json`);
   if (!object || object.size > maxBytes) throw gone();
   const data = new Uint8Array(await object.arrayBuffer());

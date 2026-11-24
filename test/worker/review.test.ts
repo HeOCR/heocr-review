@@ -44,7 +44,7 @@ describe("review flow", () => {
     expect(id1).toMatch(/^rv_[0-9a-f]{8}$/);
     const row = await env.DB.prepare("SELECT * FROM reviewers WHERE id = ?1").bind(id1).first<Record<string, unknown>>();
     expect(Object.keys(row!).sort()).toEqual(
-      ["blocked", "created_at", "display_name", "display_name_consented_at", "id", "last_seen_at", "terms_accepted_at", "terms_version"].sort(),
+      ["blocked", "created_at", "display_name", "display_name_consented_at", "handwriting_opted_out", "id", "last_seen_at", "terms_accepted_at", "terms_version"].sort(),
     );
     expect(row!.display_name).toBeNull();
   });

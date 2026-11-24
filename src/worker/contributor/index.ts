@@ -1,3 +1,7 @@
+import { purgeHandwritingEnrolment, recordHandwritingPublication } from "./handwriting-withdrawal";
+import {
+  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSetOptions, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
+} from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
   CONTRIBUTOR_API, type AgeBand, type ContributorKind, type ContributorNext, type ContributorProfile,
@@ -13,7 +17,7 @@ import { randomId } from "../crypto";
 import { assertSameOrigin, HttpError, json, readBytes, readJson } from "../http";
 import { enforce, LIMITS } from "../ratelimit";
 import {
-  canonicalContributorOrigin, contributorManifest, contributorRoot, formFields, gone, hash, invalid, optionalPrintTask, submissionBucket,
+  canonicalContributorOrigin, contributorManifest, contributorRoot, formFields, gone, hash, invalid, optionalPrintTask, quarantinePrefix, submissionBucket,
   type Manifest, type PrintTask, type Task, type Writer,
 } from "./config";
 
@@ -23,7 +27,7 @@ type Enrolment = {
   receipt: string; withdrawn_at: string | null; purged_at: string | null;
   writer_id: string; writer_account: string; guardian_account: string | null; age_band: AgeBand; split: ContributorSplit;
 };
-type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null };
+type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null; selfPin: string | null };
 const enrollmentFields = `writer_id, writer_account, guardian_account, age_band, split, receipt,
   guardian_version, guardian_sha256, assent_version, assent_sha256, withdrawn_at, purged_at`;
 const current = (a: Access) => a.manifest.policy;
@@ -38,7 +42,6 @@ const privateHeaders = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
 };
-const rootFor = (writer: string) => `${contributorRoot}quarantine/${writer}/`;
 const now = (c: Ctx) => new Date(c.now).toISOString();
 const owner = (row: Enrolment, w: Writer) =>
   row.writer_account === w.writerAccount && row.guardian_account === w.guardianAccount &&
@@ -50,9 +53,9 @@ export function isContributorAPI(path: string) {
 
 /** A contributor can sign in and sign out using the shared account shell. Minor accounts cannot use legacy queues or public credit names. */
 export async function isContributorWriter(ctx: Ctx, actor: string) {
-  const enrolled = await ctx.env.DB.prepare("SELECT 1 FROM contributor_enrolments WHERE writer_account=?")
-    .bind(actor).first();
-  if (enrolled) return true;
+  const restricted = await ctx.env.DB.prepare(`SELECT 1 FROM contributor_enrolments WHERE writer_account=?1
+    UNION ALL SELECT 1 FROM reviewers WHERE id=?1 AND handwriting_opted_out=1 LIMIT 1`).bind(actor).first();
+  if (restricted) return true;
   if (!ctx.env.CONTRIBUTOR_CONFIG_SHA256) return false;
   return (await contributorManifest(ctx.env)).writers.some(w => w.writerAccount === actor);
 }
@@ -75,14 +78,17 @@ async function access(ctx: Ctx, requested: string | null): Promise<Access> {
   if (ctx.env.CONTRIBUTOR_APP_ENABLED !== "1" || !canonicalContributorOrigin(ctx.env, ctx.url)) throw gone();
   const actor = await session(ctx);
   enforce(ctx.request.method === "GET" ? LIMITS.readMinute : LIMITS.writeMinute, actor, ctx.now);
-  const manifest = await contributorManifest(ctx.env);
-  const writer = manifest.writers.find(w => w.writerAccount === actor && (!requested || w.id === requested)) ??
-    manifest.writers.find(w => w.guardianAccount === actor && w.id === requested);
+  const signup = await handwritingPlan(ctx);
+  const manifest = signup?.manifest ?? await contributorManifest(ctx.env);
+  const writers = signup ? await selfWriters(ctx, signup, actor) : manifest.writers;
+  const writer = writers.find(w => w.writerAccount === actor && (!requested || w.id === requested)) ??
+    writers.find(w => w.guardianAccount === actor && w.id === requested);
   if (!writer) throw gone();
   const row = await ctx.env.DB.prepare(`SELECT ${enrollmentFields} FROM contributor_enrolments WHERE writer_id=?`)
     .bind(writer.id).first<Enrolment>();
-  if (row && !owner(row, writer)) throw gone();
-  return {ctx, manifest, actor, writer, role: writer.writerAccount === actor ? "writer" : "guardian", row};
+  if (row ? !owner(row, writer) : signup) throw gone();
+  return {ctx, manifest, actor, writer, role: writer.writerAccount === actor ? "writer" : "guardian", row,
+    selfPin: signup?.pin ?? null};
 }
 function state(a: Access): ContributorProfile["state"] {
   if (a.row?.withdrawn_at) return "withdrawn";
@@ -158,7 +164,9 @@ async function profile(a: Access): Promise<ContributorProfile> {
   }
   const policy=current(a);
   return {role:a.role,writer:a.writer.id,ageBand:a.writer.ageBand,state:phase,receipt:a.row?.receipt??null,
-    licence:policy.licence, version:policy.version,copy:a.role==="guardian"?policy.guardian:policy.assent,queues};
+    licence:policy.licence, version:policy.version,copy:a.role==="guardian"?policy.guardian:policy.assent,queues,
+    ...(a.selfPin && a.role==="writer" && phase==="guardian" && !a.writer.guardianAccount
+      ? {guardianPairingCode:await guardianCode(a.ctx,a.selfPin,a.writer.id)} : {})};
 }
 
 function enrolment(a: Access) {
@@ -172,26 +180,28 @@ async function consent(a: Access) {
   const body=await readJson(a.ctx.request);
   const lang=body.lang;
   if (body.accept!==true || (lang!=="he" && lang!=="en")) throw invalid();
+  const create = a.selfPin ? [] : [enrolment(a)];
   const version=consentKey(a);
   const copy=current(a)[a.role==="guardian"?"guardian":"assent"][lang as Language];
   if (body.version!==current(a).version || body.sha256!==copy.sha256) throw new HttpError(409,"consent_changed");
   if (a.role==="guardian") {
     if (state(a)==="withdrawn") throw gone();
-    await a.ctx.env.DB.batch([enrolment(a),a.ctx.env.DB.prepare(`
+    await a.ctx.env.DB.batch([...create,a.ctx.env.DB.prepare(`
       UPDATE contributor_enrolments SET guardian_version=?, guardian_sha256=?, guardian_at=?
       WHERE writer_id=? AND guardian_account=? AND writer_account=? AND age_band=? AND split=? AND withdrawn_at IS NULL
       AND (guardian_version IS NOT ? OR guardian_sha256 IS NOT ?)`)
       .bind(version,copy.sha256,now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.ageBand,a.writer.split,version,copy.sha256)]);
   } else if (adultWriter(a)) {
     if (state(a)==="withdrawn") throw gone();
-    await a.ctx.env.DB.batch([enrolment(a),a.ctx.env.DB.prepare(`
+    await a.ctx.env.DB.batch([...create,a.ctx.env.DB.prepare(`
       UPDATE contributor_enrolments SET assent_version=?, assent_sha256=?, assent_at=?
       WHERE writer_id=? AND writer_account=? AND guardian_account IS NULL AND age_band='18_plus'
         AND split=? AND withdrawn_at IS NULL
         AND (assent_version IS NOT ? OR assent_sha256 IS NOT ?)`)
       .bind(version,copy.sha256,now(a.ctx),a.writer.id,a.actor,a.writer.split,version,copy.sha256)]);
   } else {
-    if (state(a)!=="assent" && state(a)!=="ready") throw gone();
+    const phase=state(a);
+    if (phase==="guardian" || phase==="withdrawn") throw gone();
     const guardianSha=a.row!.guardian_sha256;
     await a.ctx.env.DB.prepare(`
       UPDATE contributor_enrolments SET assent_version=?, assent_sha256=?, assent_at=?
@@ -204,11 +214,17 @@ async function consent(a: Access) {
 async function withdraw(a: Access) {
   const body=await readJson(a.ctx.request);
   if (body.withdraw!==true) throw invalid();
+  if (a.selfPin) {
+    const row = a.row;
+    if (!row || !await purgeHandwritingEnrolment(a.ctx,row.receipt)) throw gone();
+    return json(await profile({...a,row:{...row,withdrawn_at:now(a.ctx)}}),200,privateHeaders);
+  }
+
   const role=a.role==="writer"?"writer_account":"guardian_account";
   await a.ctx.env.DB.batch([enrolment(a),a.ctx.env.DB.prepare(`
     UPDATE contributor_enrolments SET withdrawn_at=COALESCE(withdrawn_at,?)
-    WHERE writer_id=? AND ${role}=? AND writer_account=? AND guardian_account IS ? AND age_band=? AND split=? AND withdrawn_at IS NULL`)
-    .bind(now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.guardianAccount,a.writer.ageBand,a.writer.split)]);
+    WHERE writer_id=? AND ${role}=? AND writer_account=? AND age_band=? AND split=? AND withdrawn_at IS NULL`)
+    .bind(now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.ageBand,a.writer.split)]);
   return json(await profile(await access(a.ctx,a.writer.id)));
 }
 
@@ -256,9 +272,14 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
     SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,?,? FROM contributor_enrolments
     WHERE writer_id=? AND writer_account=? AND guardian_account IS ? AND split=? AND withdrawn_at IS NULL
       AND guardian_version IS ? AND guardian_sha256 IS ? AND assent_version=? AND assent_sha256=?
+      ${a.selfPin ? `AND EXISTS (
+        SELECT 1 FROM contributor_handwriting_roster r
+        WHERE r.writer_id=contributor_enrolments.writer_id AND r.config_sha256=?
+          AND r.split=contributor_enrolments.split AND r.age_band=contributor_enrolments.age_band AND r.set_id=?)` : ""}
     ON CONFLICT DO NOTHING
   `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
-    w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256).run();
+    w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256,
+    ...(a.selfPin ? [a.selfPin,task.page.slice("HW-V3-".length,"HW-V3-".length+1)] : [])).run();
   if (result.meta.changes===1) return true;
   const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
     .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();
@@ -285,7 +306,7 @@ async function submit(a: Access, task: Task) {
     const mime=contributorPhotoType(bytes);
     if (!mime) throw new HttpError(400,"contributor_photo_format");
     const digest=await hash(bytes);
-    const key=rootFor(a.writer.id)+randomId("",16);
+    const key=quarantinePrefix(a.writer.id)+randomId("",16);
     await bucket.put(key,bytes,{httpMetadata:{contentType:mime,cacheControl:"private, no-store"},
       ...(task.kind === "print" ? { customMetadata: { captureVariant: task.mode } } : {})});
     try {
@@ -302,16 +323,21 @@ async function submit(a: Access, task: Task) {
   return json(await profile(await access(a.ctx,a.writer.id)));
 }
 
-async function purge(ctx: Ctx, receipt: string) {
+async function requireOperator(ctx: Ctx) {
   if (!canonicalContributorOrigin(ctx.env,ctx.url)) throw gone();
   const actor=await session(ctx);
   if (!(ctx.env.ADMIN_REVIEWER_IDS??"").split(",").map(id=>id.trim()).includes(actor)) throw gone();
+}
+
+async function purge(ctx: Ctx, receipt: string) {
+  await requireOperator(ctx);
+  if (await purgeHandwritingEnrolment(ctx,receipt)) return json({purged:true},200,privateHeaders);
   const row=await ctx.env.DB.prepare(`SELECT ${enrollmentFields} FROM contributor_enrolments WHERE receipt=?`)
     .bind(receipt).first<Enrolment>();
   if (!row) throw gone();
   const bucket=submissionBucket(ctx.env,row.split);
   if (!bucket) throw gone();
-  const prefix=rootFor(row.writer_id);
+  const prefix=quarantinePrefix(row.writer_id);
   await ctx.env.DB.prepare("UPDATE contributor_enrolments SET withdrawn_at=? WHERE writer_id=? AND withdrawn_at IS NULL")
     .bind(now(ctx),row.writer_id).run();
   for (;;) {
@@ -331,13 +357,37 @@ export async function contributor(ctx: Ctx) {
   if (method!=="GET") assertSameOrigin(ctx.request);
   const deletion=/^\/operator\/withdrawals\/(cw-withdraw-[a-f0-9]{32})$/.exec(suffix);
   if (method==="POST" && deletion) return purge(ctx,deletion[1]!);
-  if (suffix==="/enrolments" && method==="GET") {
+  if (method==="POST" && suffix==="/operator/handwriting-publications") {
+    await requireOperator(ctx);
+    return recordHandwritingPublication(ctx);
+  }
+
+  const revoke=suffix==="/operator/handwriting-invites/revoke";
+  if (suffix==="/enrolments" || suffix==="/guardian" || suffix==="/operator/handwriting-roster" || revoke) {
     if (ctx.env.CONTRIBUTOR_APP_ENABLED!=="1" || !canonicalContributorOrigin(ctx.env,ctx.url)) throw gone();
     const actor=await session(ctx);
-    enforce(LIMITS.readMinute,actor,ctx.now);
-    const m=await contributorManifest(ctx.env);
-    return json({enrolments:m.writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
-      .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"}))});
+    enforce(method==="GET" ? LIMITS.readMinute : LIMITS.writeMinute,actor,ctx.now);
+    const signup=await handwritingPlan(ctx);
+    if (suffix==="/enrolments" && method==="GET") {
+      const writers=signup ? await selfWriters(ctx,signup,actor) : (await contributorManifest(ctx.env)).writers;
+      return json({enrolments:writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
+        .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"})),
+        ...(signup && actor!==signup.reviewer && !await handwritingOptedOut(ctx,actor) ? {signup:{guardian:signup.manifest.policy.guardian,
+          version:signup.manifest.policy.version,sets:await handwritingSetOptions(ctx,signup)}} : {})},200,privateHeaders);
+    }
+    if (!signup) throw gone();
+    if (revoke && method==="POST") return revokeHandwritingInvite(ctx,signup,actor);
+    if (suffix==="/enrolments" && method==="POST") {
+      const writer=await handwritingSignup(ctx,signup,actor);
+      return json(await profile(await access(ctx,writer)),200,privateHeaders);
+    }
+    if (suffix==="/guardian" && method==="POST") {
+      const writer=await acceptGuardian(ctx,signup,actor);
+      return json(await profile(await access(ctx,writer)),200,privateHeaders);
+    }
+    if (suffix==="/operator/handwriting-roster" && (method==="GET" || method==="POST"))
+      return handwritingRoster(ctx,signup,actor);
+    throw gone();
   }
   const route=/^\/writers\/(cw-[a-f0-9]{32})(?:\/(consent|withdraw)|\/tasks\/([A-Za-z0-9_-]{1,64})\/(sheet|crop|submit))?$/.exec(suffix);
   if (!route) throw gone();

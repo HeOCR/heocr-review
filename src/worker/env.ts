@@ -12,6 +12,8 @@ export interface Env {
   TRAIN_CAPTURE_MEDIA?: R2Bucket;
   CONTRIBUTOR_APP_ENABLED?: string;
   CONTRIBUTOR_CONFIG_SHA256?: string;
+  CONTRIBUTOR_HANDWRITING_CONFIG_SHA256?: string;
+  CONTRIBUTOR_ROSTER_REVIEWER_ID?: string;
   /** Optional and separately provisioned for non-TRAIN writer assignments. */
   CONTRIBUTOR_DEV_MEDIA?: R2Bucket;
   CONTRIBUTOR_EVAL_MEDIA?: R2Bucket;
