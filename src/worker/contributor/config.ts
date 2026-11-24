@@ -4,6 +4,7 @@ import type { Env } from "../env";
 import { HttpError } from "../http";
 
 export const contributorRoot = "contributor-v1/";
+export const ROSTER_OPERATOR_ID = "eval-operator";
 export const quarantinePrefix = (writer: string) => `${contributorRoot}quarantine/${writer}/`;
 const digest = /^[a-f0-9]{64}$/;
 const opaque = /^[A-Za-z0-9_-]{1,64}$/;

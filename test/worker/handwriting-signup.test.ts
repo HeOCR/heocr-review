@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { CONTRIBUTOR_API, handwritingSets, type ContributorProfile, type HandwritingSignup } from "../../src/shared/contributor";
 import { createSessionCookie } from "../../src/worker/auth/session";
-import { contributorRoot, hash } from "../../src/worker/contributor/config";
+import { contributorRoot, hash, ROSTER_OPERATOR_ID } from "../../src/worker/contributor/config";
 import type { Env } from "../../src/worker/env";
 import { handle } from "../../src/worker/index";
 import { Client } from "./helpers";
@@ -10,6 +10,7 @@ import { Client } from "./helpers";
 const execution = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
 const path = CONTRIBUTOR_API;
 const roster = path + "/operator/handwriting-roster";
+const fixtureToken = "heocr_roster_v1_" + "a".repeat(43);
 const invitation = (i: number) => String(i).repeat(32);
 const origin = "http://localhost";
 const photo = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/R8kAAAAASUVORK5CYII="), c => c.charCodeAt(0));
@@ -52,19 +53,81 @@ async function fixture(options: FixtureOptions = {}) {
     ...(options.cohort ? {cohort:{sha256:await hash(cohortCode),...options.cohort}} : {}) };
   const pin = await hash(JSON.stringify(plan));
   await env.TRAIN_CAPTURE_MEDIA!.put(contributorRoot+"handwriting-signup/"+pin+".json",JSON.stringify(plan));
+  const rosterTokenSha256 = await hash(fixtureToken);
   const req = (client: Client | null, route: string, body?: object | Uint8Array<ArrayBuffer>,
-    overrides: Partial<Env> = {}, host = origin, headers?: HeadersInit) =>
+    overrides: Partial<Env> = {}, host = origin, headers?: HeadersInit, method = body ? "POST" : "GET") =>
     handle(new Request(host+route,{
-      method:body ? "POST" : "GET",
+      method,
       headers:{cookie:client?.cookie??"",origin:host,"content-type":"application/json",...headers},
       body:body instanceof Uint8Array ? body : body ? JSON.stringify(body) : undefined,
-    }),{...env,CONTRIBUTOR_APP_ENABLED:"1",CONTRIBUTOR_HANDWRITING_CONFIG_SHA256:pin,CONTRIBUTOR_ROSTER_REVIEWER_ID:evaluationAccount,
+    }),{...env,CONTRIBUTOR_APP_ENABLED:"1",CONTRIBUTOR_HANDWRITING_CONFIG_SHA256:pin,CONTRIBUTOR_ROSTER_REVIEWER_ID:ROSTER_OPERATOR_ID,
+      CONTRIBUTOR_ROSTER_TOKEN_SHA256:rosterTokenSha256,
       CONTRIBUTOR_DEV_MEDIA:env.HANDWRITING_MEDIA,CONTRIBUTOR_EVAL_MEDIA:env.HANDWRITING_CONTROL,
       ADMIN_REVIEWER_IDS:evaluationAccount,...overrides},execution);
   const copyBody = (role: "guardian"|"assent") =>
     ({version:policy.version,accept:true,lang:"en",sha256:policy[role].en.sha256});
-  return {writer,guardian,evaluator,other,stranger,fourth,req,copyBody};
+  const rosterReq = (body?: object, overrides: Partial<Env> = {}) =>
+    req(null,roster,body,overrides,origin,{authorization:"Bearer "+fixtureToken});
+  return {writer,guardian,evaluator,other,stranger,fourth,req,rosterReq,copyBody};
 }
+
+it("admits the roster bearer only on the canonical roster GET and POST",async()=>{
+  const f=await fixture();
+  const bearer={authorization:"Bearer "+fixtureToken};
+  for (const route of ["/api/me","/api/config","/api/admin/progress","/privacy",path+"/enrolments",
+    path+"/operator/handwriting-roster/",path+"/operator/handwriting-publications",
+    path+"/writers/cw-"+"1".repeat(32)+"/tasks/HW-V3-A01/sheet"]) {
+    expect((await f.req(f.evaluator,route,undefined,{},origin,bearer)).status).toBe(404);
+  }
+  expect((await f.req(f.evaluator,path+"/operator/handwriting-publications",{}, {},origin,bearer)).status).toBe(404);
+  expect((await f.req(f.evaluator,roster)).status).toBe(404);
+  for (const method of ["HEAD","OPTIONS","PUT","DELETE"]) {
+    expect((await f.req(null,roster,undefined,{},origin,bearer,method)).status).toBe(404);
+  }
+  expect((await f.req(null,roster,undefined,{},origin,{authorization:"Bearer "+fixtureToken.replace(/a$/, "b")})).status).toBe(404);
+  expect((await f.req(null,roster,undefined,{},origin,{cookie:fixtureToken})).status).toBe(404);
+  expect((await f.req(null,roster+"?token=fixture",undefined,{},origin,bearer)).status).toBe(404);
+  expect((await f.req(null,roster,undefined,{},origin,{...bearer,origin:"https://example.org"})).status).toBe(404);
+  expect((await f.req(null,roster,undefined,{ENVIRONMENT:"production"},"https://heocr-review.heocr.workers.dev",bearer)).status).toBe(404);
+  expect((await f.rosterReq(undefined,{CONTRIBUTOR_ROSTER_TOKEN_SHA256:undefined})).status).toBe(404);
+  expect((await f.rosterReq(undefined,{CONTRIBUTOR_ROSTER_REVIEWER_ID:"rv_00000000"})).status).toBe(404);
+  expect((await f.rosterReq(undefined,{CONTRIBUTOR_HANDWRITING_CONFIG_SHA256:undefined})).status).toBe(404);
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_roster_access").first()).toBeNull();
+
+  expect((await f.req(f.writer,path+"/enrolments",{inviteCode:invitation(1),ageBand:"18_plus",set:"A"})).status).toBe(200);
+  const get=await f.rosterReq(undefined,{CONTRIBUTOR_APP_ENABLED:"0"});
+  expect(get.status).toBe(200);
+  expect(get.headers.get("cache-control")).toBe("private, no-store");
+  const {canonical,...pin}=await get.json<{canonical:string;sha256:string;throughOrdinal:number;previousSha256:null}>();
+  expect(await hash(canonical)).toBe(pin.sha256);
+  expect(canonical).not.toContain("rv_");
+  expect(canonical).not.toContain("invite");
+  expect((await f.rosterReq(pin,{CONTRIBUTOR_APP_ENABLED:"0"})).status).toBe(200);
+  const calls=await env.DB.prepare("SELECT * FROM contributor_handwriting_roster_access ORDER BY id").all();
+  expect(calls.results).toEqual([
+    {id:expect.any(Number),principal:"eval-operator",method:"GET",requested_at_ms:expect.any(Number)},
+    {id:expect.any(Number),principal:"eval-operator",method:"POST",requested_at_ms:expect.any(Number)},
+  ]);
+});
+
+it("limits concurrent roster requests in a five-minute window and keeps GET and POST independent",async()=>{
+  const f=await fixture();
+  const fixed=Date.parse("2026-11-24T10:00:05.000Z");
+  const now=vi.spyOn(Date,"now").mockReturnValue(fixed);
+  try {
+    const gets=await Promise.all(Array.from({length:8},()=>f.rosterReq()));
+    expect(gets.map(response=>response.status).sort()).toEqual([200,200,200,200,200,200,429,429]);
+    expect(gets.find(response=>response.status===429)!.headers.get("retry-after")).toBe("295");
+    const posts=await Promise.all(Array.from({length:4},()=>f.rosterReq({})));
+    expect(posts.map(response=>response.status).sort()).toEqual([400,400,400,429]);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster_access").first("n")).toBe(9);
+    now.mockReturnValue(fixed+300_000);
+    expect((await f.rosterReq()).status).toBe(200);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster_access").first("n")).toBe(10);
+  } finally {
+    now.mockRestore();
+  }
+});
 
 it("allows the owner an upload after guardian consent and assent before the first daily audit",async()=>{
   const f=await fixture();
@@ -99,13 +162,13 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect((await f.req(f.other,path+"/guardian",guardianBody)).status).toBe(404);
   expect((await f.req(f.guardian,task+"/sheet")).status).toBe(404);
   expect((await f.req(f.stranger,roster)).status).toBe(404);
-  const pin=await (await f.req(f.evaluator,roster)).json<{sha256:string;canonical:string;throughOrdinal:number;previousSha256:null}>();
+  const pin=await (await f.rosterReq()).json<{sha256:string;canonical:string;throughOrdinal:number;previousSha256:null}>();
   expect(await hash(pin.canonical)).toBe(pin.sha256);
   expect(JSON.parse(pin.canonical).rows).toEqual([{ordinal:pin.throughOrdinal,writer:profile.writer,ageBand:"13_17",set:"A",split:"train"}]);
   const {canonical, ...acceptPin}=pin;
   expect(canonical).not.toContain("rv_");
   expect((await f.req(f.stranger,roster,acceptPin)).status).toBe(404);
-  expect((await f.req(f.evaluator,roster,{...acceptPin,sha256:"2".repeat(64)})).status).toBe(409);
+  expect((await f.rosterReq({...acceptPin,sha256:"2".repeat(64)})).status).toBe(409);
   const assent=await f.req(f.writer,writerPath+"/consent",f.copyBody("assent"));
   const ready=await assent.json<ContributorProfile>();
   expect(ready).toMatchObject({state:"ready",queues:[{kind:"handwriting",total:4,done:0}]});
@@ -115,25 +178,25 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect((await f.req(f.stranger,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(404);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_pins").first<{n:number}>())?.n).toBe(0);
   expect((await f.req(f.writer,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(200);
-  expect((await f.req(f.evaluator,roster,acceptPin)).status).toBe(200);
-  expect((await f.req(f.evaluator,roster,acceptPin)).status).toBe(409);
+  expect((await f.rosterReq(acceptPin)).status).toBe(200);
+  expect((await f.rosterReq(acceptPin)).status).toBe(409);
   expect((await f.req(f.guardian,writerPath+"/withdraw",{withdraw:true})).status).toBe(200);
   expect((await f.req(f.writer,task+"/submit",photo,{},"http://localhost",photoHeaders)).status).toBe(404);
-  expect((await (await f.req(f.evaluator,roster)).json<{sha256:string}>()).sha256).toBe(pin.sha256);
+  expect((await (await f.rosterReq()).json<{sha256:string}>()).sha256).toBe(pin.sha256);
 });
 
 it("assigns the least-filled available split, never reassigns a set and chains pins",async()=>{
   const f=await fixture();
   const join=(who:Client,i:number,set:string)=>f.req(who,path+"/enrolments",{inviteCode:invitation(i),ageBand:"18_plus",set});
   expect((await join(f.writer,1,"D")).status).toBe(200);
-  const previous=await (await f.req(f.evaluator,roster)).json<{sha256:string;throughOrdinal:number;previousSha256:null}>();
+  const previous=await (await f.rosterReq()).json<{sha256:string;throughOrdinal:number;previousSha256:null}>();
   expect((await join(f.other,2,"D")).status).toBe(409);
   const other=await (await join(f.other,2,"A")).json<ContributorProfile>();
   expect(other.state).toBe("assent");
-  expect((await f.req(f.evaluator,roster,previous)).status).toBe(200);
+  expect((await f.rosterReq(previous)).status).toBe(200);
   expect((await join(f.stranger,3,"C")).status).toBe(200);
   expect((await join(f.fourth,4,"B")).status).toBe(200);
-  const next=await (await f.req(f.evaluator,roster)).json<{canonical:string;sha256:string;throughOrdinal:number;previousSha256:string}>();
+  const next=await (await f.rosterReq()).json<{canonical:string;sha256:string;throughOrdinal:number;previousSha256:string}>();
   expect(next.previousSha256).toBe(previous.sha256);
   expect(JSON.parse(next.canonical).rows.map((row:{set:string;split:string})=>[row.set,row.split])).toEqual([
     ["D","train"],["A","dev"],["C","eval_open"],["B","train"],
@@ -141,8 +204,8 @@ it("assigns the least-filled available split, never reassigns a set and chains p
   const otherPath=path+"/writers/"+other.writer;
   expect(await (await f.req(f.other,otherPath+"/consent",f.copyBody("assent"))).json())
     .toMatchObject({state:"ready"});
-  expect((await f.req(f.evaluator,roster,{...next,previousSha256:null})).status).toBe(409);
-  expect((await f.req(f.evaluator,roster,next)).status).toBe(200);
+  expect((await f.rosterReq({...next,previousSha256:null})).status).toBe(409);
+  expect((await f.rosterReq(next)).status).toBe(200);
   expect((await f.req(f.other,otherPath+"/tasks/HW-V3-A01/sheet",undefined,{CONTRIBUTOR_DEV_MEDIA:undefined})).status).toBe(404);
   expect((await f.req(f.other,otherPath+"/tasks/HW-V3-A01/sheet")).status).toBe(200);
   expect((await f.req(f.other,otherPath+"/tasks/HW-V3-C01/sheet")).status).toBe(404);
@@ -214,7 +277,7 @@ it("withdraws a writer, deletes unpublished files and preserves a previously pub
     .bind(ready.writer).first<string>("storage_key");
   expect(published).toBeTruthy();
   expect(unpublished).toBeTruthy();
-  const before=await (await f.req(f.evaluator,roster)).json<{sha256:string}>();
+  const before=await (await f.rosterReq()).json<{sha256:string}>();
   const publicationRoute=path+"/operator/handwriting-publications";
   const firstPin={contentSha256:await hash(photo),releaseSha256:"3".repeat(64)};
   expect((await f.req(f.stranger,publicationRoute,firstPin)).status).toBe(404);
@@ -228,7 +291,7 @@ it("withdraws a writer, deletes unpublished files and preserves a previously pub
   expect(await env.DB.prepare("SELECT 1 FROM contributor_enrolments WHERE writer_id=?").bind(ready.writer).first()).toBeNull();
   expect(await env.DB.prepare("SELECT 1 FROM contributor_submissions WHERE writer_id=?").bind(ready.writer).first()).toBeNull();
   expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_release_candidates WHERE writer_id=?").bind(ready.writer).first()).toBeNull();
-  expect((await (await f.req(f.evaluator,roster)).json<{sha256:string}>()).sha256).toBe(before.sha256);
+  expect((await (await f.rosterReq()).json<{sha256:string}>()).sha256).toBe(before.sha256);
   expect((await f.req(f.writer,ready.writerPath+"/consent",f.copyBody("assent"))).status).toBe(404);
   expect((await f.req(f.writer,"/api/batches")).status).toBe(404);
   const rejoin={inviteCode:cohortCode,ageBand:"18_plus",set:"B"};
