@@ -1,3 +1,4 @@
+import { hasPh1OperatorBearer, isPh1Path, ph1Intake } from "./ph1";
 import { contributor, guardContributorLegacy, isContributorAPI } from "./contributor";
 import { hasRosterBearer, ROSTER_OPERATOR_PATH, rosterOperator } from "./contributor/roster-operator";
 import { sweepRead, sweepWrite, sweepImage } from "./page-sweep";
@@ -60,11 +61,13 @@ const ROUTES: [string, RegExp, Handler][] = [
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname !== ROSTER_OPERATOR_PATH && hasRosterBearer(request)) {
+  if ((url.pathname !== ROSTER_OPERATOR_PATH && hasRosterBearer(request)) ||
+      (!url.pathname.startsWith("/api/ph1/operator/") && hasPh1OperatorBearer(request))) {
     return json({ error: "not_found" }, 404);
   }
   const capture = isCapturePath(url.pathname), privateHandwriting = isHandwritingPath(url.pathname);
-  if (!capture && !privateHandwriting && !url.pathname.startsWith("/api/")) {
+  const ph1 = isPh1Path(url.pathname);
+  if (!capture && !privateHandwriting && !ph1 && !url.pathname.startsWith("/api/")) {
     if (blockedAssetPath(url.pathname)) return json({ error: "not_found" }, 404, {
       "cdn-cache-control": "no-store",
       "cloudflare-cdn-cache-control": "no-store",
@@ -73,6 +76,7 @@ export async function handle(request: Request, env: Env, exec: ExecutionContext)
   }
   const ctx: Ctx = { env, request, url, exec, now: Date.now() };
   try {
+    if (ph1) return await ph1Intake(ctx);
     if (url.pathname === ROSTER_OPERATOR_PATH) return await rosterOperator(ctx);
     if (isContributorAPI(url.pathname)) return await contributor(ctx);
     if (capture || privateHandwriting) {
