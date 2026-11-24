@@ -9,12 +9,14 @@ import { uploadPage, uploadScript } from "./page";
 const event = "ph1-phone-2026-11-26";
 const day = "2026-11-26";
 const startsAt = Date.parse("2026-11-26T00:00:00+02:00");
-const closesAt = Date.parse("2026-11-27T00:00:00+02:00");
+const closesAt = Date.parse("2026-11-30T00:00:00+02:00");
 const prefix = `ph1/quarantine/${event}/photos/`;
-const cap = 240;
+const cap = 350;
 const maxBytes = 20*1024*1024;
 const participants = Array.from({length:20},(_,i) => "P"+String(i+1).padStart(2,"0"));
 const digest = /^[0-9a-f]{64}$/;
+const transferKinds = new Set(["original", "recompressed", "unknown"]);
+const receivedDate = (value: string) => new Date(Date.parse(value) + 2*60*60_000).toISOString().slice(0,10);
 const encoder = new TextEncoder();
 const fail = (status: number, code: string): never => { throw new HttpError(status,code); };
 const headers = {
@@ -81,6 +83,8 @@ async function upload(ctx: Ctx, bucket: R2Bucket, consent: {version:string; text
       request.headers.get("x-ph1-consent-version") !== consent.version) return fail(409,"consent_required");
   const participant = request.headers.get("x-ph1-participant") ?? "";
   if (!participants.includes(participant)) return fail(400,"invalid_participant");
+  const transfer = request.headers.get("x-ph1-transfer") ?? "unknown";
+  if (!transferKinds.has(transfer)) return fail(400,"invalid_transfer");
   const originalFilename = filename(request);
   if (request.headers.get("content-type") !== "application/octet-stream") return fail(415,"photo_required");
   const data = await readBytes(request,maxBytes,"photo_required");
@@ -93,7 +97,7 @@ async function upload(ctx: Ctx, bucket: R2Bucket, consent: {version:string; text
   }
   const sanitizedSha256 = await hash(safe.bytes);
   const metadata = {
-    participant, originalFilename, originalSha256, sanitizedSha256, mime:safe.mime,
+    participant, originalFilename, originalSha256, sanitizedSha256, mime:safe.mime, transfer,
     make:safe.meta.make ?? "", model:safe.meta.model ?? "",
     removedTags:JSON.stringify([...safe.meta.removed].sort()),
     consentVersion:consent.version, consentSha256:await hash(consent.text), receivedAt:new Date(now).toISOString(),
@@ -126,19 +130,26 @@ async function operator(ctx: Ctx, bucket: R2Bucket) {
   if (url.pathname==="/api/ph1/operator/export") {
     const listed = await entries(bucket);
     const photos = [...listed].sort(([a],[b])=>a-b).map(([ordinal,item]) => {
-      const m = item.customMetadata!;
+      const m = item.customMetadata;
+      if (!m?.receivedAt || Number.isNaN(Date.parse(m.receivedAt))) return fail(500,"capture_metadata_unavailable");
       return {
         receipt:receiptFor(ordinal), participant:m.participant, original_filename:m.originalFilename,
         original_sha256:m.originalSha256, sanitized_sha256:m.sanitizedSha256,
-        bytes:item.size, mime:m.mime, make:m.make || null, model:m.model || null,
+        bytes:item.size, mime:m.mime, make:m.make || null, model:m.model || null, transfer:m.transfer ?? "unknown",
         removed_tags:JSON.parse(m.removedTags!) as string[],
         received_at:m.receivedAt, consent_version:m.consentVersion, consent_sha256:m.consentSha256,
         download:`/api/ph1/operator/photos/${receiptFor(ordinal)}`,
       };
     });
-    const consents = [...new Map(photos.map(p => [p.participant,{
-      participant:p.participant, date:day, version:p.consent_version, sha256:p.consent_sha256,
-    }])).values()];
+    const byConsent = new Map<string, typeof photos[number]>();
+    for (const p of photos) {
+      const key = JSON.stringify([p.participant, p.consent_version, p.consent_sha256]);
+      const previous = byConsent.get(key);
+      if (!previous || p.received_at < previous.received_at) byConsent.set(key, p);
+    }
+    const consents = [...byConsent.values()].map(p => ({
+      participant:p.participant, date:receivedDate(p.received_at), version:p.consent_version, sha256:p.consent_sha256,
+    }));
     return json({schema:"heocr.ph1_phone_intake.v1",event,date:day,count:photos.length,cap,consents,photos},200,headers);
   }
   const id = /^\/api\/ph1\/operator\/photos\/([0-9]{3})$/.exec(url.pathname)?.[1];

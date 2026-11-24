@@ -20,14 +20,21 @@ export function uploadPage(consent: {version:string; text:string}, participants:
 </style>
 <script src="/ph1/upload.js" defer></script></head>
 <body><main><h1>העלאת תמונות מהטלפון</h1>
-<p>בחרו את קוד המשתתף שקיבלתם והעלו את קובצי הצילום המקוריים. אפשר לבחור כמה תמונות יחד. כבו את שמירת המיקום במצלמה וצלמו רק את הדף.</p>
+<p>בחרו את קוד המשתתף שקיבלתם והעלו את התמונות. רצוי להעלות קבצים מקוריים. אפשר לבחור כמה תמונות יחד. כבו את שמירת המיקום במצלמה וצלמו רק את הדף.</p>
 <form id="upload" data-consent-version="${escapeHtml(consent.version)}">
   <label>קוד האירוע <input id="event" type="password" required maxlength="64" autocomplete="off" dir="ltr"></label>
   <label>קוד משתתף <select id="participant" required><option value="">בחרו קוד</option>
   ${participants.map(p=>`<option value="${p}">${p}</option>`).join("")}</select></label>
   <label class="consent"><input type="checkbox" id="consent" required><span>${escapeHtml(consent.text)}</span></label>
-  <label>תמונות מקוריות (JPEG, HEIC או PNG)
+  <label>תמונות (JPEG, HEIC או PNG)
     <input id="photos" type="file" accept=".jpg,.jpeg,.heic,.heif,.png,image/jpeg,image/heic,image/png" multiple required>
+  </label>
+  <label>סוג הקבצים שנבחרו (לא חובה)
+    <select id="transfer">
+      <option value="unknown">לא ידוע או סוגים מעורבים</option>
+      <option value="original">קובצי צילום מקוריים</option>
+      <option value="recompressed">קבצים שעברו דחיסה נוספת</option>
+    </select>
   </label>
   <button type="submit">העלאת תמונות</button>
   <p id="status" role="status" aria-live="polite">הועלו 0 תמונות</p>
@@ -41,6 +48,7 @@ const eventCode = document.querySelector("#event");
 const participant = document.querySelector("#participant");
 const consent = document.querySelector("#consent");
 const photos = document.querySelector("#photos");
+const transfer = document.querySelector("#transfer");
 const status = document.querySelector("#status");
 const failed = document.querySelector("#failed");
 const button = form.querySelector("button");
@@ -53,6 +61,7 @@ form.addEventListener("submit", async e => {
   const files = Array.from(photos.files);
   const code = eventCode.value.trim();
   const selected = participant.value;
+  const transferKind = transfer.value;
   const errors = {
     event_closed: "האירוע סגור או שקוד האירוע שגוי",
     consent_required: "יש לקרוא ולאשר את נוסח ההסכמה",
@@ -63,7 +72,7 @@ form.addEventListener("submit", async e => {
     capture_busy: "נסו להעלות שוב בעוד רגע",
     invalid_filename: "יש לבחור קובץ עם שם תקין"
   };
-  for (const input of [eventCode, participant, consent, photos, button]) input.disabled = true;
+  for (const input of [eventCode, participant, consent, photos, transfer, button]) input.disabled = true;
   failed.replaceChildren();
   failed.hidden = true;
   let failures = 0;
@@ -79,6 +88,7 @@ form.addEventListener("submit", async e => {
             "x-ph1-participant":selected,
             "x-ph1-consent":"confirmed",
             "x-ph1-consent-version":form.dataset.consentVersion,
+            "x-ph1-transfer":transferKind,
             "x-ph1-filename":encodeURIComponent(file.name)
           }
         });
@@ -104,7 +114,7 @@ form.addEventListener("submit", async e => {
   } finally {
     status.textContent = "הועלו " + uploaded + " תמונות" + (failures ? " · לא הועלו " + failures : "");
     failed.hidden = failures === 0;
-    for (const input of [eventCode, participant, consent, photos, button]) input.disabled = false;
+    for (const input of [eventCode, participant, consent, photos, transfer, button]) input.disabled = false;
   }
 });
 `;

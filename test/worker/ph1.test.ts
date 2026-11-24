@@ -63,6 +63,7 @@ it("denies signed-out uploads without the event code and requires an exact conse
   expect((await send(undefined,{"x-ph1-consent":""})).status).toBe(409);
   expect((await send(undefined,{"x-ph1-consent-version":"superseded"})).status).toBe(409);
   expect((await send(undefined,{"x-ph1-participant":"P21"})).status).toBe(400);
+  expect((await send(undefined,{"x-ph1-transfer":"unexpected"})).status).toBe(400);
   expect((await send(undefined,{"x-ph1-filename":"..%2Ffile.jpg"})).status).toBe(400);
   expect((await send(undefined,{"content-length":String(21*1024*1024)})).status).toBe(413);
   expect((await send(undefined,{origin:"https://example.invalid"})).status).toBe(403);
@@ -71,12 +72,12 @@ it("denies signed-out uploads without the event code and requires an exact conse
 });
 
 it("honours Israel local midnight and fails closed until the flag, code and consent are configured",async () => {
-  for (const time of ["2026-11-25T23:59:59+02:00","2026-11-27T00:00:00+02:00"]) {
+  for (const time of ["2026-11-25T23:59:59+02:00","2026-11-30T00:00:00+02:00"]) {
     vi.setSystemTime(new Date(time));
     expect((await get("/ph1")).status).toBe(403);
     expect((await send()).status).toBe(403);
   }
-  vi.setSystemTime(new Date("2026-11-26T23:59:59+02:00"));
+  vi.setSystemTime(new Date("2026-11-29T23:59:59+02:00"));
   expect((await get("/ph1")).status).toBe(200);
   config.PH1_CONSENT=undefined;
   expect((await get("/ph1")).status).toBe(404);
@@ -118,13 +119,28 @@ it("sanitizes JPEG, PNG and HEIC before R2 and exports only to the scoped operat
   expect((await get("/api/ph1/operator/photos/001")).status).toBe(404);
   expect((await get("/api/config",operatorToken)).status).toBe(404);
   config.PH1_CAPTURE_ENABLED=undefined;
-  vi.setSystemTime(new Date("2026-11-27T00:00:00+02:00"));
+  vi.setSystemTime(new Date("2026-11-30T00:00:00+02:00"));
   expect(await (await get(manifestPath,operatorToken)).json()).toMatchObject({
-    count:3, cap:240,
+    count:3, cap:350,
     consents:[{participant:"P03",date:"2026-11-26",version:consent.version,sha256:await hash(consent.text)}],
     photos:[{participant:"P03", original_filename:"צילום 00.jpg",original_sha256:await hash(photoFixture("jpg")),
       sanitized_sha256:await hash(sanitizePhoto(photoFixture("jpg")).bytes), make:"FixtureCamera",model:"Fixture Phone 1"},
       {mime:"image/png"}, {mime:"image/heic"}],
+  });
+});
+
+it("exports declared transfer and each consent's first observed local date across the window", async () => {
+  vi.setSystemTime(new Date("2026-11-28T00:01:00+02:00"));
+  expect((await send(photoFixture("jpg"),{"x-ph1-transfer":"recompressed"})).status).toBe(201);
+  vi.setSystemTime(new Date("2026-11-29T00:02:00+02:00"));
+  expect((await send(photoFixture("png"),{"x-ph1-transfer":"original","x-ph1-participant":"P04"})).status).toBe(201);
+  expect((await send(photoFixture("heic"))).status).toBe(201);
+  config.PH1_CAPTURE_ENABLED = undefined;
+  const data = await (await get("/api/ph1/operator/export",operatorToken)).json();
+  expect(data).toMatchObject({
+    count:3,
+    photos:[{transfer:"recompressed"},{transfer:"original"},{transfer:"unknown"}],
+    consents:[{participant:"P03",date:"2026-11-28"},{participant:"P04",date:"2026-11-29"}],
   });
 });
 
@@ -137,11 +153,11 @@ it("retries simultaneous submissions of the same file without consuming a second
 });
 
 it("enforces the event cap atomically during concurrent uploads",async () => {
-  const slots = Array.from({length:239},(_,i) => String(i+1).padStart(3,"0"));
+  const slots = Array.from({length:349},(_,i) => String(i+1).padStart(3,"0"));
   for (let i=0;i<slots.length;i+=20) await Promise.all(slots.slice(i,i+20).map(slot=>bucket.put(prefix+slot,"fixture")));
   const responses = await Promise.all([send(),send(photoFixture("png"))]);
   expect(responses.map(r=>r.status).sort()).toEqual([201,409]);
   const success = responses.find(res=>res.status===201)!;
-  expect(await success.json()).toMatchObject({receipt:"240"});
-  expect((await list())).toHaveLength(240);
+  expect(await success.json()).toMatchObject({receipt:"350"});
+  expect((await list())).toHaveLength(350);
 });
