@@ -22,6 +22,8 @@ type FixtureOptions = {
   capacity?: {split: ContributorSplit; max: number}[];
   setsBySplit?: Partial<Record<ContributorSplit,HandwritingSet[]>>;
   sharedSentence?: boolean;
+  lineRoles?: Record<string,string>;
+  amendmentSha256?: string;
   cohort?: {maxUses:number;expiresAt:string};
 };
 const cohortCode = invitation(8);
@@ -46,7 +48,8 @@ async function fixture(options: FixtureOptions = {}) {
     return [set,await Promise.all(Array.from({length:4},async (_, index) => {
       const page = `HW-V3-${set}0${index+1}`;
       const sentences = Array.from({length:30},(_, i) => `שורת בדיקה ${page} ${i+1}`);
-      if (options.sharedSentence && index===0) sentences[29] = set==="D" ? "e\u0301  142" : "é 142";
+      if (options.sharedSentence && index===0) sentences[28] = set==="D" ? "e\u0301  142" : "é 142";
+      sentences[29] = "שורת כיול לדוגמה 37";
       const pdf = "%PDF-1.4\n% invented fixture " + page;
       const sheetSha256 = await hash(pdf);
       const mediaKey = contributorRoot+"sheets/"+sheetSha256+".pdf";
@@ -54,8 +57,10 @@ async function fixture(options: FixtureOptions = {}) {
       return {kind:"handwriting",id:page,page,sentences,rights:"CC0-1.0: invented fixture",sheetSha256,promptSha256:await hash(sentences.join("\n"))};
     }))];
   })));
-  const plan = { schema:"heocr.handwriting_signup.v1", approval:{evalSplitSha256:"1".repeat(64),leadGo:"fixture"},
+  const plan = { schema:"heocr.handwriting_signup.v1", approval:{evalSplitSha256:"1".repeat(64),leadGo:"fixture",
+    allocationAmendmentSha256:options.amendmentSha256??"3".repeat(64)},
     policy, sheets, writerLimit:options.writerLimit??4, invites:await Promise.all([1,2,3,4].map(i=>hash(invitation(i)))),
+    lineRoles:options.lineRoles??{"30":"calibration"},
     capacity:options.capacity??[{split:"train",max:2},{split:"dev",max:1},{split:"eval_open",max:1}],
     setsBySplit:options.setsBySplit??{train:["A","B"],dev:["C"],eval_open:["D"]},
     ...(options.cohort ? {cohort:{sha256:await hash(cohortCode),...options.cohort}} : {}) };
@@ -494,6 +499,14 @@ it.each([{}, {train:["A","B"],dev:["C"],eval_open:["C","D"]}] as FixtureOptions[
 
 it("rejects a sentence shared across differently hashed sheets",async()=>{
   const f=await fixture({sharedSentence:true});
+  expect((await f.req(f.writer,enrolmentRoute)).status).toBe(404);
+});
+
+const badCalibrationPlans: FixtureOptions[] = [
+  {lineRoles:{}}, {lineRoles:{"29":"calibration","30":"calibration"}}, {amendmentSha256:""},
+];
+it.each(badCalibrationPlans)("requires a pinned amendment and marks only line 30 as calibration",async options=>{
+  const f=await fixture(options);
   expect((await f.req(f.writer,enrolmentRoute)).status).toBe(404);
 });
 
