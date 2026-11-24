@@ -23,12 +23,15 @@ export async function referenceLane(db: D1Database, batch: BatchRecord, proposal
   return row?.lane ?? "ordinary"; // Changed source or geometry needs another human look.
 }
 
-export async function referenceFilter(db: D1Database, batch: BatchRecord, audit: boolean) {
+export async function referenceFilter(db: D1Database, batch: BatchRecord, lane: "ordinary" | "audit" | "all") {
   const rows = await db.prepare(`SELECT p.id FROM proposals p LEFT JOIN current_reference_consensus_lines c ON c.proposal_id=p.id
     WHERE p.batch_id=?1 AND p.active=1 AND (p.gate_kind IS NULL OR p.gate_kind='always')
       AND COALESCE(json_extract(p.payload_json,'$.pass'),1)=1
-      AND (CASE WHEN ?2=1 THEN c.lane='audit' ELSE COALESCE(c.lane,'ordinary')='ordinary' END)
-    ORDER BY c.position NULLS FIRST,p.rank,p.id`).bind(batch.id, Number(audit)).all<{ id: number }>();
+      AND (CASE ?2 WHEN 'audit' THEN c.lane='audit'
+        WHEN 'all' THEN COALESCE(c.lane,'ordinary') IN ('ordinary','audit')
+        ELSE COALESCE(c.lane,'ordinary')='ordinary' END)
+    ORDER BY c.position NULLS FIRST,p.rank,p.id`).bind(batch.id, lane).all<{ id: number }>();
+  const audit = lane === "audit";
   return { id: audit ? "reference-typing" : "reference-review", ids: rows.results.map(r => r.id), strata: rows.results.length,
     preserveOrder: true, omitPages: audit };
 }

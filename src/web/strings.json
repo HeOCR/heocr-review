@@ -432,6 +432,14 @@
   "הכינוי שלך",
   "Your pseudonym"
  ],
+ "hide_completed_tasks": [
+  "הסתרת משימות שהושלמו",
+  "Hide completed tasks"
+ ],
+ "no_tasks_left": [
+  "לא נשארו לך משימות להשלמה",
+  "No tasks left for you to complete"
+ ],
  "pick_h": [
   "בחרו משימה",
   "Choose a task"
