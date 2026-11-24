@@ -129,15 +129,6 @@ export async function selfWriters(ctx: Ctx, signup: HandwritingPlan, actor: stri
   return rows.results.map(({set,...writer}) => ({...writer,tasks:signup.plan.sheets[set]}));
 }
 
-export const rosterGate = `EXISTS (
-  SELECT 1 FROM contributor_handwriting_roster r JOIN contributor_handwriting_pins p
-    ON p.config_sha256 = r.config_sha256 AND p.through_ordinal >= r.ordinal
-  WHERE r.writer_id=? AND r.config_sha256=?)`;
-
-export async function rosterPinned(ctx: Ctx, writer: string, pin: string) {
-  return !!await ctx.env.DB.prepare("SELECT 1 WHERE "+rosterGate).bind(writer,pin).first();
-}
-
 const snapshot = (pin: string, rows: RosterRow[]) =>
   JSON.stringify({schema:"heocr.handwriting_roster.v1",configSha256:pin,rows:rows.map(({ordinal,writer,ageBand,set,split}) =>
     ({ordinal,writer,ageBand,set,split}))}) + "\n";

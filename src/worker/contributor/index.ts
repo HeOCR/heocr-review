@@ -1,5 +1,5 @@
 import {
-  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSignup, rosterGate, rosterPinned, selfWriters,
+  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSignup, selfWriters,
 } from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
@@ -26,7 +26,7 @@ type Enrolment = {
   receipt: string; withdrawn_at: string | null; purged_at: string | null;
   writer_id: string; writer_account: string; guardian_account: string | null; age_band: AgeBand; split: ContributorSplit;
 };
-type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null; selfPin: string | null; pinned: boolean };
+type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null; selfPin: string | null };
 const enrollmentFields = `writer_id, writer_account, guardian_account, age_band, split, receipt,
   guardian_version, guardian_sha256, assent_version, assent_sha256, withdrawn_at, purged_at`;
 const current = (a: Access) => a.manifest.policy;
@@ -88,7 +88,7 @@ async function access(ctx: Ctx, requested: string | null): Promise<Access> {
     .bind(writer.id).first<Enrolment>();
   if (row && !owner(row, writer)) throw gone();
   return {ctx, manifest, actor, writer, role: writer.writerAccount === actor ? "writer" : "guardian", row,
-    selfPin: signup?.pin ?? null, pinned: !signup || await rosterPinned(ctx, writer.id, signup.pin)};
+    selfPin: signup?.pin ?? null};
 }
 function state(a: Access): ContributorProfile["state"] {
   if (a.row?.withdrawn_at) return "withdrawn";
@@ -97,7 +97,7 @@ function state(a: Access): ContributorProfile["state"] {
   if (!adultWriter(a) && (a.row?.guardian_version !== version ||
       !Object.values(guardian).some(c=>c.sha256===a.row?.guardian_sha256))) return "guardian";
   if (a.row?.assent_version !== version || !Object.values(assent).some(c=>c.sha256===a.row?.assent_sha256)) return "assent";
-  return a.pinned ? "ready" : "roster_pending";
+  return "ready";
 }
 function requireReady(a: Access) {
   if (a.role !== "writer" || state(a) !== "ready") throw gone();
@@ -265,11 +265,14 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
     SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,?,? FROM contributor_enrolments
     WHERE writer_id=? AND writer_account=? AND guardian_account IS ? AND split=? AND withdrawn_at IS NULL
       AND guardian_version IS ? AND guardian_sha256 IS ? AND assent_version=? AND assent_sha256=?
-      ${a.selfPin ? "AND "+rosterGate : ""}
+      ${a.selfPin ? `AND EXISTS (
+        SELECT 1 FROM contributor_handwriting_roster r
+        WHERE r.writer_id=contributor_enrolments.writer_id AND r.config_sha256=?
+          AND r.split=contributor_enrolments.split AND r.age_band=contributor_enrolments.age_band AND r.set_id=?)` : ""}
     ON CONFLICT DO NOTHING
   `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
     w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256,
-    ...(a.selfPin ? [w.id,a.selfPin] : [])).run();
+    ...(a.selfPin ? [a.selfPin,task.page.slice("HW-V3-".length,"HW-V3-".length+1)] : [])).run();
   if (result.meta.changes===1) return true;
   const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
     .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();

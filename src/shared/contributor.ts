@@ -32,7 +32,7 @@ export type ContributorProfile = {
   role: "writer" | "guardian";
   writer: string;
   ageBand: AgeBand;
-  state: "guardian" | "assent" | "roster_pending" | "ready" | "withdrawn";
+  state: "guardian" | "assent" | "ready" | "withdrawn";
   receipt: string | null;
   guardianPairingCode?: string;
   licence: "cc0_open";

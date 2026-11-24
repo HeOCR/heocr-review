@@ -65,8 +65,9 @@ verify the reported SHA-256 against these bytes.
 
 POST the reviewed `{sha256,throughOrdinal,previousSha256}` back to the
 same endpoint, using the same origin. Read the head back. A stale or
-changed prefix fails. Newly enrolled writers beyond the approved prefix
-can complete consent while the next daily checkpoint is pending. A sheet
-and its upload are available after both consent and the applicable
-checkpoint. Withdrawal closes uploads immediately. Keeping a pseudonymous
-roster row preserves the split history and prevents reissuing its sheets.
+changed prefix fails. The checkpoint audits the enrolled roster. Any
+enrolled writer with current consent can access their sheets and upload
+before the audit. The upload write matches the writer, assigned split, age
+band and sheet set to the current private plan's roster entry again.
+Withdrawal closes uploads immediately. Keeping a pseudonymous roster row
+preserves the split history and prevents reissuing its sheets.

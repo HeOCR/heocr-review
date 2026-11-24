@@ -107,9 +107,6 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
     if (profile.role==="guardian" && profile.state!=="guardian") return h("section",{class:"card"},
       h("p",{},text("האישור נשמר. הכותב או הכותבת יכולים להיכנס ולהחליט אם להשתתף.","Your consent is saved. The writer can sign in and decide whether to participate.")),
       ...(signup ? [btn(text("אישור למשתתף נוסף","Approve another participant"),()=>signupView(true))] : []));
-    if (profile.state==="roster_pending") return h("section",{class:"card"},
-      h("p",{},text("ההסכמה נשמרה. אפשר יהיה להעלות דפים אחרי אימות ההרשמה.","Your agreement is saved. You can upload pages once your enrolment is verified.")),
-      btn(text("בדיקה מחדש","Check again"),()=>void load()));
     const copy=profile.copy[lang()];
     const checkbox=h("input",{type:"checkbox"});
     const save=btn(text("שמירת אישור","Save agreement"),()=>{
