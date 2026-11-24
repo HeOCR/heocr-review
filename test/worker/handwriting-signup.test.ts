@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
-import { CONTRIBUTOR_API, handwritingSets, type ContributorProfile } from "../../src/shared/contributor";
+import { CONTRIBUTOR_API, handwritingSets, type ContributorProfile, type HandwritingSignup } from "../../src/shared/contributor";
+import { createSessionCookie } from "../../src/worker/auth/session";
 import { contributorRoot, hash } from "../../src/worker/contributor/config";
 import type { Env } from "../../src/worker/env";
 import { handle } from "../../src/worker/index";
@@ -13,7 +14,13 @@ const invitation = (i: number) => String(i).repeat(32);
 const origin = "http://localhost";
 const photo = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/R8kAAAAASUVORK5CYII="), c => c.charCodeAt(0));
 
-async function fixture() {
+type FixtureOptions = {
+  writerLimit?: number;
+  capacity?: {split: "train" | "dev" | "eval_open"; max: number}[];
+  cohort?: {maxUses:number;expiresAt:string};
+};
+const cohortCode = invitation(8);
+async function fixture(options: FixtureOptions = {}) {
   const writer = new Client(), guardian = new Client(), other = new Client(), evaluator = new Client(), stranger = new Client();
   const fourth = new Client();
   await fourth.signIn("signup-fourth");
@@ -40,8 +47,9 @@ async function fixture() {
     }))];
   })));
   const plan = { schema:"heocr.handwriting_signup.v1", approval:{evalSplitSha256:"1".repeat(64),leadGo:"fixture"},
-    policy, sheets, invites:await Promise.all([1,2,3,4].map(i=>hash(invitation(i)))),
-    capacity:[{split:"train",max:2},{split:"dev",max:1},{split:"eval_open",max:1}] };
+    policy, sheets, writerLimit:options.writerLimit??4, invites:await Promise.all([1,2,3,4].map(i=>hash(invitation(i)))),
+    capacity:options.capacity??[{split:"train",max:2},{split:"dev",max:1},{split:"eval_open",max:1}],
+    ...(options.cohort ? {cohort:{sha256:await hash(cohortCode),...options.cohort}} : {}) };
   const pin = await hash(JSON.stringify(plan));
   await env.TRAIN_CAPTURE_MEDIA!.put(contributorRoot+"handwriting-signup/"+pin+".json",JSON.stringify(plan));
   const req = (client: Client | null, route: string, body?: object | Uint8Array<ArrayBuffer>,
@@ -51,7 +59,8 @@ async function fixture() {
       headers:{cookie:client?.cookie??"",origin:host,"content-type":"application/json",...headers},
       body:body instanceof Uint8Array ? body : body ? JSON.stringify(body) : undefined,
     }),{...env,CONTRIBUTOR_APP_ENABLED:"1",CONTRIBUTOR_HANDWRITING_CONFIG_SHA256:pin,CONTRIBUTOR_ROSTER_REVIEWER_ID:evaluationAccount,
-      CONTRIBUTOR_DEV_MEDIA:env.HANDWRITING_MEDIA,CONTRIBUTOR_EVAL_MEDIA:env.HANDWRITING_CONTROL,...overrides},execution);
+      CONTRIBUTOR_DEV_MEDIA:env.HANDWRITING_MEDIA,CONTRIBUTOR_EVAL_MEDIA:env.HANDWRITING_CONTROL,
+      ADMIN_REVIEWER_IDS:evaluationAccount,...overrides},execution);
   const copyBody = (role: "guardian"|"assent") =>
     ({version:policy.version,accept:true,lang:"en",sha256:policy[role].en.sha256});
   return {writer,guardian,evaluator,other,stranger,fourth,req,copyBody};
@@ -238,7 +247,7 @@ it.each(["dev","eval_open"] as const)("stores the original only in the assigned 
   }
 });
 
-it("allocates a set only once when two accounts try to claim it concurrently",async()=>{
+it("keeps least-used-set eligibility atomic when writers sign up concurrently",async()=>{
   const f=await fixture();
   const replies=await Promise.all([f.writer,f.other].map((actor,index)=>f.req(actor,path+"/enrolments",{
     inviteCode:invitation(index+1),ageBand:"18_plus",set:"A",
@@ -251,4 +260,72 @@ it("allocates a set only once when two accounts try to claim it concurrently",as
   expect((await f.req([f.writer,f.other][losingIndex]!,path+"/enrolments",{
     inviteCode:invitation(losingIndex+1),ageBand:"18_plus",set:"B",
   })).status).toBe(200);
+});
+
+const enrolmentRoute = path+"/enrolments";
+const revokeRoute = path+"/operator/handwriting-invites/revoke";
+const liveCohort = {maxUses:50,expiresAt:"2099-01-01T00:00:00Z"};
+const usingCohort = (set: string) => ({inviteCode:cohortCode,ageBand:"18_plus",set});
+
+it("allows the same cohort code for multiple writers, atomically enforces its own use cap and keeps individual codes",async()=>{
+  const f=await fixture({cohort:{...liveCohort,maxUses:2}});
+  expect((await f.req(f.writer,enrolmentRoute,usingCohort("A"))).status).toBe(200);
+  expect((await (await f.req(f.other,enrolmentRoute)).json<{signup:HandwritingSignup}>()).signup.sets).toEqual(["B","C","D"]);
+  const replies=await Promise.all([
+    f.req(f.other,enrolmentRoute,usingCohort("B")),f.req(f.stranger,enrolmentRoute,usingCohort("C")),
+  ]);
+  expect(replies.map(x=>x.status).sort()).toEqual([200,409]);
+  const count=await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster WHERE invite_sha256=?")
+    .bind(await hash(cohortCode)).first<{n:number}>();
+  expect(count?.n).toBe(2);
+  const actor=replies[0]!.ok?f.stranger:f.other;
+  const set=replies[0]!.ok?"C":"B";
+  expect((await f.req(actor,enrolmentRoute,{...usingCohort(set),inviteCode:invitation(1)})).status).toBe(200);
+});
+
+it("refuses expired cohort codes and keeps an available one-use enrolment",async()=>{
+  const f=await fixture({cohort:{...liveCohort,expiresAt:"2000-01-01T00:00:00Z"}});
+  expect((await f.req(f.writer,enrolmentRoute,usingCohort("A"))).status).toBe(404);
+  expect((await f.req(f.writer,enrolmentRoute,{...usingCohort("A"),inviteCode:invitation(1)})).status).toBe(200);
+});
+
+it("allows only an admin to revoke a cohort code and preserves existing writers",async()=>{
+  const f=await fixture({cohort:liveCohort});
+  const first=await (await f.req(f.writer,enrolmentRoute,usingCohort("A"))).json<ContributorProfile>();
+  const revocation={sha256:await hash(cohortCode)};
+  expect((await f.req(f.other,revokeRoute,revocation)).status).toBe(404);
+  expect((await f.req(f.evaluator,revokeRoute,revocation)).status).toBe(200);
+  expect((await f.req(f.evaluator,revokeRoute,revocation)).status).toBe(200);
+  expect((await f.req(f.other,enrolmentRoute,usingCohort("B"))).status).toBe(409);
+  expect((await f.req(f.writer,path+"/writers/"+first.writer)).status).toBe(200);
+  expect((await f.req(f.other,enrolmentRoute,{...usingCohort("B"),inviteCode:invitation(1)})).status).toBe(200);
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_revoked_invites").first()).toEqual({n:1});
+});
+
+it("balances reused sets and split counts and never admits a 51st writer",async()=>{
+  const f=await fixture({cohort:liveCohort,writerLimit:50,capacity:[
+    {split:"train",max:30},{split:"dev",max:20},{split:"eval_open",max:20},
+  ]});
+  const reviewers=Array.from({length:51},(_,i)=>"rv_"+(i+11000).toString(16).padStart(8,"0"));
+  const time=new Date().toISOString();
+  await env.DB.batch(reviewers.map(id=>env.DB.prepare("INSERT INTO reviewers (id,created_at,last_seen_at) VALUES (?,?,?)").bind(id,time,time)));
+  const actors=await Promise.all(reviewers.map(async id=>{
+    const client=new Client();
+    client.cookie=(await createSessionCookie(env,id)).split(";")[0]!;
+    return client;
+  }));
+  for (let i=0;i<49;i++)
+    expect((await f.req(actors[i]!,enrolmentRoute,usingCohort(handwritingSets[i%4]!))).status).toBe(200);
+  const last=await Promise.all(["B","C"].map((set,i)=>f.req(actors[49+i]!,enrolmentRoute,usingCohort(set))));
+  expect(last.map(x=>x.status).sort()).toEqual([200,409]);
+  const setCounts=(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster GROUP BY set_id ORDER BY n").all<{n:number}>()).results;
+  const splits=(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster GROUP BY split ORDER BY n").all<{n:number}>()).results;
+  expect(setCounts.map(r=>r.n)).toEqual([12,12,13,13]);
+  expect(splits.map(r=>r.n)).toEqual([16,17,17]);
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_enrolments").first()).toEqual({n:50});
+  const rejected=last[0]!.ok?1:0;
+  const unusedSet=rejected===0?"B":"C";
+  const actor=actors[49+rejected]!;
+  expect((await f.req(actor,enrolmentRoute,{...usingCohort(unusedSet),inviteCode:invitation(1)})).status).toBe(409);
+  expect((await (await f.req(actor,enrolmentRoute)).json<{signup:HandwritingSignup}>()).signup.sets).toEqual([]);
 });

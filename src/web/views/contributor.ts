@@ -1,4 +1,4 @@
-import { CONTRIBUTOR_API, handwritingAgeBands, handwritingSets, type HandwritingSet, type HandwritingSignup, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
+import { CONTRIBUTOR_API, handwritingAgeBands, type HandwritingSet, type HandwritingSignup, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h } from "../dom";
 import { lang, t } from "../i18n";
@@ -51,7 +51,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
     } else if (err instanceof ApiFailure && err.code==="contributor_reference_changed") {
       notice(text("דף ההעתקה השתנה. טענו מחדש והשתמשו בגרסה העדכנית.","The assigned text changed. Reload and use the current version."));
     } else if (err instanceof ApiFailure && err.code==="handwriting_slot_unavailable") {
-      notice(text("אין מקום פנוי לסט הזה או שההזמנה כבר שימשה.","This set has no place available, or the invitation has already been used."));
+      notice(text("הסט הזה או קוד ההזמנה אינם זמינים. טענו מחדש לבדיקת הסטים הזמינים.","This set or invitation is unavailable. Reload to see the available sets."));
     } else if (err instanceof ApiFailure && err.status===413) {
       notice(text("הקובץ גדול מדי. בחרו תמונה עד 16 מגה־בייט.","That file is too large. Choose a photo up to 16 MB."));
     } else if (err instanceof ApiFailure && err.code==="contributor_photo_format") {
@@ -258,8 +258,8 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       const age=h("select",{required:true},h("option",{value:""},text("בחרו קבוצת גיל","Choose an age band")),
         ...handwritingAgeBands.map(band=>h("option",{value:band},tr(bands[band]))));
       const set=h("select",{required:true},h("option",{value:""},text("בחרו סט אחד","Choose one set")),
-        ...handwritingSets.map(id=>h("option",{value:id},tr(setNames[id]))));
-      const join=h("button",{type:"submit",class:"act primary"},text("הרשמה","Enrol"));
+        ...signup.sets.map(id=>h("option",{value:id},tr(setNames[id]))));
+      const join=h("button",{type:"submit",class:"act primary",disabled:!signup.sets.length},text("הרשמה","Enrol"));
       root.append(h("form",{class:"card contributor-consent",onsubmit:(event:Event)=>{
         event.preventDefault();
         void action(join,()=>post(CONTRIBUTOR_API+"/enrolments",
@@ -269,7 +269,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
         h("label",{},text("קוד הזמנה","Invitation code"), " ",code),
         h("label",{},text("קבוצת גיל","Age band"), " ",age),
         h("label",{},text("סט להעתקה","Set to copy"), " ",set),
-        join),
+        signup.sets.length ? join : h("p",{},text("ההרשמה מלאה כרגע.","Enrolment is full at the moment."))),
         btn(text("אישור הורה או אפוטרופוס","Guardian consent"),()=>signupView(true)));
       return;
     }

@@ -52,11 +52,21 @@ ALTER TABLE contributor_submissions_new RENAME TO contributor_submissions;
 CREATE TABLE contributor_handwriting_roster (
   ordinal INTEGER PRIMARY KEY,
   config_sha256 TEXT NOT NULL,
-  invite_sha256 TEXT NOT NULL UNIQUE,
+  invite_sha256 TEXT NOT NULL,
   writer_id TEXT NOT NULL UNIQUE,
-  set_id TEXT NOT NULL UNIQUE CHECK(set_id IN ('A','B','C','D')),
+  set_id TEXT NOT NULL CHECK(set_id IN ('A','B','C','D')),
   age_band TEXT NOT NULL CHECK(age_band IN ('10_12','13_17','18_plus')),
   split TEXT NOT NULL CHECK(split IN ('train','dev','eval_open'))
+);
+
+CREATE INDEX contributor_handwriting_roster_config_invite
+  ON contributor_handwriting_roster(config_sha256, invite_sha256);
+
+CREATE TABLE contributor_handwriting_revoked_invites (
+  config_sha256 TEXT NOT NULL,
+  invite_sha256 TEXT NOT NULL,
+  revoked_at TEXT NOT NULL,
+  PRIMARY KEY(config_sha256, invite_sha256)
 );
 
 CREATE TABLE contributor_handwriting_pins (

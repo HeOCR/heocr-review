@@ -1,5 +1,5 @@
 import {
-  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSignup, selfWriters,
+  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSetOptions, handwritingSignup, revokeHandwritingInvite, selfWriters,
 } from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
@@ -345,7 +345,8 @@ export async function contributor(ctx: Ctx) {
   if (method!=="GET") assertSameOrigin(ctx.request);
   const deletion=/^\/operator\/withdrawals\/(cw-withdraw-[a-f0-9]{32})$/.exec(suffix);
   if (method==="POST" && deletion) return purge(ctx,deletion[1]!);
-  if (suffix==="/enrolments" || suffix==="/guardian" || suffix==="/operator/handwriting-roster") {
+  const revoke=suffix==="/operator/handwriting-invites/revoke";
+  if (suffix==="/enrolments" || suffix==="/guardian" || suffix==="/operator/handwriting-roster" || revoke) {
     if (ctx.env.CONTRIBUTOR_APP_ENABLED!=="1" || !canonicalContributorOrigin(ctx.env,ctx.url)) throw gone();
     const actor=await session(ctx);
     enforce(method==="GET" ? LIMITS.readMinute : LIMITS.writeMinute,actor,ctx.now);
@@ -355,9 +356,10 @@ export async function contributor(ctx: Ctx) {
       return json({enrolments:writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
         .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"})),
         ...(signup && actor!==signup.reviewer ? {signup:{guardian:signup.manifest.policy.guardian,
-          version:signup.manifest.policy.version}} : {})},200,privateHeaders);
+          version:signup.manifest.policy.version,sets:await handwritingSetOptions(ctx,signup)}} : {})},200,privateHeaders);
     }
     if (!signup) throw gone();
+    if (revoke && method==="POST") return revokeHandwritingInvite(ctx,signup,actor);
     if (suffix==="/enrolments" && method==="POST") {
       const writer=await handwritingSignup(ctx,signup,actor);
       return json(await profile(await access(ctx,writer)),200,privateHeaders);

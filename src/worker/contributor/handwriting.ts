@@ -10,6 +10,7 @@ const account = /^rv_[a-f0-9]{8}$/;
 const splits = ["train", "dev", "eval_open"] as const;
 const pairing = /^(cw-[a-f0-9]{32})\.([A-Za-z0-9_-]{43})$/;
 const invite = /^[a-f0-9]{32}$/;
+const maxWriters = 50;
 const attemptLimit = { bucket: "handwriting-enrol", max: 8, windowS: 60 };
 const noStore = { "cache-control": "private, no-store", "cdn-cache-control": "no-store" };
 type Sheets = Record<HandwritingSet, Extract<Task, { kind: "handwriting" }>[]>;
@@ -17,13 +18,21 @@ type Plan = {
   schema: "heocr.handwriting_signup.v1";
   approval: Manifest["approval"];
   policy: Manifest["policy"];
+  writerLimit: number;
   capacity: { split: ContributorSplit; max: number }[];
   invites: string[];
+  cohort?: { sha256: string; maxUses: number; expiresAt: string };
   sheets: Sheets;
 };
 type RosterRow = {
   ordinal: number; writer: string; ageBand: typeof handwritingAgeBands[number]; set: HandwritingSet; split: ContributorSplit;
 };
+
+function validExpiry(value: string) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString().replace(/\.000Z$/, "Z") === value.replace(/\.000Z$/, "Z");
+}
 
 export async function handwritingPlan(ctx: Ctx) {
   const env = ctx.env;
@@ -33,21 +42,26 @@ export async function handwritingPlan(ctx: Ctx) {
   if (!digest.test(pin) || !reviewer || !account.test(reviewer) ||
       !env.TRAIN_CAPTURE_MEDIA || env.CONTRIBUTOR_CONFIG_SHA256) throw gone();
   const plan = await pinnedJSON(env.TRAIN_CAPTURE_MEDIA, "handwriting-signup", pin, 128 * 1024) as Plan | null;
-  if (plan?.schema !== "heocr.handwriting_signup.v1" || !Array.isArray(plan.capacity) ||
+  if (plan?.schema !== "heocr.handwriting_signup.v1" || !Number.isInteger(plan.writerLimit) ||
+      plan.writerLimit < 1 || plan.writerLimit > maxWriters || !Array.isArray(plan.capacity) ||
       plan.capacity.length < 1 || plan.capacity.length > splits.length ||
       plan.capacity.some(entry => !entry || !splits.includes(entry.split) ||
-        !Number.isInteger(entry.max) || entry.max < 1 || entry.max > handwritingSets.length ||
+        !Number.isInteger(entry.max) || entry.max < 1 || entry.max > maxWriters ||
         !submissionBucket(env, entry.split)) ||
       new Set(plan.capacity.map(entry => entry.split)).size !== plan.capacity.length ||
-      !Array.isArray(plan.invites) || !plan.invites.length || plan.invites.length > handwritingSets.length ||
+      plan.capacity.reduce((total, entry) => total + entry.max, 0) < plan.writerLimit ||
+      !Array.isArray(plan.invites) || plan.invites.length > maxWriters ||
       !plan.invites.every(value => typeof value === "string" && digest.test(value)) ||
       new Set(plan.invites).size !== plan.invites.length ||
-      plan.invites.length !== plan.capacity.reduce((total, entry) => total + entry.max, 0) ||
+      (plan.cohort === undefined ? !plan.invites.length : !plan.cohort ||
+        typeof plan.cohort.sha256 !== "string" || !digest.test(plan.cohort.sha256) ||
+        plan.invites.includes(plan.cohort.sha256) || !Number.isInteger(plan.cohort.maxUses) ||
+        plan.cohort.maxUses < 1 || plan.cohort.maxUses > maxWriters || !validExpiry(plan.cohort.expiresAt)) ||
       !plan.sheets || Object.keys(plan.sheets).length !== handwritingSets.length) throw gone();
   // Reuse the approved terms and handwriting-sheet validation for every page in the set.
   const writers = handwritingSets.map((set, i) => {
     const tasks = plan.sheets[set];
-    if (!Array.isArray(tasks) || tasks.length < 3 || tasks.length > 4 ||
+    if (!Array.isArray(tasks) || tasks.length !== 4 ||
         tasks.some((task, j) => task?.kind !== "handwriting" || task.page !== `HW-V3-${set}0${j + 1}`)) throw gone();
     return { id: "cw-" + String(i).repeat(32), writerAccount: "rv_" + String(i).repeat(8),
       guardianAccount: null, ageBand: "18_plus", split: "train", tasks };
@@ -60,6 +74,19 @@ export async function handwritingPlan(ctx: Ctx) {
 
 export type HandwritingPlan = NonNullable<Awaited<ReturnType<typeof handwritingPlan>>>;
 
+const setLoads = `SELECT choices.value AS set_id, COUNT(r.set_id) AS uses
+  FROM json_each('${JSON.stringify(handwritingSets)}') AS choices
+  LEFT JOIN contributor_handwriting_roster r ON r.set_id=choices.value AND r.config_sha256=?1
+  GROUP BY choices.key`;
+const leastUsedSets = "SELECT set_id FROM set_loads WHERE uses=(SELECT MIN(uses) FROM set_loads)";
+
+export async function handwritingSetOptions(ctx: Ctx, signup: HandwritingPlan) {
+  const options = await ctx.env.DB.prepare(`WITH set_loads AS (${setLoads})
+    ${leastUsedSets} AND (SELECT SUM(uses) FROM set_loads) < ?2 ORDER BY set_id`)
+    .bind(signup.pin,signup.plan.writerLimit).all<{set_id:HandwritingSet}>();
+  return options.results.map(row => row.set_id);
+}
+
 export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor: string) {
   enforce(attemptLimit, actor, ctx.now);
   const { inviteCode, ageBand, set } = await readJson(ctx.request);
@@ -67,7 +94,8 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
       !handwritingSets.includes(set as HandwritingSet)) throw invalid();
   if (actor === signup.reviewer) throw gone();
   const pin = await hash(inviteCode);
-  if (!signup.plan.invites.includes(pin)) throw gone();
+  const cohort = signup.plan.cohort?.sha256 === pin ? signup.plan.cohort : null;
+  if (cohort ? Date.parse(cohort.expiresAt) <= ctx.now : !signup.plan.invites.includes(pin)) throw gone();
   const db = ctx.env.DB;
   const writer = randomId("cw-", 16);
   const existing = await db.prepare(`SELECT e.writer_id AS writer FROM contributor_enrolments e
@@ -75,22 +103,38 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
     WHERE writer_account=? AND config_sha256=?`).bind(actor,signup.pin).first<{writer:string}>();
   if (existing) return existing.writer;
   const [assigned] = await db.batch([
-    db.prepare(`INSERT INTO contributor_handwriting_roster(config_sha256,invite_sha256,writer_id,set_id,age_band,split)
-      SELECT ?1,?2,?3,?4,?5,capacity.split
-      FROM json_each(?7) AS choice
-      JOIN (SELECT json_extract(value,'$.split') AS split, COUNT(r.ordinal) AS used
-        FROM json_each(?7) LEFT JOIN contributor_handwriting_roster r ON r.split=json_extract(value,'$.split')
-        GROUP BY json_extract(value,'$.split')) AS capacity ON capacity.split=json_extract(choice.value,'$.split')
-      WHERE capacity.used < json_extract(choice.value,'$.max') AND NOT EXISTS
-        (SELECT 1 FROM contributor_enrolments WHERE writer_account=?6 OR guardian_account=?6)
-      ORDER BY capacity.used, choice.key LIMIT 1
-      ON CONFLICT DO NOTHING`).bind(signup.pin,pin,writer,set,ageBand,actor,JSON.stringify(signup.plan.capacity)),
+    db.prepare(`WITH set_loads AS (${setLoads}), split_room AS (
+        SELECT json_extract(choice.value,'$.split') AS split
+        FROM json_each(?7) AS choice
+        LEFT JOIN contributor_handwriting_roster r ON r.split=json_extract(choice.value,'$.split') AND r.config_sha256=?1
+        GROUP BY choice.key HAVING COUNT(r.split) < json_extract(choice.value,'$.max')
+        ORDER BY COUNT(r.split), choice.key LIMIT 1
+      )
+      INSERT INTO contributor_handwriting_roster(config_sha256,invite_sha256,writer_id,set_id,age_band,split)
+      SELECT ?1,?2,?3,?4,?5,split FROM split_room
+      WHERE (SELECT SUM(uses) FROM set_loads) < ?8 AND ?4 IN (${leastUsedSets})
+        AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND invite_sha256=?2) < ?9
+        AND NOT EXISTS (SELECT 1 FROM contributor_handwriting_revoked_invites WHERE config_sha256=?1 AND invite_sha256=?2)
+        AND NOT EXISTS (SELECT 1 FROM contributor_enrolments WHERE writer_account=?6 OR guardian_account=?6)
+      ON CONFLICT DO NOTHING`)
+      .bind(signup.pin,pin,writer,set,ageBand,actor,JSON.stringify(signup.plan.capacity),signup.plan.writerLimit,cohort?.maxUses ?? 1),
     db.prepare(`INSERT INTO contributor_enrolments(writer_id,writer_account,age_band,split,receipt)
       SELECT writer_id,?,age_band,split,? FROM contributor_handwriting_roster WHERE writer_id=?`)
       .bind(actor,randomId("cw-withdraw-",16),writer),
   ]);
   if (assigned?.meta.changes !== 1) throw new HttpError(409,"handwriting_slot_unavailable");
   return writer;
+}
+
+/** Record a revocation without changing the pinned plan or existing writers. */
+export async function revokeHandwritingInvite(ctx: Ctx, signup: HandwritingPlan, actor: string) {
+  if (!(ctx.env.ADMIN_REVIEWER_IDS??"").split(",").map(id=>id.trim()).includes(actor)) throw gone();
+  const { sha256 } = await readJson(ctx.request);
+  if (typeof sha256 !== "string" || !digest.test(sha256)) throw invalid();
+  if (sha256 !== signup.plan.cohort?.sha256 && !signup.plan.invites.includes(sha256)) throw gone();
+  await ctx.env.DB.prepare(`INSERT INTO contributor_handwriting_revoked_invites(config_sha256,invite_sha256,revoked_at)
+    VALUES(?,?,?) ON CONFLICT DO NOTHING`).bind(signup.pin,sha256,new Date(ctx.now).toISOString()).run();
+  return json({revoked:true},200,noStore);
 }
 
 const pairingMessage = (pin: string, writer: string) => `handwriting-guardian/v1/${pin}/${writer}`;
