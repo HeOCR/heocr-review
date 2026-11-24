@@ -1312,6 +1312,14 @@
   "צלמו את אותו דף לפי הסדר שלמטה. חמשת הצילומים הראשונים נדרשים. שמרו כל צילום לפני שתשנו את הדף לצילום הבא.",
   "Photograph the same sheet in the order below. The first five photos are required. Save each photo before changing the sheet for the next one."
  ],
+ "cg_kids_print_p": [
+  "אם צריך עזרה עם המדפסת או עם המצלמה, בקשו ממבוגר לעזור. הניחו את הדף על שולחן פנוי.",
+  "Ask an adult if you need help with the printer or camera. Put the sheet on a clear table."
+ ],
+ "cg_kids_check_p": [
+  "לפני ששולחים, בדקו שרואים את כל הדף ושהאותיות חדות. הרחיקו ידיים ופנים מהתמונה. אל תכתבו על הדף שם, חתימה או פרטים אישיים.",
+  "Before sending, check that you can see the whole sheet and read the letters. Keep hands and faces out of the photo. Leave names, signatures and personal details off the sheet."
+ ],
  "cg_variant_flat": [
   "דף שטוח",
   "Flat sheet"

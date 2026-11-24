@@ -119,6 +119,7 @@ const nextRequired = (tasks: Task[], done: Set<string>) => tasks.find(t => !opti
 function printView(a: Access, task: PrintTask, done: Set<string>): PrintCapture {
   return { id: task.id, page: task.page, kind: task.kind, mode: task.mode,
     sheet: `${CONTRIBUTOR_API}/writers/${a.writer.id}/tasks/${task.id}/sheet`,
+    ...(task.variant ? { variant: task.variant } : {}),
     ...(task.sequence ? { captureSteps: sheetSlots(a, task.page).map(slot => ({ mode: slot.mode, saved: done.has(slot.id) })) } : {}) };
 }
 async function nextView(a: Access, task: Task, done: Set<string>): Promise<ContributorNext> {

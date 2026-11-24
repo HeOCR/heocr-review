@@ -56,6 +56,9 @@ environment. The manifest uses:
   The writer can proceed to the next sheet and return to the optional photo
   later. Optional photos contribute zero to the required queue total. Use a
   distinct task ID per page/variant and keep its assignment immutable.
+  For the kids' print-and-capture walkthrough, set `variant: "kids"` on
+  every slot of a sheet's sequence. Use assigned TRAIN print pages. Office
+  DEV and held-out capture packs stay in their separate intake lanes.
 - `form`: `{kind:"form", pack:"TRN-FM01", variant:"worksheet", sheetSha256,
   referenceSha256}`. Resolve `page` against the approved TRAIN worksheet roster.
   Pin that exact leaf's PDF and its fictional field-value reference. The card

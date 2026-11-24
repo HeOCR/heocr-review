@@ -17,7 +17,7 @@ export type ContributorNext = {
   kind: ContributorKind;
   page: string;
 } & (
-  { kind: "print"; mode: CaptureMode; sheet: string; captureSteps?: PrintCaptureStep[] } |
+  { kind: "print"; mode: CaptureMode; sheet: string; captureSteps?: PrintCaptureStep[]; variant?: "kids" } |
   { kind: "form"; sheet: string; fields: FormField[]; referenceSha256: string } |
   { kind: "line"; crop: string; candidate: string } |
   { kind: "handwriting"; prompt: string; rights: string; referenceSha256: string }

@@ -12,7 +12,7 @@ test("contributor invitation shows only sign-in then the Hebrew assigned walkthr
   const modes = [...requiredPrintModes, "shadow" as const];
   let saved = 0;
   const capture = (mode: PrintCapture["mode"]): PrintCapture => ({ id: mode, kind: "print", page: "TRN-PRINT-01",
-    mode, sheet: `${writerPath}/tasks/${mode}/sheet`, captureSteps: modes.map((mode, index) => ({ mode, saved: index < saved })) });
+    mode, variant: "kids", sheet: `${writerPath}/tasks/${mode}/sheet`, captureSteps: modes.map((mode, index) => ({ mode, saved: index < saved })) });
   const printQueue = (): ContributorQueue => ({ kind: "print", total: 5, done: Math.min(saved, 5),
     next: saved < 5 ? capture(requiredPrintModes[saved]!) : null,
     ...(saved === 5 ? { optionalPrint: [capture("shadow")] } : {}) });
@@ -66,8 +66,10 @@ test("contributor invitation shows only sign-in then the Hebrew assigned walkthr
   await expect(page.getByRole("link", { name: "הורדה והדפסה" })).toHaveAttribute("href", `${writerPath}/tasks/flat/sheet`);
   await expect(page.getByText("בכ־30 מעלות", { exact: false })).toBeVisible();
   await expect(page.getByText("כבו שמירת מיקום", { exact: false })).toBeVisible();
+  await expect(page.getByText("בקשו ממבוגר לעזור", { exact: false })).toBeVisible();
   const current = page.locator("[aria-current='step']");
   for (const mode of requiredPrintModes) {
+    await expect(current.getByText("הרחיקו ידיים ופנים", { exact: false })).toBeVisible();
     await expect(current.locator(`.guide-art-${mode}`)).toBeVisible();
     await expect(page.getByRole("button", { name: "בחירת צילום" })).toHaveCount(1);
     const chooser = page.waitForEvent("filechooser");

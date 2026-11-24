@@ -38,12 +38,17 @@ export function captureGuide(mode: CaptureMode, preparation: Step[], upload: HTM
 }
 
 export function printSequenceGuide(task: PrintCapture, download: HTMLElement, upload: HTMLElement, skip?: HTMLElement) {
+  const kids = task.variant === "kids";
   const captures: Step[] = task.captureSteps!.map(({ mode, saved }) => {
     const current = task.mode === mode;
     return { title: captureTitles[mode], instruction: captureInstructions[mode], illustration: mode, current,
-      content: current ? [h("p", {}, t("cg_upload_p")), upload, ...(skip ? [skip] : [])]
+      content: current ? [
+        ...(kids ? [h("p", {}, t("cg_kids_check_p"))] : []),
+        h("p", {}, t("cg_upload_p")), upload, ...(skip ? [skip] : []),
+      ]
         : saved ? [h("p", { class: "small" }, t("cg_variant_saved"))] : [] };
   });
   return guide([{ title: "cg_print_h", instruction: "cg_print_p", illustration: "print",
-    content: [download, h("p", {}, t("cg_sequence_intro")), h("p", {}, t("cg_photo_p")), h("p", {}, t("cg_check_p"))] }, ...captures]);
+    content: [download, ...(kids ? [h("p", {}, t("cg_kids_print_p"))] : []),
+      h("p", {}, t("cg_sequence_intro")), h("p", {}, t("cg_photo_p")), h("p", {}, t("cg_check_p"))] }, ...captures]);
 }
