@@ -214,6 +214,11 @@ main#app.task .state { padding-inline: 16px; }
   display: grid; gap: 12px; align-content: start; padding: clamp(14px, 3vw, 24px);
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
 }
+.contributor-code, form.contributor-consent label:not(.check) { display: grid; gap: 6px; min-width: 0; }
+.contributor-code input, form.contributor-consent :is(input[type=text], select) {
+  box-sizing: border-box; width: 100%; min-height: var(--touch); padding: 8px;
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--control-line); border-radius: 6px;
+}
 .contributor-queue h2 { font-size: 1rem; }
 .contributor .act { width: fit-content; min-height: var(--touch); justify-self: start; }
 .contributor-count { color: var(--muted); font-family: var(--font-mono); }

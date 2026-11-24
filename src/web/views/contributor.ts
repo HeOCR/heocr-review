@@ -1,4 +1,4 @@
-import { CONTRIBUTOR_API, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
+import { CONTRIBUTOR_API, handwritingAgeBands, handwritingSets, type HandwritingSet, type HandwritingSignup, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h } from "../dom";
 import { lang, t } from "../i18n";
@@ -14,7 +14,13 @@ const names: Record<ContributorKind, Pair> = {
   handwriting: ["כתיבה ביד", "Write by hand"],
 };
 const bands: Record<ContributorProfile["ageBand"], Pair> = {
-  "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"], "18_plus": ["18+", "18+"],
+  "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"], "13_17": ["13–17", "13–17"], "18_plus": ["18+", "18+"],
+};
+const setNames: Record<HandwritingSet, Pair> = {
+  A: ["מקורות", "Sources"],
+  B: ["מסמכי יסוד", "Founding texts"],
+  C: ["שירה עברית ישנה", "Old Hebrew poetry"],
+  D: ["פרוזה יומיומית", "Everyday prose"],
 };
 const btn = (label: string, action: () => void, primary = false) =>
   h("button", {type:"button", class: primary ? "act primary" : "act", onclick:action}, label);
@@ -33,6 +39,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
   let selected: ContributorKind | null=null;
   let printPage: string | null = null;
   let busy=false;
+  let signup: HandwritingSignup | undefined;
   const url=()=>`${CONTRIBUTOR_API}/writers/${p!.writer}`;
   const submitUrl=(task:ContributorNext)=>url()+"/tasks/"+task.id+"/submit";
   function notice(message:string) { notices.textContent=message; }
@@ -43,6 +50,8 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       notice(text("הנוסח השתנה. טענו מחדש ובדקו את הגרסה החדשה.","The wording changed. Reload to read the new version."));
     } else if (err instanceof ApiFailure && err.code==="contributor_reference_changed") {
       notice(text("דף ההעתקה השתנה. טענו מחדש והשתמשו בגרסה העדכנית.","The assigned text changed. Reload and use the current version."));
+    } else if (err instanceof ApiFailure && err.code==="handwriting_slot_unavailable") {
+      notice(text("אין מקום פנוי לסט הזה או שההזמנה כבר שימשה.","This set has no place available, or the invitation has already been used."));
     } else if (err instanceof ApiFailure && err.status===413) {
       notice(text("הקובץ גדול מדי. בחרו תמונה עד 16 מגה־בייט.","That file is too large. Choose a photo up to 16 MB."));
     } else if (err instanceof ApiFailure && err.code==="contributor_photo_format") {
@@ -87,10 +96,20 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
   }
   function consent(profile:ContributorProfile) {
     if (profile.state==="withdrawn") return h("p",{class:"card"},text("ההשתתפות הופסקה.", "Participation has stopped."));
-    if (profile.role==="writer" && profile.state==="guardian") return h("p",{class:"card"},
-      text("המשימות ייפתחו אחרי אישור ההורה או האפוטרופוס. בקשו מהם להיכנס מהחשבון שלהם.","Tasks open after your guardian agrees using their own account."));
-    if (profile.role==="guardian" && profile.state!=="guardian") return h("p",{class:"card"},
-      text("האישור נשמר. הכותב או הכותבת יכולים להיכנס ולהחליט אם להשתתף.","Your consent is saved. The writer can sign in and decide whether to participate."));
+    if (profile.role==="writer" && profile.state==="guardian") return h("section",{class:"card"},
+      h("p",{},text("המשימות ייפתחו אחרי אישור ההורה או האפוטרופוס. בקשו מהם להיכנס מהחשבון שלהם.","Tasks open after your guardian agrees using their own account.")),
+      ...(profile.guardianPairingCode ? [
+        h("p",{},text("תנו את הקוד רק להורה או לאפוטרופוס.","Share this code only with your guardian.")),
+        h("label",{class:"contributor-code"},text("קוד לאישור הורה או אפוטרופוס","Guardian pairing code"), " ",
+          h("input",{type:"text",dir:"ltr",readonly:true,value:profile.guardianPairingCode})),
+        btn(text("בדיקה מחדש","Check again"),()=>void load()),
+      ] : []));
+    if (profile.role==="guardian" && profile.state!=="guardian") return h("section",{class:"card"},
+      h("p",{},text("האישור נשמר. הכותב או הכותבת יכולים להיכנס ולהחליט אם להשתתף.","Your consent is saved. The writer can sign in and decide whether to participate.")),
+      ...(signup ? [btn(text("אישור למשתתף נוסף","Approve another participant"),()=>signupView(true))] : []));
+    if (profile.state==="roster_pending") return h("section",{class:"card"},
+      h("p",{},text("ההסכמה נשמרה. אפשר יהיה להעלות דפים אחרי אימות ההרשמה.","Your agreement is saved. You can upload pages once your enrolment is verified.")),
+      btn(text("בדיקה מחדש","Check again"),()=>void load()));
     const copy=profile.copy[lang()];
     const checkbox=h("input",{type:"checkbox"});
     const save=btn(text("שמירת אישור","Save agreement"),()=>{
@@ -202,9 +221,11 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
   function render() {
     if (!p) return;
     const heading=h("h1",{"data-contributor-heading":"",tabindex:"-1"},contributorTitle());
+    const identity=signup && p.role==="writer"
+      ? h("p",{class:"small"},text("קוד כותב","Writer code")," ",bdi(p.writer,"ltr")) : null;
     const queues=p.queues.filter(queue=>queue.total>0);
     if (!queues.length) {
-      root.replaceChildren(heading,consent(p),notices,...[withdrawal(p)].filter(n=>n!==null));
+      root.replaceChildren(heading,...(identity?[identity]:[]),consent(p),notices,...[withdrawal(p)].filter(n=>n!==null));
       return;
     }
     const queue = queues.find(q => q.kind === selected);
@@ -227,13 +248,58 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
           h("p",{class:"small muted"},text("הושלם","Complete")),
         ...(q.optionalPrint??[]).map(task=>btn(t("cg_open_shadow", {page:task.page}),()=>{selected="print";printPage=task.page;render();focusTask(true);})));
     });
-    root.replaceChildren(heading,h("div",{class:"contributor-grid"},...cards),notices,...[withdrawal(p)].filter(n=>n!==null));
+    root.replaceChildren(heading,...(identity?[identity]:[]),h("div",{class:"contributor-grid"},...cards),notices,...[withdrawal(p)].filter(n=>n!==null));
+  }
+  const secretInput = (max: number) => h("input",{type:"text",dir:"ltr",required:true,maxlength:max,
+    autocomplete:"off",autocapitalize:"none",spellcheck:"false"});
+  function signupView(showGuardian = false) {
+    if (!signup) return;
+    notice("");
+    root.replaceChildren(h("h1",{},contributorTitle()),notices);
+    if (!showGuardian) {
+      const code=secretInput(32);
+      const age=h("select",{required:true},h("option",{value:""},text("בחרו קבוצת גיל","Choose an age band")),
+        ...handwritingAgeBands.map(band=>h("option",{value:band},tr(bands[band]))));
+      const set=h("select",{required:true},h("option",{value:""},text("בחרו סט אחד","Choose one set")),
+        ...handwritingSets.map(id=>h("option",{value:id},tr(setNames[id]))));
+      const join=h("button",{type:"submit",class:"act primary"},text("הרשמה","Enrol"));
+      root.append(h("form",{class:"card contributor-consent",onsubmit:(event:Event)=>{
+        event.preventDefault();
+        void action(join,()=>post(CONTRIBUTOR_API+"/enrolments",
+          {inviteCode:code.value.trim(),ageBand:age.value,set:set.value}),"");
+      }},
+        h("h2",{},text("הרשמה לכתיבה ביד","Handwriting enrolment")),
+        h("label",{},text("קוד הזמנה","Invitation code"), " ",code),
+        h("label",{},text("קבוצת גיל","Age band"), " ",age),
+        h("label",{},text("סט להעתקה","Set to copy"), " ",set),
+        join),
+        btn(text("אישור הורה או אפוטרופוס","Guardian consent"),()=>signupView(true)));
+      return;
+    }
+    const code=secretInput(79);
+    const checkbox=h("input",{type:"checkbox",required:true});
+    const accept=h("button",{type:"submit",class:"act primary"},text("שמירת אישור","Save agreement"));
+    const wording=signup.guardian[lang()];
+    const version=signup.version;
+    root.append(h("form",{class:"card contributor-consent",onsubmit:(event:Event)=>{
+      event.preventDefault();
+      void action(accept,()=>post(CONTRIBUTOR_API+"/guardian",
+        {code:code.value.trim(),lang:lang(),version,sha256:wording.sha256,accept:checkbox.checked}),
+        text("האישור נשמר.","Agreement saved."));
+    }},
+      h("h2",{},text("אישור הורה או אפוטרופוס","Guardian consent")),
+      h("p",{class:"contributor-copy"},wording.text),
+      h("label",{},text("קוד לאישור הורה או אפוטרופוס","Guardian pairing code"), " ",code),
+      h("label",{class:"check"},checkbox," ",text("קראתי ואני מאשר/ת כהורה או כאפוטרופוס.","I have read this and agree as the guardian.")),
+      accept),btn(text("חזרה","Back"),()=>void load()));
   }
   async function load() {
     root.replaceChildren(h("h1",{},contributorTitle()),notices);
     notice(t("loading"));
     try {
-      const data=await get<{enrolments:{writer:string;role:string;ageBand:ContributorProfile["ageBand"]}[]}>(CONTRIBUTOR_API+"/enrolments");
+      const data=await get<{enrolments:{writer:string;role:string;ageBand:ContributorProfile["ageBand"]}[];signup?:HandwritingSignup}>(CONTRIBUTOR_API+"/enrolments");
+      signup=data.signup;
+      if (!data.enrolments.length && signup) return signupView();
       if (!data.enrolments.length) {
         notice(text("אין משימות לחשבון הזה. אם הוזמנתם, שלחו למארגני המיזם באופן פרטי את קוד החשבון.","This account has no assignments. If you were invited, share the account code privately with your organiser."));
         root.append(h("p",{},text("קוד חשבון", "Account code")," ",bdi(account,"ltr")));

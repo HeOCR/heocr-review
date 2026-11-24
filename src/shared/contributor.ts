@@ -6,8 +6,11 @@ export type CaptureMode = typeof captureModes[number];
 export const requiredPrintModes = ["flat", "angle", "folded", "crumpled", "scribbled"] as const;
 export type PrintCaptureStep = { mode: CaptureMode; saved: boolean };
 export type ContributorSplit = "train" | "dev" | "eval_open";
-export const ageBands = ["10_12", "13_15", "16_17", "18_plus"] as const;
+export const ageBands = ["10_12", "13_15", "16_17", "13_17", "18_plus"] as const;
 export type AgeBand = typeof ageBands[number];
+export const handwritingAgeBands = ["10_12", "13_17", "18_plus"] as const;
+export const handwritingSets = ["A", "B", "C", "D"] as const;
+export type HandwritingSet = typeof handwritingSets[number];
 export type Language = "he" | "en";
 export type ConsentCopy = { text: string; sha256: string };
 export type FormField = { id: string; label: string; value: string };
@@ -29,10 +32,17 @@ export type ContributorProfile = {
   role: "writer" | "guardian";
   writer: string;
   ageBand: AgeBand;
-  state: "guardian" | "assent" | "ready" | "withdrawn";
+  state: "guardian" | "assent" | "roster_pending" | "ready" | "withdrawn";
   receipt: string | null;
+  guardianPairingCode?: string;
   licence: "cc0_open";
   version: string;
   copy: Record<Language, ConsentCopy>;
   queues: ContributorQueue[];
+};
+
+
+export type HandwritingSignup = {
+  guardian: Record<Language, ConsentCopy>;
+  version: string;
 };

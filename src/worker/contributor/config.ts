@@ -135,7 +135,7 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
   return m;
 }
 
-async function pinnedJSON(bucket: R2Bucket, key: string, pin: string, maxBytes: number): Promise<unknown> {
+export async function pinnedJSON(bucket: R2Bucket, key: string, pin: string, maxBytes: number): Promise<unknown> {
   const object = await bucket.get(`${contributorRoot}${key}/${pin}.json`);
   if (!object || object.size > maxBytes) throw gone();
   const data = new Uint8Array(await object.arrayBuffer());

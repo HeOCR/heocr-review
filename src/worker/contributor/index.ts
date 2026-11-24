@@ -1,3 +1,6 @@
+import {
+  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSignup, rosterGate, rosterPinned, selfWriters,
+} from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
   CONTRIBUTOR_API, type AgeBand, type ContributorKind, type ContributorNext, type ContributorProfile,
@@ -23,7 +26,7 @@ type Enrolment = {
   receipt: string; withdrawn_at: string | null; purged_at: string | null;
   writer_id: string; writer_account: string; guardian_account: string | null; age_band: AgeBand; split: ContributorSplit;
 };
-type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null };
+type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null; selfPin: string | null; pinned: boolean };
 const enrollmentFields = `writer_id, writer_account, guardian_account, age_band, split, receipt,
   guardian_version, guardian_sha256, assent_version, assent_sha256, withdrawn_at, purged_at`;
 const current = (a: Access) => a.manifest.policy;
@@ -75,14 +78,17 @@ async function access(ctx: Ctx, requested: string | null): Promise<Access> {
   if (ctx.env.CONTRIBUTOR_APP_ENABLED !== "1" || !canonicalContributorOrigin(ctx.env, ctx.url)) throw gone();
   const actor = await session(ctx);
   enforce(ctx.request.method === "GET" ? LIMITS.readMinute : LIMITS.writeMinute, actor, ctx.now);
-  const manifest = await contributorManifest(ctx.env);
-  const writer = manifest.writers.find(w => w.writerAccount === actor && (!requested || w.id === requested)) ??
-    manifest.writers.find(w => w.guardianAccount === actor && w.id === requested);
+  const signup = await handwritingPlan(ctx);
+  const manifest = signup?.manifest ?? await contributorManifest(ctx.env);
+  const writers = signup ? await selfWriters(ctx, signup, actor) : manifest.writers;
+  const writer = writers.find(w => w.writerAccount === actor && (!requested || w.id === requested)) ??
+    writers.find(w => w.guardianAccount === actor && w.id === requested);
   if (!writer) throw gone();
   const row = await ctx.env.DB.prepare(`SELECT ${enrollmentFields} FROM contributor_enrolments WHERE writer_id=?`)
     .bind(writer.id).first<Enrolment>();
   if (row && !owner(row, writer)) throw gone();
-  return {ctx, manifest, actor, writer, role: writer.writerAccount === actor ? "writer" : "guardian", row};
+  return {ctx, manifest, actor, writer, role: writer.writerAccount === actor ? "writer" : "guardian", row,
+    selfPin: signup?.pin ?? null, pinned: !signup || await rosterPinned(ctx, writer.id, signup.pin)};
 }
 function state(a: Access): ContributorProfile["state"] {
   if (a.row?.withdrawn_at) return "withdrawn";
@@ -91,7 +97,7 @@ function state(a: Access): ContributorProfile["state"] {
   if (!adultWriter(a) && (a.row?.guardian_version !== version ||
       !Object.values(guardian).some(c=>c.sha256===a.row?.guardian_sha256))) return "guardian";
   if (a.row?.assent_version !== version || !Object.values(assent).some(c=>c.sha256===a.row?.assent_sha256)) return "assent";
-  return "ready";
+  return a.pinned ? "ready" : "roster_pending";
 }
 function requireReady(a: Access) {
   if (a.role !== "writer" || state(a) !== "ready") throw gone();
@@ -158,7 +164,9 @@ async function profile(a: Access): Promise<ContributorProfile> {
   }
   const policy=current(a);
   return {role:a.role,writer:a.writer.id,ageBand:a.writer.ageBand,state:phase,receipt:a.row?.receipt??null,
-    licence:policy.licence, version:policy.version,copy:a.role==="guardian"?policy.guardian:policy.assent,queues};
+    licence:policy.licence, version:policy.version,copy:a.role==="guardian"?policy.guardian:policy.assent,queues,
+    ...(a.selfPin && a.role==="writer" && phase==="guardian" && !a.writer.guardianAccount
+      ? {guardianPairingCode:await guardianCode(a.ctx,a.selfPin,a.writer.id)} : {})};
 }
 
 function enrolment(a: Access) {
@@ -191,7 +199,8 @@ async function consent(a: Access) {
         AND (assent_version IS NOT ? OR assent_sha256 IS NOT ?)`)
       .bind(version,copy.sha256,now(a.ctx),a.writer.id,a.actor,a.writer.split,version,copy.sha256)]);
   } else {
-    if (state(a)!=="assent" && state(a)!=="ready") throw gone();
+    const phase=state(a);
+    if (phase==="guardian" || phase==="withdrawn") throw gone();
     const guardianSha=a.row!.guardian_sha256;
     await a.ctx.env.DB.prepare(`
       UPDATE contributor_enrolments SET assent_version=?, assent_sha256=?, assent_at=?
@@ -207,8 +216,8 @@ async function withdraw(a: Access) {
   const role=a.role==="writer"?"writer_account":"guardian_account";
   await a.ctx.env.DB.batch([enrolment(a),a.ctx.env.DB.prepare(`
     UPDATE contributor_enrolments SET withdrawn_at=COALESCE(withdrawn_at,?)
-    WHERE writer_id=? AND ${role}=? AND writer_account=? AND guardian_account IS ? AND age_band=? AND split=? AND withdrawn_at IS NULL`)
-    .bind(now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.guardianAccount,a.writer.ageBand,a.writer.split)]);
+    WHERE writer_id=? AND ${role}=? AND writer_account=? AND age_band=? AND split=? AND withdrawn_at IS NULL`)
+    .bind(now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.ageBand,a.writer.split)]);
   return json(await profile(await access(a.ctx,a.writer.id)));
 }
 
@@ -256,9 +265,11 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
     SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,?,? FROM contributor_enrolments
     WHERE writer_id=? AND writer_account=? AND guardian_account IS ? AND split=? AND withdrawn_at IS NULL
       AND guardian_version IS ? AND guardian_sha256 IS ? AND assent_version=? AND assent_sha256=?
+      ${a.selfPin ? "AND "+rosterGate : ""}
     ON CONFLICT DO NOTHING
   `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
-    w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256).run();
+    w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256,
+    ...(a.selfPin ? [w.id,a.selfPin] : [])).run();
   if (result.meta.changes===1) return true;
   const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
     .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();
@@ -331,13 +342,30 @@ export async function contributor(ctx: Ctx) {
   if (method!=="GET") assertSameOrigin(ctx.request);
   const deletion=/^\/operator\/withdrawals\/(cw-withdraw-[a-f0-9]{32})$/.exec(suffix);
   if (method==="POST" && deletion) return purge(ctx,deletion[1]!);
-  if (suffix==="/enrolments" && method==="GET") {
+  if (suffix==="/enrolments" || suffix==="/guardian" || suffix==="/operator/handwriting-roster") {
     if (ctx.env.CONTRIBUTOR_APP_ENABLED!=="1" || !canonicalContributorOrigin(ctx.env,ctx.url)) throw gone();
     const actor=await session(ctx);
-    enforce(LIMITS.readMinute,actor,ctx.now);
-    const m=await contributorManifest(ctx.env);
-    return json({enrolments:m.writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
-      .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"}))});
+    enforce(method==="GET" ? LIMITS.readMinute : LIMITS.writeMinute,actor,ctx.now);
+    const signup=await handwritingPlan(ctx);
+    if (suffix==="/enrolments" && method==="GET") {
+      const writers=signup ? await selfWriters(ctx,signup,actor) : (await contributorManifest(ctx.env)).writers;
+      return json({enrolments:writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
+        .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"})),
+        ...(signup && actor!==signup.reviewer ? {signup:{guardian:signup.manifest.policy.guardian,
+          version:signup.manifest.policy.version}} : {})},200,privateHeaders);
+    }
+    if (!signup) throw gone();
+    if (suffix==="/enrolments" && method==="POST") {
+      const writer=await handwritingSignup(ctx,signup,actor);
+      return json(await profile(await access(ctx,writer)),200,privateHeaders);
+    }
+    if (suffix==="/guardian" && method==="POST") {
+      const writer=await acceptGuardian(ctx,signup,actor);
+      return json(await profile(await access(ctx,writer)),200,privateHeaders);
+    }
+    if (suffix==="/operator/handwriting-roster" && (method==="GET" || method==="POST"))
+      return handwritingRoster(ctx,signup,actor);
+    throw gone();
   }
   const route=/^\/writers\/(cw-[a-f0-9]{32})(?:\/(consent|withdraw)|\/tasks\/([A-Za-z0-9_-]{1,64})\/(sheet|crop|submit))?$/.exec(suffix);
   if (!route) throw gone();
