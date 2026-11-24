@@ -1,10 +1,13 @@
 # Handwriting v3 self-enrolment
 
 At `/app/#contributor`, a signed-in writer enters an invitation code and
-chooses an age band and one of the currently offered sets. The app offers
-every least-assigned set, then assigns all four of that set's sheets. This
-keeps assignment counts across sets and across the sixteen sheets within
-one writer of one another. Multiple writers can copy the same sheet.
+chooses an age band of 10 or older. The Worker selects the least-filled
+split with room remaining before offering any sets. Within that split it
+offers every least-assigned set. The writer selects one set and gets all four
+of its sheets. The write checks the offered split and set against current
+allocations. A stale offer asks the writer to check again, leaving the
+invitation use available. Multiple writers in the same split can copy the
+same sheet.
 Registration takes at most 50 writers and 200 uploaded sheets, one upload
 per writer and assigned sheet. A rejected signup leaves its code use
 available.
@@ -22,7 +25,9 @@ Migration `0026_handwriting_self_enrolment.sql` copies the existing
 contributor tables and adds the roster, invite revocation and checkpoint
 tables. Migration `0027_handwriting_withdrawal.sql` adds publication pins,
 withdrawal receipt digests and an opt-out flag. Migration `0028` adds
-the roster operator's rate and access audit. Use the production runbook,
+the roster operator's rate and access audit. Migration `0029` requires a
+checkpoint covering the writer before a submission enters the release
+candidates view. Use the production runbook,
 rehearsal against a restore-readable
 export, a current
 D1 budget including the table copies and indexes, a clean deployed commit
@@ -43,6 +48,9 @@ It contains these fields:
   and room remaining. The maxima must cover the writer limit. Allocations
   count after withdrawal. Only provisioned private split buckets can
   be selected.
+- `setsBySplit` maps each configured split to its permitted sets. Every
+  set belongs to exactly one split. The plan validator rejects a normalized
+  sentence shared across splits, even when the sheets have different hashes.
 - `invites` contains the SHA-256 of each individually issued single-use
   invitation. It may be empty with a cohort code.
 - Optional `cohort` specifies `{sha256,maxUses,expiresAt}` for a single
@@ -53,12 +61,13 @@ It contains these fields:
 - `sheets` maps `A`, `B`, `C`, `D` to four ordered handwriting tasks
   `HW-V3-<set>01` through `04`. Include the approved 30
   sentences, prompt SHA, rights and PDF SHA for each. Use the contributor
-  v1 handwriting task shape. Store the PDF in every approved split bucket
-  at `contributor-v1/sheets/<sha256>.pdf`. Read the plan and each PDF
-  back against its pin.
+  v1 handwriting task shape. Store each PDF only in the private bucket
+  assigned to its set at `contributor-v1/sheets/<sha256>.pdf`. Read the
+  plan and each PDF back against its pin.
 
-After the required approvals, pin `CONTRIBUTOR_HANDWRITING_CONFIG_SHA256`
-and enable `CONTRIBUTOR_APP_ENABLED=1` for collection. Keep
+Pin `CONTRIBUTOR_HANDWRITING_CONFIG_SHA256` with collection off for the eval
+operator's readback. Enable `CONTRIBUTOR_APP_ENABLED=1` only after the
+separate collection approval. Keep
 `CONTRIBUTOR_CONFIG_SHA256` unset for this handwriting-only launch. The enabled plan is immutable for the pilot.
 Registration and guardian pairing have an eight-attempt-per-minute
 limit per account per isolate. Existing contributor request limits and
@@ -91,7 +100,8 @@ pinned plan while collection is off. Archive the
 The rows contain ordinal, writer code, age band, set and split. No account
 IDs or consent records appear in this snapshot. Keep the snapshot in
 private custody. Review the allocation and append-only prefix, and
-verify the reported SHA-256 against these bytes.
+verify the reported SHA-256 against these bytes. Both GET and POST reject a
+roster containing a writer whose assigned set falls outside their split.
 
 POST the reviewed `{sha256,throughOrdinal,previousSha256}` back to the
 same endpoint as JSON with the bearer. Read the head back. A stale or
@@ -128,9 +138,13 @@ origin. Repeat after in-flight requests drain. Reconcile any staging or
 working copies governed by the withdrawal before acknowledging completion.
 Keep receipts, account IDs and working copies out of logs.
 
-Select sources for downstream review from the release candidates view.
-Check eligibility again on the live database before a separately approved
-release, after reconciling withdrawal requests. Verify the public release
+Uploads remain in their private split buckets. Before a submission leaves
+quarantine, require a roster checkpoint that covers its writer, a passed
+operator review for page identity and privacy, and eval approval of the
+split's intended use. The release candidates view enforces checkpoint
+coverage. The operator and eval record the other two approvals separately.
+Check all three again before any downstream use, after reconciling
+withdrawal requests. Verify the public release
 manifest and byte readback with the lead. To pin an exact published original,
 POST `{contentSha256,releaseSha256}` to
 `/api/contributor/v1/operator/handwriting-publications` as the operator.

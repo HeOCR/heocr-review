@@ -5,6 +5,43 @@ const writer = "cw-" + "a".repeat(32);
 const writerPath = `${CONTRIBUTOR_API}/writers/${writer}`;
 const original = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/R8kAAAAASUVORK5CYII=", "base64");
 
+test("handwriting signup on a phone offers only the sets from the assigned split", async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  const copy = { text: "Invented fixture wording", sha256: "1".repeat(64) };
+  const policy = { version: "fixture", guardian: { he: copy, en: copy } };
+  const who = { inviteCode: "2".repeat(32), ageBand: "10_12" };
+  const profile: ContributorProfile = {
+    role: "writer", writer, ageBand: "10_12", state: "guardian", receipt: null,
+    licence: "cc0_open", version: "fixture", copy: { he: copy, en: copy }, queues: [],
+  };
+  await page.route("**/api/config", async route => {
+    const response = await route.fetch();
+    return route.fulfill({ response, json: { ...await response.json(), contributorEnabled: true } });
+  });
+  await page.route(`**${CONTRIBUTOR_API}/enrolments**`, async route => {
+    const request = route.request();
+    if (request.method() === "GET") return route.fulfill({ json: { enrolments: [], signup: policy } });
+    if (new URL(request.url()).pathname.endsWith("/options")) {
+      expect(request.postDataJSON()).toEqual(who);
+      return route.fulfill({ json: { split: "eval_open", sets: ["D"] } });
+    }
+    expect(request.postDataJSON()).toEqual({ ...who, split: "eval_open", set: "D" });
+    return route.fulfill({ json: profile });
+  });
+  await page.goto("/app/#contributor");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByText("הרשמה לכתיבה ביד")).toBeVisible();
+  await expect(page.getByLabel("סט להעתקה")).toHaveCount(0);
+  await page.getByLabel("קוד הזמנה").fill(who.inviteCode);
+  await page.getByLabel("קבוצת גיל").selectOption(who.ageBand);
+  await page.getByRole("button", { name: "המשך", exact: true }).click();
+  const set = page.getByLabel("סט להעתקה");
+  await expect(set.locator("option")).toHaveCount(1);
+  await expect(set).toHaveValue("D");
+  await page.getByRole("button", { name: "הרשמה", exact: true }).click();
+  await expect(page.getByText("המשימות ייפתחו אחרי אישור", { exact: false })).toBeVisible();
+});
+
 test("contributor invitation shows only sign-in then the Hebrew assigned walkthroughs", async ({ page }) => {
   await page.setViewportSize({ width: 412, height: 915 });
   await page.addInitScript(() => localStorage.setItem("heocr-review.prefs.v1", JSON.stringify({ lang: "en" })));

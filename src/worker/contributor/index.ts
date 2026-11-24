@@ -1,6 +1,6 @@
 import { purgeHandwritingEnrolment, recordHandwritingPublication } from "./handwriting-withdrawal";
 import {
-  acceptGuardian, guardianCode, handwritingPlan, handwritingSetOptions, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
+  acceptGuardian, guardianCode, handwritingOffer, handwritingPlan, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
 } from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
@@ -363,7 +363,8 @@ export async function contributor(ctx: Ctx) {
   }
 
   const revoke=suffix==="/operator/handwriting-invites/revoke";
-  if (suffix==="/enrolments" || suffix==="/guardian" || revoke) {
+  const options=suffix==="/enrolments/options";
+  if (suffix==="/enrolments" || options || suffix==="/guardian" || revoke) {
     if (ctx.env.CONTRIBUTOR_APP_ENABLED!=="1" || !canonicalContributorOrigin(ctx.env,ctx.url)) throw gone();
     const actor=await session(ctx);
     enforce(method==="GET" ? LIMITS.readMinute : LIMITS.writeMinute,actor,ctx.now);
@@ -373,10 +374,11 @@ export async function contributor(ctx: Ctx) {
       return json({enrolments:writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
         .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"})),
         ...(signup && !await handwritingOptedOut(ctx,actor) ? {signup:{guardian:signup.manifest.policy.guardian,
-          version:signup.manifest.policy.version,sets:await handwritingSetOptions(ctx,signup)}} : {})},200,privateHeaders);
+          version:signup.manifest.policy.version}} : {})},200,privateHeaders);
     }
     if (!signup) throw gone();
     if (revoke && method==="POST") return revokeHandwritingInvite(ctx,signup,actor);
+    if (options && method==="POST") return json(await handwritingOffer(ctx,signup,actor),200,privateHeaders);
     if (suffix==="/enrolments" && method==="POST") {
       const writer=await handwritingSignup(ctx,signup,actor);
       return json(await profile(await access(ctx,writer)),200,privateHeaders);
