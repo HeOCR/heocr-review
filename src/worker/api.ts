@@ -223,7 +223,7 @@ export async function batches(ctx: Ctx): Promise<Response> {
     if (!type) continue;
     if (isConsensus(b) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const referenceReview = await referenceConsensusActive(ctx.env.DB, b);
-    const filter = referenceReview ? await referenceFilter(ctx.env.DB, b, false) : null;
+    const filter = referenceReview ? await referenceFilter(ctx.env.DB, b, "all") : null;
     out.push({
       ...(referenceReview ? { referenceTyping: true as const } : {}),
       id: b.id,
@@ -258,7 +258,7 @@ export async function next(ctx: Ctx, batchId: string): Promise<Response> {
   if (isRestrictedDraftVerification(batch)) {
     if (await referenceConsensusActive(ctx.env.DB, batch)) {
       const audit = params.get("queue") === "check";
-      const filter = await referenceFilter(ctx.env.DB, batch, audit);
+      const filter = await referenceFilter(ctx.env.DB, batch, audit ? "audit" : "ordinary");
       const out = await nextFor(ctx.env.DB, batch, reviewer.id, ctx.now, filter, false, false, audit ? "audit" : "ordinary");
       if (audit || out.proposal) return json(out);
       const page = await nextPage(ctx.env.DB, batch, reviewer.id, "triage") ?? await nextPage(ctx.env.DB, batch, reviewer.id, "fix");
@@ -465,7 +465,7 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     value: normalized.value,
     text: normalized.text,
     progress: await progressFor(db, batch, reviewer.id, ctx.now,
-      lane ? await referenceFilter(db, batch, lane === "audit") : null, isAdmin(ctx.env, reviewer.id)),
+      lane ? await referenceFilter(db, batch, lane === "audit" ? "audit" : "ordinary") : null, isAdmin(ctx.env, reviewer.id)),
   });
 }
 

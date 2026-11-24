@@ -426,13 +426,18 @@ it("uses sealed line order and blank audit typing while keeping real answers and
   expect((await req("POST", decision(prior!.id), owner.cookie, host, { value: "exact" })).status).toBe(200);
   await env.DB.prepare("UPDATE reference_consensus_runs SET active=1 WHERE projection_sha256=?1").bind(projection).run();
   expect((await req("GET", `${root}/next?queue=check`, admin.cookie)).status).toBe(404);
-  expect(await (await req("GET", `${root}/next`)).json()).toMatchObject({ proposal: { id: difficult!.id } });
+  const ordinary = await (await req("GET", `${root}/next`)).json<{ progress: { remainingForMe: number } }>();
+  expect(ordinary).toMatchObject({ proposal: { id: difficult!.id } });
   expect((await req("GET", `/api/proposals/${accepted!.id}`)).status).toBe(404);
   const blind = await req("GET", `${root}/next?queue=check`);
   expect(blind.headers.get("cache-control")).toBe("no-store");
   const body = await blind.json();
   expect(body).toMatchObject({ proposal: { id: audit!.id, view: { mode: "type", pass: 2, candidate: "", runs: [] } },
     progress: { total: 1, remainingForMe: 1 }, prefetch: [] });
+  const list = await (await req("GET", "/api/batches")).json<{ batches: { id: string; progress: unknown }[] }>();
+  expect(list.batches.find(b => b.id === batch)).toMatchObject({
+    progress: { remainingForMe: ordinary.progress.remainingForMe + 1 },
+  });
   expect(JSON.stringify(body)).not.toContain("טיוטה");
   expect(await (await req("GET", `/api/proposals/${audit!.id}`)).json()).toMatchObject({ proposal: { view: { candidate: "" } } });
   expect((await req("POST", decision(audit!.id), owner.cookie, host, { value: "exact" })).status).toBe(400);

@@ -65,6 +65,16 @@ export function saveContributorLanguage(language: Lang, s: Store | null = store(
   try { s?.setItem(CONTRIBUTOR_LANGUAGE_KEY, language); } catch { /* The current page keeps the chosen language. */ }
 }
 
+const hideCompletedKey = (reviewerId: string) => `heocr-review.hide-completed.v1.${reviewerId}`;
+
+export function loadHideCompleted(reviewerId: string, s: Store | null = store()): boolean {
+  try { return s?.getItem(hideCompletedKey(reviewerId)) !== "0"; } catch { return true; }
+}
+
+export function saveHideCompleted(reviewerId: string, hide: boolean, s: Store | null = store()): void {
+  try { s?.setItem(hideCompletedKey(reviewerId), hide ? "1" : "0"); } catch { /* The list still updates. */ }
+}
+
 /** Apply to the page: data-theme on <html> (absent = follow the system), the language, and body.swap. */
 export function applyPrefs(p: Prefs, doc: Document = document): void {
   const html = doc.documentElement;

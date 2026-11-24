@@ -8,7 +8,7 @@ import { ApiFailure, get } from "./api";
 import { h, mount } from "./dom";
 import { lang, t } from "./i18n";
 import { icon, mark, type IconName } from "./icons";
-import { applyPrefs, contributorLanguage, loadPrefs, saveContributorLanguage, savePrefs, type Prefs } from "./prefs";
+import { applyPrefs, contributorLanguage, loadHideCompleted, loadPrefs, saveContributorLanguage, saveHideCompleted, savePrefs, type Prefs } from "./prefs";
 import { adminView } from "./views/admin";
 import type { ReviewScreen } from "./views/common";
 import { lineConsensusView } from "./views/consensus";
@@ -208,7 +208,7 @@ async function route(): Promise<void> {
     else if (batches.length === 1 && hash !== "tasks") batch = batches[0];
     if (!batch) {
       if (!batches.length) return show("doc", stateScreen("tasks", t("empty_h"), t("empty_p")));
-      return show("doc", picker(batches));
+      return show("doc", picker(batches, me.reviewerId));
     }
     const subset = chosen?.[2] ? (batch.subsets.find((s) => s.id === chosen[2]) ?? null) : null;
     const hooks = { needTerms, signedOut, where: (line: string | null) => setWhere(whereTitle, line) };
@@ -284,20 +284,26 @@ function queueNav(batch: BatchSummary, current: "triage" | "fix" | undefined): H
 }
 
 /** Every open batch, the ones with work left for this reviewer first. */
-function picker(batches: BatchSummary[]): HTMLElement {
+function picker(batches: BatchSummary[], reviewerId: string): HTMLElement {
+  const remaining = (b: BatchSummary) =>
+    Math.max(b.progress.remainingForMe, b.triage ? b.triage.triage + b.triage.fix : 0);
+  const hasWork = (b: BatchSummary) =>
+    b.progress.ownOnly === true || remaining(b) > 0 || (b.pageSweep?.remainingPages ?? 0) > 0;
   const priority = (b: BatchSummary) => {
     const index = PAGE_SWEEP_BATCHES.findIndex(id => id === b.id);
     return (b.pageSweep?.remainingPages ?? 0) > 0 && index >= 0 ? index : PAGE_SWEEP_BATCHES.length;
   };
   const sorted = [...batches].sort((a, b) => priority(a) - priority(b) ||
-    Number(b.progress.remainingForMe > 0) - Number(a.progress.remainingForMe > 0));
-  return h(
-    "div",
-    { class: "picker" },
-    h("h1", {}, t("pick_h")),
-    ...sorted.map((b) => {
+    Number(hasWork(b)) - Number(hasWork(a)));
+  const checkbox = h("input", { type: "checkbox", checked: loadHideCompleted(reviewerId) });
+  const list = h("div", { class: "picker" });
+  const renderList = () => {
+    const shown = checkbox.checked ? sorted.filter(hasWork) : sorted;
+    list.replaceChildren(...shown.map((b) => {
       const p = b.progress;
-      const pages = desktopSweep() ? b.pageSweep?.remainingPages : undefined;
+      const left = remaining(b);
+      const sweeps = b.pageSweep?.remainingPages;
+      const pages = left === 0 || (desktopSweep() && (sweeps ?? 0) > 0) ? sweeps : undefined;
       // A volunteer batch shows the volunteer's own count only (nothing about other volunteers' work).
       const own = p.ownOnly === true;
       const pct = !own && p.total ? Math.round((p.covered / p.total) * 100) : 0;
@@ -307,7 +313,7 @@ function picker(batches: BatchSummary[]): HTMLElement {
         h("strong", {}, b.taskLabel[lang()]),
         own
           ? h("span", { class: "count" }, h("strong", { class: "num" }, String(p.decidedByMe)), ` ${t("decided")}`)
-          : h("span", { class: "count" }, h("strong", { class: "num" }, String(pages ?? p.remainingForMe)), pages === undefined ? ` ${t("remain")}` : lang() === "he" ? " עמודים נותרו" : " pages left"),
+          : h("span", { class: "count" }, h("strong", { class: "num" }, String(pages ?? left)), pages === undefined ? ` ${t("remain")}` : lang() === "he" ? " עמודים נותרו" : " pages left"),
         h(
           "span",
           { class: "meta" },
@@ -316,8 +322,16 @@ function picker(batches: BatchSummary[]): HTMLElement {
         ),
         own ? null : h("span", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }, h("i", { style: `width:${pct}%` })),
       );
-    }),
-  );
+    }));
+    if (!shown.length) list.append(h("p", { class: "muted", role: "status" }, t("no_tasks_left")));
+  };
+  checkbox.addEventListener("change", () => {
+    saveHideCompleted(reviewerId, checkbox.checked);
+    renderList();
+  });
+  renderList();
+  return h("div", { class: "picker" }, h("h1", {}, t("pick_h")),
+    h("label", { class: "check" }, checkbox, t("hide_completed_tasks")), list);
 }
 
 async function start(): Promise<void> {
