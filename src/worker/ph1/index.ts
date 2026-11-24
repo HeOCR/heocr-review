@@ -6,12 +6,13 @@ import { UnsupportedPhoto } from "./exif";
 import { sanitizePhoto } from "./photo";
 import { uploadPage, uploadScript } from "./page";
 
-const event = "ph1-phone-2026-11-26";
-const day = "2026-11-26";
-const startsAt = Date.parse("2026-11-26T00:00:00+02:00");
-const closesAt = Date.parse("2026-11-27T00:00:00+02:00");
+const event = "ph1-phone-2026-11-26-to-2026-11-29";
+const opens = "2026-11-26T00:00:00+02:00";
+const closes = "2026-11-30T00:00:00+02:00";
+const startsAt = Date.parse(opens);
+const closesAt = Date.parse(closes);
 const prefix = `ph1/quarantine/${event}/photos/`;
-const cap = 240;
+const cap = 420;
 const maxBytes = 20*1024*1024;
 const participants = Array.from({length:20},(_,i) => "P"+String(i+1).padStart(2,"0"));
 const digest = /^[0-9a-f]{64}$/;
@@ -38,14 +39,21 @@ async function matches(code: string, verifier: string | undefined) {
     crypto.subtle.timingSafeEqual(encoder.encode(await hash(code)),encoder.encode(verifier));
 }
 
+const approvedConsent = {
+  version:"ph1-2026-11-25-amendment-1",
+  text:{
+    en:"By uploading, you release these photos under CC0. Please don't photograph people.",
+    he:"בהעלאת התמונות אתם משחררים אותן לשימוש חופשי לפי CC0. נא לא לצלם אנשים.",
+  },
+} as const;
+
 function consentConfig(value: string | undefined) {
   if (!value || value.length>4096) return null;
   try {
-    const body = JSON.parse(value) as {version?:unknown; text?:unknown} | null;
-    if (typeof body?.version !== "string" || !/^[A-Za-z0-9._-]{1,80}$/.test(body.version) ||
-        typeof body.text !== "string" || !body.text.trim() || body.text.length>1000 ||
-        /[\u0000-\u001f\u007f]/.test(body.text)) return null;
-    return {version:body.version,text:body.text};
+    const body = JSON.parse(value) as {version?:unknown; text?:{he?:unknown; en?:unknown}} | null;
+    if (body?.version !== approvedConsent.version || body.text?.he !== approvedConsent.text.he ||
+        body.text?.en !== approvedConsent.text.en) return null;
+    return approvedConsent;
   } catch { return null; }
 }
 function filename(request: Request) {
@@ -70,15 +78,19 @@ async function entries(bucket: R2Bucket) {
   return rows;
 }
 
-async function upload(ctx: Ctx, bucket: R2Bucket, consent: {version:string; text:string}) {
+async function upload(ctx: Ctx, bucket: R2Bucket, consent: typeof approvedConsent) {
   const { request, env, now } = ctx;
   assertSameOrigin(request);
   enforce({bucket:"ph1-attempt",max:120,windowS:60},await clientKey(env,request),now);
   const code = request.headers.get("x-ph1-event-code") ?? "";
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(code) || !await matches(code,env.PH1_EVENT_CODE_SHA256))
     return fail(403,"event_closed");
+  const language = request.headers.get("x-ph1-consent-language");
   if (request.headers.get("x-ph1-consent") !== "confirmed" ||
-      request.headers.get("x-ph1-consent-version") !== consent.version) return fail(409,"consent_required");
+      request.headers.get("x-ph1-consent-version") !== consent.version ||
+      (language !== "he" && language !== "en")) return fail(409,"consent_required");
+  const declared = request.headers.get("x-ph1-transfer");
+  if (declared !== null && declared !== "recompressed") return fail(400,"invalid_transfer");
   const participant = request.headers.get("x-ph1-participant") ?? "";
   if (!participants.includes(participant)) return fail(400,"invalid_participant");
   const originalFilename = filename(request);
@@ -96,7 +108,9 @@ async function upload(ctx: Ctx, bucket: R2Bucket, consent: {version:string; text
     participant, originalFilename, originalSha256, sanitizedSha256, mime:safe.mime,
     make:safe.meta.make ?? "", model:safe.meta.model ?? "",
     removedTags:JSON.stringify([...safe.meta.removed].sort()),
-    consentVersion:consent.version, consentSha256:await hash(consent.text), receivedAt:new Date(now).toISOString(),
+    transfer:declared ?? "unknown",
+    consentVersion:consent.version, consentLanguage:language, consentSha256:await hash(consent.text[language]),
+    receivedAt:new Date(now).toISOString(),
   };
   if (encoder.encode(JSON.stringify(metadata)).length>1900) return fail(415,"unsupported_or_unsafe_photo");
 
@@ -132,14 +146,27 @@ async function operator(ctx: Ctx, bucket: R2Bucket) {
         original_sha256:m.originalSha256, sanitized_sha256:m.sanitizedSha256,
         bytes:item.size, mime:m.mime, make:m.make || null, model:m.model || null,
         removed_tags:JSON.parse(m.removedTags!) as string[],
-        received_at:m.receivedAt, consent_version:m.consentVersion, consent_sha256:m.consentSha256,
+        transfer:m.transfer, received_at:m.receivedAt,
+        consent_version:m.consentVersion, consent_language:m.consentLanguage, consent_sha256:m.consentSha256,
         download:`/api/ph1/operator/photos/${receiptFor(ordinal)}`,
       };
     });
-    const consents = [...new Map(photos.map(p => [p.participant,{
-      participant:p.participant, date:day, version:p.consent_version, sha256:p.consent_sha256,
-    }])).values()];
-    return json({schema:"heocr.ph1_phone_intake.v1",event,date:day,count:photos.length,cap,consents,photos},200,headers);
+    // One initial consent per participant. Individual uploads retain their own language and digest.
+    const initial = new Map<string,{participant:string; date:string; version:string; language:string; sha256:string}>();
+    for (const photo of photos) {
+      if (!photo.participant || initial.has(photo.participant)) continue;
+      const israelDate = new Date(Date.parse(photo.received_at!)+2*60*60*1000).toISOString().slice(0,10);
+      initial.set(photo.participant,{
+        participant:photo.participant,date:israelDate,version:photo.consent_version!,
+        language:photo.consent_language!,sha256:photo.consent_sha256!,
+      });
+    }
+    const consent = consentConfig(env.PH1_CONSENT);
+    const consent_policy = consent && {
+      version:consent.version, sha256:{he:await hash(consent.text.he),en:await hash(consent.text.en)},
+    };
+    return json({schema:"heocr.ph1_phone_intake.v1",event,date:opens.slice(0,10),
+      window:{opens_at:opens,closes_at:closes},count:photos.length,cap,consent_policy,consents:[...initial.values()],photos},200,headers);
   }
   const id = /^\/api\/ph1\/operator\/photos\/([0-9]{3})$/.exec(url.pathname)?.[1];
   if (!id || Number(id)<1 || Number(id)>cap) return fail(404,"not_found");
