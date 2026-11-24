@@ -1,7 +1,7 @@
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g,ch =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]!);
 
-export function uploadPage(consent: {version:string; text:string}, participants: string[]) {
+export function uploadPage(consent: {version:string; text:{he:string; en:string}}, participants: string[]) {
   return `<!doctype html>
 <html lang="he" dir="rtl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,15 +20,20 @@ export function uploadPage(consent: {version:string; text:string}, participants:
 </style>
 <script src="/ph1/upload.js" defer></script></head>
 <body><main><h1>העלאת תמונות מהטלפון</h1>
-<p>בחרו את קוד המשתתף שקיבלתם והעלו את קובצי הצילום המקוריים. אפשר לבחור כמה תמונות יחד. כבו את שמירת המיקום במצלמה וצלמו רק את הדף.</p>
+<p>בחרו את קוד המשתתף שקיבלתם והעלו את קובצי הצילום, עדיף הקבצים המקוריים. אפשר לבחור כמה תמונות יחד. כבו את שמירת המיקום במצלמה וצלמו רק את הדף.</p>
 <form id="upload" data-consent-version="${escapeHtml(consent.version)}">
   <label>קוד האירוע <input id="event" type="password" required maxlength="64" autocomplete="off" dir="ltr"></label>
   <label>קוד משתתף <select id="participant" required><option value="">בחרו קוד</option>
   ${participants.map(p=>`<option value="${p}">${p}</option>`).join("")}</select></label>
-  <label class="consent"><input type="checkbox" id="consent" required><span>${escapeHtml(consent.text)}</span></label>
-  <label>תמונות מקוריות (JPEG, HEIC או PNG)
+  <label>שפת ההסכמה <select id="consent-language"><option value="he">עברית</option><option value="en" lang="en">English</option></select></label>
+  <label class="consent"><input type="checkbox" id="consent" required>
+    <span data-consent-text="he" lang="he">${escapeHtml(consent.text.he)}</span>
+    <span data-consent-text="en" lang="en" dir="ltr" hidden>${escapeHtml(consent.text.en)}</span>
+  </label>
+  <label>תמונות (JPEG, HEIC או PNG)
     <input id="photos" type="file" accept=".jpg,.jpeg,.heic,.heif,.png,image/jpeg,image/heic,image/png" multiple required>
   </label>
+  <label class="consent"><input type="checkbox" id="recompressed"><span>התמונות נשלחו בוואטסאפ או נדחסו בהעברה</span></label>
   <button type="submit">העלאת תמונות</button>
   <p id="status" role="status" aria-live="polite">הועלו 0 תמונות</p>
   <ul id="failed" hidden aria-label="תמונות שלא הועלו"></ul>
@@ -40,6 +45,8 @@ const form = document.querySelector("#upload");
 const eventCode = document.querySelector("#event");
 const participant = document.querySelector("#participant");
 const consent = document.querySelector("#consent");
+const language = document.querySelector("#consent-language");
+const recompressed = document.querySelector("#recompressed");
 const photos = document.querySelector("#photos");
 const status = document.querySelector("#status");
 const failed = document.querySelector("#failed");
@@ -47,12 +54,18 @@ const button = form.querySelector("button");
 let uploaded = 0;
 const received = new Set();
 participant.addEventListener("change", () => { consent.checked = false; });
+language.addEventListener("change", () => {
+  consent.checked = false;
+  for (const copy of form.querySelectorAll("[data-consent-text]"))
+    copy.hidden = copy.dataset.consentText !== language.value;
+});
 form.addEventListener("submit", async e => {
   e.preventDefault();
   if (button.disabled || !form.reportValidity()) return;
   const files = Array.from(photos.files);
   const code = eventCode.value.trim();
   const selected = participant.value;
+  const inputs = [eventCode, participant, language, consent, recompressed, photos, button];
   const errors = {
     event_closed: "האירוע סגור או שקוד האירוע שגוי",
     consent_required: "יש לקרוא ולאשר את נוסח ההסכמה",
@@ -63,7 +76,7 @@ form.addEventListener("submit", async e => {
     capture_busy: "נסו להעלות שוב בעוד רגע",
     invalid_filename: "יש לבחור קובץ עם שם תקין"
   };
-  for (const input of [eventCode, participant, consent, photos, button]) input.disabled = true;
+  for (const input of inputs) input.disabled = true;
   failed.replaceChildren();
   failed.hidden = true;
   let failures = 0;
@@ -79,6 +92,8 @@ form.addEventListener("submit", async e => {
             "x-ph1-participant":selected,
             "x-ph1-consent":"confirmed",
             "x-ph1-consent-version":form.dataset.consentVersion,
+            "x-ph1-consent-language":language.value,
+            ...(recompressed.checked ? {"x-ph1-transfer":"recompressed"} : {}),
             "x-ph1-filename":encodeURIComponent(file.name)
           }
         });
@@ -100,11 +115,14 @@ form.addEventListener("submit", async e => {
         failed.append(row);
       }
     }
-    if (!failures) photos.value = "";
+    if (!failures) {
+      photos.value = "";
+      recompressed.checked = false;
+    }
   } finally {
     status.textContent = "הועלו " + uploaded + " תמונות" + (failures ? " · לא הועלו " + failures : "");
     failed.hidden = failures === 0;
-    for (const input of [eventCode, participant, consent, photos, button]) input.disabled = false;
+    for (const input of inputs) input.disabled = false;
   }
 });
 `;
