@@ -21,12 +21,13 @@ type Enrolment = {
   guardian_version: string | null; guardian_sha256: string | null;
   assent_version: string | null; assent_sha256: string | null;
   receipt: string; withdrawn_at: string | null; purged_at: string | null;
-  writer_id: string; writer_account: string; guardian_account: string; age_band: AgeBand; split: ContributorSplit;
+  writer_id: string; writer_account: string; guardian_account: string | null; age_band: AgeBand; split: ContributorSplit;
 };
 type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null };
 const enrollmentFields = `writer_id, writer_account, guardian_account, age_band, split, receipt,
   guardian_version, guardian_sha256, assent_version, assent_sha256, withdrawn_at, purged_at`;
 const current = (a: Access) => a.manifest.policy;
+const adultWriter = (a: Access) => a.writer.ageBand === "18_plus";
 const consentKey = (a: Access) => current(a).version + ":" + current(a).licence;
 const referencePin = (task: Task) => task.kind === "form" ? task.referenceSha256 :
   task.kind === "handwriting" ? task.promptSha256 : null;
@@ -87,7 +88,8 @@ function state(a: Access): ContributorProfile["state"] {
   if (a.row?.withdrawn_at) return "withdrawn";
   const {guardian, assent}=current(a);
   const version=consentKey(a);
-  if (a.row?.guardian_version !== version || !Object.values(guardian).some(c=>c.sha256===a.row?.guardian_sha256)) return "guardian";
+  if (!adultWriter(a) && (a.row?.guardian_version !== version ||
+      !Object.values(guardian).some(c=>c.sha256===a.row?.guardian_sha256))) return "guardian";
   if (a.row?.assent_version !== version || !Object.values(assent).some(c=>c.sha256===a.row?.assent_sha256)) return "assent";
   return "ready";
 }
@@ -129,7 +131,8 @@ async function nextView(a: Access, task: Task, done: Set<string>): Promise<Contr
     case "form": return {...base,kind:task.kind,sheet:path+"/sheet",
       fields:await formFields(a.ctx.env,task),referenceSha256:task.referenceSha256};
     case "line": return {...base,kind:task.kind,crop:path+"/crop",candidate:candidateOf(await line(a,task))};
-    case "handwriting": return {...base,kind:task.kind,prompt:task.sentences.join("\n"),rights:task.rights,referenceSha256:task.promptSha256};
+    case "handwriting": return {...base,kind:task.kind,prompt:task.sentences.join("\n"),rights:task.rights,referenceSha256:task.promptSha256,
+      ...(task.sheetSha256 ? {sheet:path+"/sheet"} : {})};
   }
 }
 async function profile(a: Access): Promise<ContributorProfile> {
@@ -179,6 +182,14 @@ async function consent(a: Access) {
       WHERE writer_id=? AND guardian_account=? AND writer_account=? AND age_band=? AND split=? AND withdrawn_at IS NULL
       AND (guardian_version IS NOT ? OR guardian_sha256 IS NOT ?)`)
       .bind(version,copy.sha256,now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.ageBand,a.writer.split,version,copy.sha256)]);
+  } else if (adultWriter(a)) {
+    if (state(a)==="withdrawn") throw gone();
+    await a.ctx.env.DB.batch([enrolment(a),a.ctx.env.DB.prepare(`
+      UPDATE contributor_enrolments SET assent_version=?, assent_sha256=?, assent_at=?
+      WHERE writer_id=? AND writer_account=? AND guardian_account IS NULL AND age_band='18_plus'
+        AND split=? AND withdrawn_at IS NULL
+        AND (assent_version IS NOT ? OR assent_sha256 IS NOT ?)`)
+      .bind(version,copy.sha256,now(a.ctx),a.writer.id,a.actor,a.writer.split,version,copy.sha256)]);
   } else {
     if (state(a)!=="assent" && state(a)!=="ready") throw gone();
     const guardianSha=a.row!.guardian_sha256;
@@ -196,7 +207,7 @@ async function withdraw(a: Access) {
   const role=a.role==="writer"?"writer_account":"guardian_account";
   await a.ctx.env.DB.batch([enrolment(a),a.ctx.env.DB.prepare(`
     UPDATE contributor_enrolments SET withdrawn_at=COALESCE(withdrawn_at,?)
-    WHERE writer_id=? AND ${role}=? AND writer_account=? AND guardian_account=? AND age_band=? AND split=? AND withdrawn_at IS NULL`)
+    WHERE writer_id=? AND ${role}=? AND writer_account=? AND guardian_account IS ? AND age_band=? AND split=? AND withdrawn_at IS NULL`)
     .bind(now(a.ctx),a.writer.id,a.actor,a.writer.writerAccount,a.writer.guardianAccount,a.writer.ageBand,a.writer.split)]);
   return json(await profile(await access(a.ctx,a.writer.id)));
 }
@@ -214,13 +225,15 @@ async function taskFor(a: Access, id: string) {
   return {task,done:done.has(id)};
 }
 async function asset(a: Access, task: Task, action: string) {
-  const bucket=a.ctx.env.TRAIN_CAPTURE_MEDIA;
+  const bucket = task.kind === "handwriting"
+    ? submissionBucket(a.ctx.env, a.writer.split) : a.ctx.env.TRAIN_CAPTURE_MEDIA;
   if (!bucket) throw gone();
-  const sheet=action==="sheet" && (task.kind==="print"||task.kind==="form");
+  const sheet=action==="sheet" && (task.kind==="print"||task.kind==="form"||(task.kind==="handwriting" && !!task.sheetSha256));
   const crop=action==="crop" && task.kind==="line";
   if (!sheet && !crop) throw gone();
   if (crop) await line(a,task);
   const pin=task.kind==="line"?task.cropSha256:task.sheetSha256;
+  if (!pin) throw gone();
   const key=sheet?`${contributorRoot}sheets/${pin}.pdf`:`${contributorRoot}line-crops/${pin}.jpg`;
   const object=await bucket.get(key);
   if (!object || object.size>24*1024*1024) throw gone();
@@ -241,11 +254,11 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
     INSERT INTO contributor_submissions
       (writer_id,task_id,kind,policy_version,policy_licence,guardian_sha256,assent_sha256,reference_sha256,content_sha256,storage_key,review_result_json,uploaded_at)
     SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,?,? FROM contributor_enrolments
-    WHERE writer_id=? AND writer_account=? AND guardian_account=? AND split=? AND withdrawn_at IS NULL
-      AND guardian_version=? AND guardian_sha256=? AND assent_version=? AND assent_sha256=?
+    WHERE writer_id=? AND writer_account=? AND guardian_account IS ? AND split=? AND withdrawn_at IS NULL
+      AND guardian_version IS ? AND guardian_sha256 IS ? AND assent_version=? AND assent_sha256=?
     ON CONFLICT DO NOTHING
   `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
-    w.id,w.writerAccount,w.guardianAccount,w.split,consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256).run();
+    w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256).run();
   if (result.meta.changes===1) return true;
   const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
     .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();

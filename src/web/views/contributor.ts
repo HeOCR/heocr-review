@@ -14,7 +14,7 @@ const names: Record<ContributorKind, Pair> = {
   handwriting: ["כתיבה ביד", "Write by hand"],
 };
 const bands: Record<ContributorProfile["ageBand"], Pair> = {
-  "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"],
+  "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"], "18_plus": ["18+", "18+"],
 };
 const btn = (label: string, action: () => void, primary = false) =>
   h("button", {type:"button", class: primary ? "act primary" : "act", onclick:action}, label);
@@ -102,7 +102,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       void action(save,()=>post(url()+"/consent",{lang:lang(),version:profile.version,sha256:copy.sha256,accept:true}),text("האישור נשמר.","Agreement saved."));
     },true);
     return h("section",{class:"card contributor-consent"},
-      h("h2",{},profile.role==="guardian"?text("אישור הורה או אפוטרופוס","Guardian consent"):text("הסכמת הכותב או הכותבת","Writer assent")),
+      h("h2",{},profile.role==="guardian"?text("אישור הורה או אפוטרופוס","Guardian consent"):profile.ageBand==="18_plus"?text("הסכמת המשתתף או המשתתפת","Participant consent"):text("הסכמת הכותב או הכותבת","Writer assent")),
       h("p",{class:"small muted"},tr(bands[profile.ageBand])," · ",text("גרסה ", "Version "),bdi(profile.version,"ltr")),
       h("p",{class:"contributor-copy"},copy.text),
       h("label",{class:"check"},checkbox," ",profile.role==="guardian"?
@@ -112,7 +112,9 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
   }
   function upload(task:ContributorNext) {
     const photo=h("input",{type:"file",accept:"image/jpeg,image/png",hidden:true});
-    const choose=btn(text("בחירת צילום","Choose photo"),()=>photo.click());
+    const choose=btn(task.kind === "handwriting"
+      ? text("בחירת סריקה או צילום","Choose scan or photo")
+      : text("בחירת צילום","Choose photo"),()=>photo.click());
     const privacy=h("input",{type:"checkbox"});
     const preview=h("img",{class:"contributor-preview",alt:t("cg_preview"),hidden:true});
     photo.addEventListener("change",()=>{
@@ -183,7 +185,9 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
         document.body.classList.remove("contributor-printing");
       });
       return h("section",{class:"card contributor-task"},title,captureGuide("flat",[
-        {title:"cg_print_h",instruction:"cg_hand_print_p",illustration:"print",content:[print]},
+        {title:"cg_print_h",instruction:"cg_hand_print_p",illustration:"print",content:[task.sheet
+          ? h("a",{class:"act",href:task.sheet,download:""},text("הורדה והדפסה","Download and print"))
+          : print]},
         {title:"cg_copy_h",instruction:"cg_copy_p",illustration:"copy",content:[sheet]},
       ],upload(task)));
     }

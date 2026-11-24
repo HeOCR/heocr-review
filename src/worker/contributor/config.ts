@@ -7,6 +7,7 @@ export const contributorRoot = "contributor-v1/";
 const digest = /^[a-f0-9]{64}$/;
 const opaque = /^[A-Za-z0-9_-]{1,64}$/;
 const account = /^rv_[a-f0-9]{8}$/;
+const v3Page = /^HW-V3-([A-D])0[1-4]$/;
 const writerKey = /^cw-[a-f0-9]{32}$/;
 type Copy = Record<Language, ConsentCopy>;
 
@@ -15,13 +16,13 @@ export type Task = CommonTask & (
   { kind: "print"; mode: CaptureMode; sheetSha256: string; sequence?: true } |
   { kind: "form"; pack: "TRN-FM01"; variant: "worksheet"; sheetSha256: string; referenceSha256: string } |
   { kind: "line"; proposalId: number; proposalSha256: string; cropSha256: string } |
-  { kind: "handwriting"; sentences: string[]; promptSha256: string; rights: string }
+  { kind: "handwriting"; sentences: string[]; promptSha256: string; rights: string; sheetSha256?: string }
 );
 export type PrintTask = Extract<Task, { kind: "print" }>;
 export const optionalPrintTask = (task: Task): task is PrintTask & { sequence: true; mode: "shadow" } =>
   task.kind === "print" && task.sequence === true && task.mode === "shadow";
 export type Writer = {
-  id: string; writerAccount: string; guardianAccount: string;
+  id: string; writerAccount: string; guardianAccount: string | null;
   ageBand: AgeBand; split: ContributorSplit; tasks: Task[];
 };
 export type Manifest = {
@@ -54,7 +55,11 @@ function isCopy(copy: Copy | undefined): copy is Copy {
 function validTask(task: Task, split: ContributorSplit) {
   if (!task || typeof task.id !== "string" || !opaque.test(task.id) || typeof task.page !== "string" || !opaque.test(task.page)) return false;
   if (task.kind === "handwriting") {
-    return Array.isArray(task.sentences) && task.sentences.length >= 1 && task.sentences.length <= 10 &&
+    const v3 = v3Page.test(task.page);
+    const length = task.sentences?.length;
+    return Array.isArray(task.sentences) && (v3
+      ? length === 30 && typeof task.sheetSha256 === "string" && digest.test(task.sheetSha256)
+      : !task.page.startsWith("HW-V3-") && task.sheetSha256 === undefined && length >= 1 && length <= 10) &&
       task.sentences.every(s => typeof s === "string" && s.trim().length > 0 && s.length <= 220 && !/[\p{Cc}\p{Cf}]/u.test(s)) &&
       digest.test(task.promptSha256) && typeof task.rights === "string" && /^(PD|CC0-1\.0): \S/.test(task.rights) && task.rights.length <= 240;
   }
@@ -93,16 +98,21 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
     for (const lang of ["he", "en"] as const) if (await hash(copy[lang].text) !== copy[lang].sha256) throw gone();
   }
   const writers = new Set<string>(), writerAccounts = new Set<string>(), guardians = new Set<string>(), prompts = new Map<string, ContributorSplit>();
+  const v3Pages = new Set<string>(), v3Texts = new Set<string>();
   for (const w of m.writers) {
     if (!w || !writerKey.test(w.id) || writers.has(w.id) || !account.test(w.writerAccount) || writerAccounts.has(w.writerAccount) ||
-      !account.test(w.guardianAccount) || w.guardianAccount === w.writerAccount ||
+      (w.ageBand === "18_plus" ? w.guardianAccount !== null :
+        typeof w.guardianAccount !== "string" || !account.test(w.guardianAccount) || w.guardianAccount === w.writerAccount) ||
       !ageBands.includes(w.ageBand) || !["train", "dev", "eval_open"].includes(w.split) ||
       !Array.isArray(w.tasks) || !w.tasks.length || w.tasks.length > 100 ||
       !w.tasks.every(t => validTask(t, w.split)) || new Set(w.tasks.map(t => t.id)).size !== w.tasks.length ||
       !validPrintSequences(w.tasks)) throw gone();
     writers.add(w.id);
     writerAccounts.add(w.writerAccount);
-    guardians.add(w.guardianAccount);
+    if (w.guardianAccount) guardians.add(w.guardianAccount);
+    const sheets = w.tasks.filter(task => task.kind === "handwriting" && v3Page.test(task.page));
+    if (sheets.length && (sheets.length < 3 || sheets.length > 4 ||
+        !sheets.every(task => v3Page.exec(task.page)![1] === v3Page.exec(sheets[0]!.page)![1]))) throw gone();
     const slots = new Set<string>();
     for (const task of w.tasks) {
       const slot = task.kind === "print" ? `print/${task.page}/${task.mode}` :
@@ -113,6 +123,11 @@ export async function parseContributorManifest(data: unknown): Promise<Manifest>
         const old = prompts.get(task.promptSha256);
         if (old && old !== w.split || await hash(task.sentences.join("\n")) !== task.promptSha256) throw gone();
         prompts.set(task.promptSha256, w.split);
+        if (v3Page.test(task.page)) {
+          if (v3Pages.has(task.page) || v3Texts.has(task.promptSha256)) throw gone();
+          v3Pages.add(task.page);
+          v3Texts.add(task.promptSha256);
+        }
       }
     }
   }
