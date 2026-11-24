@@ -1,4 +1,4 @@
-import { handwritingAgeBands, handwritingSets, type ContributorSplit, type HandwritingSet } from "../../shared/contributor";
+import { handwritingAgeBands, handwritingSets, type ContributorSplit, type HandwritingOffer, type HandwritingSet } from "../../shared/contributor";
 import type { Ctx } from "../api";
 import { base64url, base64urlDecode, hmacSha256, hmacVerify, randomId, requireSecret } from "../crypto";
 import { HttpError, json, readJson } from "../http";
@@ -19,6 +19,7 @@ type Plan = {
   policy: Manifest["policy"];
   writerLimit: number;
   capacity: { split: ContributorSplit; max: number }[];
+  setsBySplit: Partial<Record<ContributorSplit, HandwritingSet[]>>;
   invites: string[];
   cohort?: { sha256: string; maxUses: number; expiresAt: string };
   sheets: Sheets;
@@ -31,6 +32,21 @@ function validExpiry(value: string) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && new Date(time).toISOString().replace(/\.000Z$/, "Z") === value.replace(/\.000Z$/, "Z");
+}
+
+function splitForSets(plan: Plan) {
+  const bySet = new Map<HandwritingSet, ContributorSplit>();
+  if (!plan.setsBySplit || Object.keys(plan.setsBySplit).length !== plan.capacity.length) throw gone();
+  for (const {split} of plan.capacity) {
+    const sets = plan.setsBySplit[split];
+    if (!Array.isArray(sets) || !sets.length) throw gone();
+    for (const set of sets) {
+      if (!handwritingSets.includes(set) || bySet.has(set)) throw gone();
+      bySet.set(set,split);
+    }
+  }
+  if (bySet.size !== handwritingSets.length) throw gone();
+  return bySet;
 }
 
 export async function handwritingPlan(ctx: Ctx) {
@@ -55,48 +71,86 @@ export async function handwritingPlan(ctx: Ctx) {
         plan.invites.includes(plan.cohort.sha256) || !Number.isInteger(plan.cohort.maxUses) ||
         plan.cohort.maxUses < 1 || plan.cohort.maxUses > maxWriters || !validExpiry(plan.cohort.expiresAt)) ||
       !plan.sheets || Object.keys(plan.sheets).length !== handwritingSets.length) throw gone();
+  const splitBySet = splitForSets(plan);
   // Reuse the approved terms and handwriting-sheet validation for every page in the set.
   const writers = handwritingSets.map((set, i) => {
     const tasks = plan.sheets[set];
     if (!Array.isArray(tasks) || tasks.length !== 4 ||
-        tasks.some((task, j) => task?.kind !== "handwriting" || task.page !== `HW-V3-${set}0${j + 1}`)) throw gone();
+        tasks.some((task, j) => task?.kind !== "handwriting" || task.page !== `HW-V3-${set}0${j + 1}` ||
+          task.id !== task.page)) throw gone();
     return { id: "cw-" + String(i).repeat(32), writerAccount: "rv_" + String(i).repeat(8),
-      guardianAccount: null, ageBand: "18_plus", split: "train", tasks };
+      guardianAccount: null, ageBand: "18_plus", split: splitBySet.get(set)!, tasks };
   });
   const sheetPins = writers.flatMap(writer => writer.tasks.map(task => task.sheetSha256));
   if (new Set(sheetPins).size !== sheetPins.length) throw gone();
   const manifest = await parseContributorManifest({schema:"heocr.contributor.v1",approval:plan.approval,policy:plan.policy,writers});
-  return { plan, pin, manifest: { ...manifest, writers: [] as Writer[] } };
+  // Sheet hashes alone cannot detect a sentence shared by two otherwise distinct sheets.
+  const lineSplits = new Map<string,ContributorSplit>();
+  for (const writer of writers) for (const task of writer.tasks) for (const sentence of task.sentences) {
+    const line = sentence.normalize("NFC").trim().replace(/\s+/gu," ");
+    const split = lineSplits.get(line);
+    if (split && split !== writer.split) throw gone();
+    lineSplits.set(line,writer.split);
+  }
+  return { plan, pin, splitBySet, manifest: { ...manifest, writers: [] as Writer[] } };
 }
 
 export type HandwritingPlan = NonNullable<Awaited<ReturnType<typeof handwritingPlan>>>;
 
-const setLoads = `SELECT choices.value AS set_id, COUNT(r.set_id) AS uses
-  FROM json_each('${JSON.stringify(handwritingSets)}') AS choices
-  LEFT JOIN contributor_handwriting_roster r ON r.set_id=choices.value AND r.config_sha256=?1
-  GROUP BY choices.key`;
-const leastUsedSets = "SELECT set_id FROM set_loads WHERE uses=(SELECT MIN(uses) FROM set_loads)";
-
-export async function handwritingSetOptions(ctx: Ctx, signup: HandwritingPlan) {
-  const options = await ctx.env.DB.prepare(`WITH set_loads AS (${setLoads})
-    ${leastUsedSets} AND (SELECT SUM(uses) FROM set_loads) < ?2 ORDER BY set_id`)
-    .bind(signup.pin,signup.plan.writerLimit).all<{set_id:HandwritingSet}>();
-  return options.results.map(row => row.set_id);
-}
+// The server determines the split before consulting set loads. Use the same
+// selection in the offer read and in the write so a stale offer cannot move a writer.
+const offerScope = `split_room AS (
+    SELECT json_extract(choice.value,'$.split') AS split
+    FROM json_each(?2) AS choice
+    LEFT JOIN contributor_handwriting_roster r ON r.split=json_extract(choice.value,'$.split') AND r.config_sha256=?1
+    GROUP BY choice.key HAVING COUNT(r.split) < json_extract(choice.value,'$.max')
+    ORDER BY COUNT(r.split), choice.key LIMIT 1
+  ), set_loads AS (
+    SELECT split_room.split, choices.value AS set_id, COUNT(r.set_id) AS uses
+    FROM split_room JOIN json_each(?3, '$.' || split_room.split) AS choices
+    LEFT JOIN contributor_handwriting_roster r ON r.set_id=choices.value AND r.split=split_room.split AND r.config_sha256=?1
+    GROUP BY split_room.split, choices.key
+  ), offer AS (
+    SELECT split,set_id FROM set_loads
+    WHERE uses=(SELECT MIN(uses) FROM set_loads)
+      AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1) < ?4
+      AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND invite_sha256=?5) < ?6
+      AND NOT EXISTS (SELECT 1 FROM contributor_handwriting_revoked_invites WHERE config_sha256=?1 AND invite_sha256=?5)
+      AND EXISTS (SELECT 1 FROM reviewers WHERE id=?7 AND handwriting_opted_out=0)
+      AND NOT EXISTS (SELECT 1 FROM contributor_enrolments WHERE writer_account=?7 OR guardian_account=?7)
+  )`;
 
 export async function handwritingOptedOut(ctx: Ctx, actor: string) {
   return (await ctx.env.DB.prepare("SELECT handwriting_opted_out FROM reviewers WHERE id=?")
     .bind(actor).first<number>("handwriting_opted_out")) === 1;
 }
 
-export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor: string) {
+async function invitation(ctx: Ctx, signup: HandwritingPlan, actor: string) {
   enforce(attemptLimit, actor, ctx.now);
-  const { inviteCode, ageBand, set } = await readJson(ctx.request);
-  if (typeof inviteCode !== "string" || !invite.test(inviteCode) || !handwritingAgeBands.some(band => band === ageBand) ||
-      !handwritingSets.includes(set as HandwritingSet)) throw invalid();
+  const body = await readJson(ctx.request);
+  const { inviteCode, ageBand } = body;
+  if (typeof inviteCode !== "string" || !invite.test(inviteCode) || !handwritingAgeBands.some(band => band === ageBand)) throw invalid();
   const pin = await hash(inviteCode);
   const cohort = signup.plan.cohort?.sha256 === pin ? signup.plan.cohort : null;
   if (cohort ? Date.parse(cohort.expiresAt) <= ctx.now : !signup.plan.invites.includes(pin)) throw gone();
+  const args = [signup.pin, JSON.stringify(signup.plan.capacity), JSON.stringify(signup.plan.setsBySplit),
+    signup.plan.writerLimit, pin, cohort?.maxUses ?? 1, actor] as const;
+  return { body, args, ageBand };
+}
+
+const unavailable = () => new HttpError(409,"handwriting_slot_unavailable");
+
+export async function handwritingOffer(ctx: Ctx, signup: HandwritingPlan, actor: string): Promise<HandwritingOffer> {
+  const { args } = await invitation(ctx,signup,actor);
+  const { results } = await ctx.env.DB.prepare(`WITH ${offerScope} SELECT split,set_id FROM offer ORDER BY set_id`)
+    .bind(...args).all<{split:ContributorSplit;set_id:HandwritingSet}>();
+  if (!results.length) throw unavailable();
+  return { split:results[0]!.split, sets:results.map(row => row.set_id) };
+}
+
+export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor: string) {
+  const { body:{split,set}, args, ageBand } = await invitation(ctx,signup,actor);
+  if (!splits.includes(split as ContributorSplit) || !handwritingSets.includes(set as HandwritingSet)) throw invalid();
   const db = ctx.env.DB;
   const writer = randomId("cw-", 16);
   const existing = await db.prepare(`SELECT e.writer_id AS writer FROM contributor_enrolments e
@@ -104,27 +158,16 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
     WHERE writer_account=? AND config_sha256=?`).bind(actor,signup.pin).first<{writer:string}>();
   if (existing) return existing.writer;
   const [assigned] = await db.batch([
-    db.prepare(`WITH set_loads AS (${setLoads}), split_room AS (
-        SELECT json_extract(choice.value,'$.split') AS split
-        FROM json_each(?7) AS choice
-        LEFT JOIN contributor_handwriting_roster r ON r.split=json_extract(choice.value,'$.split') AND r.config_sha256=?1
-        GROUP BY choice.key HAVING COUNT(r.split) < json_extract(choice.value,'$.max')
-        ORDER BY COUNT(r.split), choice.key LIMIT 1
-      )
+    db.prepare(`WITH ${offerScope}
       INSERT INTO contributor_handwriting_roster(config_sha256,invite_sha256,writer_id,set_id,age_band,split)
-      SELECT ?1,?2,?3,?4,?5,split FROM split_room
-      WHERE (SELECT SUM(uses) FROM set_loads) < ?8 AND ?4 IN (${leastUsedSets})
-        AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND invite_sha256=?2) < ?9
-        AND NOT EXISTS (SELECT 1 FROM contributor_handwriting_revoked_invites WHERE config_sha256=?1 AND invite_sha256=?2)
-        AND EXISTS (SELECT 1 FROM reviewers WHERE id=?6 AND handwriting_opted_out=0)
-        AND NOT EXISTS (SELECT 1 FROM contributor_enrolments WHERE writer_account=?6 OR guardian_account=?6)
+      SELECT ?1,?5,?8,set_id,?9,split FROM offer WHERE split=?10 AND set_id=?11
       ON CONFLICT DO NOTHING`)
-      .bind(signup.pin,pin,writer,set,ageBand,actor,JSON.stringify(signup.plan.capacity),signup.plan.writerLimit,cohort?.maxUses ?? 1),
+      .bind(...args,writer,ageBand,split,set),
     db.prepare(`INSERT INTO contributor_enrolments(writer_id,writer_account,age_band,split,receipt)
       SELECT writer_id,?,age_band,split,? FROM contributor_handwriting_roster WHERE writer_id=?`)
       .bind(actor,randomId("cw-withdraw-",16),writer),
   ]);
-  if (assigned?.meta.changes !== 1) throw new HttpError(409,"handwriting_slot_unavailable");
+  if (assigned?.meta.changes !== 1) throw unavailable();
   return writer;
 }
 
@@ -173,7 +216,10 @@ export async function selfWriters(ctx: Ctx, signup: HandwritingPlan, actor: stri
     FROM contributor_handwriting_roster r JOIN contributor_enrolments e USING(writer_id)
     WHERE r.config_sha256=? AND (writer_account=? OR guardian_account=?) ORDER BY r.ordinal`)
     .bind(signup.pin,actor,actor).all<Omit<Writer,"tasks">&{set:HandwritingSet}>();
-  return rows.results.map(({set,...writer}) => ({...writer,tasks:signup.plan.sheets[set]}));
+  return rows.results.map(({set,...writer}) => {
+    if (signup.splitBySet.get(set) !== writer.split) throw gone();
+    return {...writer,tasks:signup.plan.sheets[set]};
+  });
 }
 
 const snapshot = (pin: string, rows: RosterRow[]) =>
@@ -184,6 +230,9 @@ export async function handwritingRoster(ctx: Ctx, signup: HandwritingPlan) {
   const db = ctx.env.DB;
   const rows = (await db.prepare(`SELECT ordinal,writer_id AS writer,age_band AS ageBand,set_id AS "set",split
     FROM contributor_handwriting_roster WHERE config_sha256=? ORDER BY ordinal`).bind(signup.pin).all<RosterRow>()).results;
+  if (rows.length > signup.plan.writerLimit ||
+      rows.some(row => signup.splitBySet.get(row.set) !== row.split || !handwritingAgeBands.includes(row.ageBand)) ||
+      signup.plan.capacity.some(({split,max}) => rows.filter(row => row.split === split).length > max)) throw gone();
   const prior = await db.prepare(`SELECT roster_sha256,through_ordinal FROM contributor_handwriting_pins
     WHERE config_sha256=? ORDER BY through_ordinal DESC LIMIT 1`).bind(signup.pin)
     .first<{roster_sha256:string;through_ordinal:number}>();

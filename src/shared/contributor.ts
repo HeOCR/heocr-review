@@ -43,7 +43,8 @@ export type ContributorProfile = {
 
 
 export type HandwritingSignup = {
-  sets: HandwritingSet[];
   guardian: Record<Language, ConsentCopy>;
   version: string;
 };
+
+export type HandwritingOffer = { split: ContributorSplit; sets: HandwritingSet[] };

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { expect, it, vi } from "vitest";
-import { CONTRIBUTOR_API, handwritingSets, type ContributorProfile, type HandwritingSignup } from "../../src/shared/contributor";
+import { CONTRIBUTOR_API, handwritingSets, type ContributorProfile, type ContributorSplit, type HandwritingOffer, type HandwritingSet } from "../../src/shared/contributor";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { contributorRoot, hash, ROSTER_OPERATOR_ID } from "../../src/worker/contributor/config";
 import type { Env } from "../../src/worker/env";
@@ -9,6 +9,8 @@ import { Client } from "./helpers";
 
 const execution = { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext;
 const path = CONTRIBUTOR_API;
+const enrolmentRoute = path + "/enrolments";
+const optionsRoute = enrolmentRoute + "/options";
 const roster = path + "/operator/handwriting-roster";
 const fixtureToken = "heocr_roster_v1_" + "a".repeat(43);
 const invitation = (i: number) => String(i).repeat(32);
@@ -17,10 +19,14 @@ const photo = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC
 
 type FixtureOptions = {
   writerLimit?: number;
-  capacity?: {split: "train" | "dev" | "eval_open"; max: number}[];
+  capacity?: {split: ContributorSplit; max: number}[];
+  setsBySplit?: Partial<Record<ContributorSplit,HandwritingSet[]>>;
+  sharedSentence?: boolean;
   cohort?: {maxUses:number;expiresAt:string};
 };
 const cohortCode = invitation(8);
+const splitFor = (set: string): ContributorSplit => set==="D" ? "eval_open" : set==="C" ? "dev" : "train";
+const enrol = (inviteCode: string, set: string, ageBand = "18_plus") => ({inviteCode,ageBand,split:splitFor(set),set});
 async function fixture(options: FixtureOptions = {}) {
   const writer = new Client(), guardian = new Client(), other = new Client(), evaluator = new Client(), stranger = new Client();
   const fourth = new Client();
@@ -40,6 +46,7 @@ async function fixture(options: FixtureOptions = {}) {
     return [set,await Promise.all(Array.from({length:4},async (_, index) => {
       const page = `HW-V3-${set}0${index+1}`;
       const sentences = Array.from({length:30},(_, i) => `שורת בדיקה ${page} ${i+1}`);
+      if (options.sharedSentence && index===0) sentences[29] = set==="D" ? "e\u0301  142" : "é 142";
       const pdf = "%PDF-1.4\n% invented fixture " + page;
       const sheetSha256 = await hash(pdf);
       const mediaKey = contributorRoot+"sheets/"+sheetSha256+".pdf";
@@ -50,6 +57,7 @@ async function fixture(options: FixtureOptions = {}) {
   const plan = { schema:"heocr.handwriting_signup.v1", approval:{evalSplitSha256:"1".repeat(64),leadGo:"fixture"},
     policy, sheets, writerLimit:options.writerLimit??4, invites:await Promise.all([1,2,3,4].map(i=>hash(invitation(i)))),
     capacity:options.capacity??[{split:"train",max:2},{split:"dev",max:1},{split:"eval_open",max:1}],
+    setsBySplit:options.setsBySplit??{train:["A","B"],dev:["C"],eval_open:["D"]},
     ...(options.cohort ? {cohort:{sha256:await hash(cohortCode),...options.cohort}} : {}) };
   const pin = await hash(JSON.stringify(plan));
   await env.TRAIN_CAPTURE_MEDIA!.put(contributorRoot+"handwriting-signup/"+pin+".json",JSON.stringify(plan));
@@ -94,7 +102,7 @@ it("admits the roster bearer only on the canonical roster GET and POST",async()=
   expect((await f.rosterReq(undefined,{CONTRIBUTOR_HANDWRITING_CONFIG_SHA256:undefined})).status).toBe(404);
   expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_roster_access").first()).toBeNull();
 
-  expect((await f.req(f.writer,path+"/enrolments",{inviteCode:invitation(1),ageBand:"18_plus",set:"A"})).status).toBe(200);
+  expect((await f.req(f.writer,enrolmentRoute,enrol(invitation(1),"A"))).status).toBe(200);
   const get=await f.rosterReq(undefined,{CONTRIBUTOR_APP_ENABLED:"0"});
   expect(get.status).toBe(200);
   expect(get.headers.get("cache-control")).toBe("private, no-store");
@@ -131,11 +139,13 @@ it("limits concurrent roster requests in a five-minute window and keeps GET and 
 
 it("allows the owner an upload after guardian consent and assent before the first daily audit",async()=>{
   const f=await fixture();
-  const join={inviteCode:invitation(1),ageBand:"13_17",set:"A"};
+  const join=enrol(invitation(1),"A","13_17");
   expect((await f.req(null,path+"/enrolments",join)).status).toBe(401);
   expect((await f.req(f.writer,path+"/enrolments",join,{CONTRIBUTOR_APP_ENABLED:"0"})).status).toBe(404);
   expect((await f.req(f.writer,path+"/enrolments",join,{ENVIRONMENT:"production"},"https://heocr-review.heocr.workers.dev")).status).toBe(404);
   expect((await f.req(f.writer,path+"/enrolments",{...join,inviteCode:invitation(9)})).status).toBe(404);
+  expect(await (await f.req(f.writer,optionsRoute,{inviteCode:join.inviteCode,ageBand:join.ageBand})).json())
+    .toEqual({split:"train",sets:["A","B"]});
   const response=await f.req(f.writer,path+"/enrolments",join);
   expect(response.status).toBe(200);
   const profile=await response.json<ContributorProfile>();
@@ -178,37 +188,41 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect((await f.req(f.stranger,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(404);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_pins").first<{n:number}>())?.n).toBe(0);
   expect((await f.req(f.writer,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(200);
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_release_candidates").first()).toBeNull();
   expect((await f.rosterReq(acceptPin)).status).toBe(200);
+  expect(await env.DB.prepare("SELECT 1 AS eligible FROM contributor_handwriting_release_candidates").first()).toEqual({eligible:1});
   expect((await f.rosterReq(acceptPin)).status).toBe(409);
   expect((await f.req(f.guardian,writerPath+"/withdraw",{withdraw:true})).status).toBe(200);
   expect((await f.req(f.writer,task+"/submit",photo,{},"http://localhost",photoHeaders)).status).toBe(404);
   expect((await (await f.rosterReq()).json<{sha256:string}>()).sha256).toBe(pin.sha256);
 });
 
-it("assigns the least-filled available split, never reassigns a set and chains pins",async()=>{
+it("offers the least-filled split first, rejects a set from another split, and chains pins",async()=>{
   const f=await fixture();
-  const join=(who:Client,i:number,set:string)=>f.req(who,path+"/enrolments",{inviteCode:invitation(i),ageBand:"18_plus",set});
-  expect((await join(f.writer,1,"D")).status).toBe(200);
+  const join=(who:Client,i:number,set:string)=>f.req(who,enrolmentRoute,enrol(invitation(i),set));
+  expect((await join(f.writer,1,"A")).status).toBe(200);
   const previous=await (await f.rosterReq()).json<{sha256:string;throughOrdinal:number;previousSha256:null}>();
   expect((await join(f.other,2,"D")).status).toBe(409);
-  const other=await (await join(f.other,2,"A")).json<ContributorProfile>();
+  expect((await f.req(f.other,enrolmentRoute,{...enrol(invitation(2),"D"),split:"dev"})).status).toBe(409);
+  expect(await (await f.req(f.other,optionsRoute,{inviteCode:invitation(2),ageBand:"18_plus"})).json()).toEqual({split:"dev",sets:["C"]});
+  const other=await (await join(f.other,2,"C")).json<ContributorProfile>();
   expect(other.state).toBe("assent");
   expect((await f.rosterReq(previous)).status).toBe(200);
-  expect((await join(f.stranger,3,"C")).status).toBe(200);
+  expect((await join(f.stranger,3,"D")).status).toBe(200);
   expect((await join(f.fourth,4,"B")).status).toBe(200);
   const next=await (await f.rosterReq()).json<{canonical:string;sha256:string;throughOrdinal:number;previousSha256:string}>();
   expect(next.previousSha256).toBe(previous.sha256);
   expect(JSON.parse(next.canonical).rows.map((row:{set:string;split:string})=>[row.set,row.split])).toEqual([
-    ["D","train"],["A","dev"],["C","eval_open"],["B","train"],
+    ["A","train"],["C","dev"],["D","eval_open"],["B","train"],
   ]);
   const otherPath=path+"/writers/"+other.writer;
   expect(await (await f.req(f.other,otherPath+"/consent",f.copyBody("assent"))).json())
     .toMatchObject({state:"ready"});
   expect((await f.rosterReq({...next,previousSha256:null})).status).toBe(409);
   expect((await f.rosterReq(next)).status).toBe(200);
-  expect((await f.req(f.other,otherPath+"/tasks/HW-V3-A01/sheet",undefined,{CONTRIBUTOR_DEV_MEDIA:undefined})).status).toBe(404);
-  expect((await f.req(f.other,otherPath+"/tasks/HW-V3-A01/sheet")).status).toBe(200);
-  expect((await f.req(f.other,otherPath+"/tasks/HW-V3-C01/sheet")).status).toBe(404);
+  expect((await f.req(f.other,otherPath+"/tasks/HW-V3-C01/sheet",undefined,{CONTRIBUTOR_DEV_MEDIA:undefined})).status).toBe(404);
+  expect((await f.req(f.other,otherPath+"/tasks/HW-V3-C01/sheet")).status).toBe(200);
+  expect((await f.req(f.other,otherPath+"/tasks/HW-V3-A01/sheet")).status).toBe(404);
   expect((await join(f.guardian,4,"B")).status).toBe(409);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster").first<{n:number}>())?.n).toBe(4);
 });
@@ -221,9 +235,7 @@ function uploadHeaders(profile: ContributorProfile) {
 }
 
 async function readyAdult(f: Awaited<ReturnType<typeof fixture>>) {
-  const joined=await (await f.req(f.writer,path+"/enrolments",{
-    inviteCode:invitation(1),ageBand:"18_plus",set:"A",
-  })).json<ContributorProfile>();
+  const joined=await (await f.req(f.writer,enrolmentRoute,enrol(invitation(1),"A"))).json<ContributorProfile>();
   const writerPath=path+"/writers/"+joined.writer;
   expect((await f.req(f.writer,writerPath+"/tasks/HW-V3-A01/submit",photo)).status).toBe(404);
   const ready=await (await f.req(f.writer,writerPath+"/consent",f.copyBody("assent"))).json<ContributorProfile>();
@@ -277,11 +289,13 @@ it("withdraws a writer, deletes unpublished files and preserves a previously pub
     .bind(ready.writer).first<string>("storage_key");
   expect(published).toBeTruthy();
   expect(unpublished).toBeTruthy();
-  const before=await (await f.rosterReq()).json<{sha256:string}>();
+  const before=await (await f.rosterReq()).json<{sha256:string;throughOrdinal:number;previousSha256:null}>();
   const publicationRoute=path+"/operator/handwriting-publications";
   const firstPin={contentSha256:await hash(photo),releaseSha256:"3".repeat(64)};
   expect((await f.req(f.stranger,publicationRoute,firstPin)).status).toBe(404);
   expect((await f.req(f.evaluator,publicationRoute,firstPin,{},"https://heocr-review.heocr.workers.dev")).status).toBe(404);
+  expect((await f.req(f.evaluator,publicationRoute,firstPin)).status).toBe(409);
+  expect((await f.rosterReq(before)).status).toBe(200);
   expect((await f.req(f.evaluator,publicationRoute,firstPin)).status).toBe(200);
   expect((await f.req(f.evaluator,publicationRoute,{...firstPin,releaseSha256:"4".repeat(64)})).status).toBe(409);
   await bucket.put(prefix+"orphan","private fixture");
@@ -294,7 +308,7 @@ it("withdraws a writer, deletes unpublished files and preserves a previously pub
   expect((await (await f.rosterReq()).json<{sha256:string}>()).sha256).toBe(before.sha256);
   expect((await f.req(f.writer,ready.writerPath+"/consent",f.copyBody("assent"))).status).toBe(404);
   expect((await f.req(f.writer,"/api/batches")).status).toBe(404);
-  const rejoin={inviteCode:cohortCode,ageBand:"18_plus",set:"B"};
+  const rejoin=enrol(cohortCode,"C");
   expect((await f.req(f.writer,path+"/enrolments",rejoin)).status).toBe(409);
   expect((await f.req(f.other,path+"/enrolments",rejoin)).status).toBe(200);
   expect(await bucket.get(unpublished!)).toBeNull();
@@ -350,9 +364,9 @@ it("commits only one upload and keeps one private object for simultaneous retrie
 it("rate-limits a burst of invalid enrolment attempts without onboarding the account",async()=>{
   const f=await fixture();
   for (let i=0;i<8;i++) {
-    expect((await f.req(f.writer,path+"/enrolments",{inviteCode:invitation(9),ageBand:"18_plus",set:"A"})).status).toBe(404);
+    expect((await f.req(f.writer,optionsRoute,{inviteCode:invitation(9),ageBand:"18_plus"})).status).toBe(404);
   }
-  const limited=await f.req(f.writer,path+"/enrolments",{inviteCode:invitation(1),ageBand:"18_plus",set:"A"});
+  const limited=await f.req(f.writer,enrolmentRoute,enrol(invitation(1),"A"));
   expect(limited.status).toBe(429);
   expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster").first<{n:number}>())?.n).toBe(0);
@@ -360,16 +374,15 @@ it("rate-limits a burst of invalid enrolment attempts without onboarding the acc
 
 it.each(["dev","eval_open"] as const)("stores the original only in the assigned %s bucket",async split=>{
   const f=await fixture();
-  const join=(actor:Client,i:number,set:string)=>f.req(actor,path+"/enrolments",{
-    inviteCode:invitation(i),ageBand:"18_plus",set,
-  });
-  expect((await join(f.writer,1,"D")).status).toBe(200);
-  if (split==="eval_open") expect((await join(f.other,2,"B")).status).toBe(200);
-  const joined=await (await join(f.stranger,split==="dev"?2:3,"A")).json<ContributorProfile>();
+  const join=(actor:Client,i:number,set:string)=>f.req(actor,enrolmentRoute,enrol(invitation(i),set));
+  expect((await join(f.writer,1,"A")).status).toBe(200);
+  if (split==="eval_open") expect((await join(f.other,2,"C")).status).toBe(200);
+  const set=split==="dev" ? "C" : "D";
+  const joined=await (await join(f.stranger,split==="dev"?2:3,set)).json<ContributorProfile>();
   const writerPath=path+"/writers/"+joined.writer;
   const ready=await (await f.req(f.stranger,writerPath+"/consent",f.copyBody("assent"))).json<ContributorProfile>();
   const prefix=contributorRoot+"quarantine/"+ready.writer+"/";
-  const saved=await f.req(f.stranger,writerPath+"/tasks/HW-V3-A01/submit",photo,{},origin,uploadHeaders(ready));
+  const saved=await f.req(f.stranger,writerPath+`/tasks/HW-V3-${set}01/submit`,photo,{},origin,uploadHeaders(ready));
   expect(saved.status).toBe(200);
   const buckets={train:env.TRAIN_CAPTURE_MEDIA!,dev:env.HANDWRITING_MEDIA!,eval_open:env.HANDWRITING_CONTROL!};
   for (const [name,bucket] of Object.entries(buckets)) {
@@ -382,40 +395,41 @@ it.each(["dev","eval_open"] as const)("stores the original only in the assigned 
   }
 });
 
-it("keeps least-used-set eligibility atomic when writers sign up concurrently",async()=>{
+it("rejects a stale split offer when two writers sign up concurrently",async()=>{
   const f=await fixture();
-  const replies=await Promise.all([f.writer,f.other].map((actor,index)=>f.req(actor,path+"/enrolments",{
-    inviteCode:invitation(index+1),ageBand:"18_plus",set:"A",
-  })));
+  const actors=[f.writer,f.other];
+  const offers=await Promise.all(actors.map((actor,index)=>f.req(actor,optionsRoute,{
+    inviteCode:invitation(index+1),ageBand:"18_plus",
+  }).then(res=>res.json())));
+  expect(offers).toEqual([{split:"train",sets:["A","B"]},{split:"train",sets:["A","B"]}]);
+  const replies=await Promise.all(actors.map((actor,index)=>f.req(actor,enrolmentRoute,enrol(invitation(index+1),"A"))));
   expect(replies.map(reply=>reply.status).sort()).toEqual([200,409]);
   const totals=await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM contributor_enrolments) AS enrolled,
     (SELECT COUNT(*) FROM contributor_handwriting_roster) AS roster`).first();
   expect(totals).toEqual({enrolled:1,roster:1});
   const losingIndex=replies.findIndex(reply=>reply.status===409);
-  expect((await f.req([f.writer,f.other][losingIndex]!,path+"/enrolments",{
-    inviteCode:invitation(losingIndex+1),ageBand:"18_plus",set:"B",
-  })).status).toBe(200);
+  const actor=actors[losingIndex]!, inviteCode=invitation(losingIndex+1);
+  expect(await (await f.req(actor,optionsRoute,{inviteCode,ageBand:"18_plus"})).json()).toEqual({split:"dev",sets:["C"]});
+  expect((await f.req(actor,enrolmentRoute,enrol(inviteCode,"C"))).status).toBe(200);
 });
 
-const enrolmentRoute = path+"/enrolments";
 const revokeRoute = path+"/operator/handwriting-invites/revoke";
 const liveCohort = {maxUses:50,expiresAt:"2099-01-01T00:00:00Z"};
-const usingCohort = (set: string) => ({inviteCode:cohortCode,ageBand:"18_plus",set});
+const usingCohort = (set: string) => enrol(cohortCode,set);
 
 it("allows the same cohort code for multiple writers, atomically enforces its own use cap and keeps individual codes",async()=>{
   const f=await fixture({cohort:{...liveCohort,maxUses:2}});
   expect((await f.req(f.writer,enrolmentRoute,usingCohort("A"))).status).toBe(200);
-  expect((await (await f.req(f.other,enrolmentRoute)).json<{signup:HandwritingSignup}>()).signup.sets).toEqual(["B","C","D"]);
+  expect(await (await f.req(f.other,optionsRoute,{inviteCode:cohortCode,ageBand:"18_plus"})).json()).toEqual({split:"dev",sets:["C"]});
   const replies=await Promise.all([
-    f.req(f.other,enrolmentRoute,usingCohort("B")),f.req(f.stranger,enrolmentRoute,usingCohort("C")),
+    f.req(f.other,enrolmentRoute,usingCohort("C")),f.req(f.stranger,enrolmentRoute,usingCohort("C")),
   ]);
   expect(replies.map(x=>x.status).sort()).toEqual([200,409]);
   const count=await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster WHERE invite_sha256=?")
     .bind(await hash(cohortCode)).first<{n:number}>();
   expect(count?.n).toBe(2);
   const actor=replies[0]!.ok?f.stranger:f.other;
-  const set=replies[0]!.ok?"C":"B";
-  expect((await f.req(actor,enrolmentRoute,{...usingCohort(set),inviteCode:invitation(1)})).status).toBe(200);
+  expect((await f.req(actor,enrolmentRoute,enrol(invitation(1),"D"))).status).toBe(200);
 });
 
 it("refuses expired cohort codes and keeps an available one-use enrolment",async()=>{
@@ -431,15 +445,15 @@ it("allows only an admin to revoke a cohort code and preserves existing writers"
   expect((await f.req(f.other,revokeRoute,revocation)).status).toBe(404);
   expect((await f.req(f.evaluator,revokeRoute,revocation)).status).toBe(200);
   expect((await f.req(f.evaluator,revokeRoute,revocation)).status).toBe(200);
-  expect((await f.req(f.other,enrolmentRoute,usingCohort("B"))).status).toBe(409);
+  expect((await f.req(f.other,enrolmentRoute,usingCohort("C"))).status).toBe(409);
   expect((await f.req(f.writer,path+"/writers/"+first.writer)).status).toBe(200);
-  expect((await f.req(f.other,enrolmentRoute,{...usingCohort("B"),inviteCode:invitation(1)})).status).toBe(200);
+  expect((await f.req(f.other,enrolmentRoute,enrol(invitation(1),"C"))).status).toBe(200);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_revoked_invites").first()).toEqual({n:1});
 });
 
-it("balances reused sets and split counts and never admits a 51st writer",async()=>{
+it("fills the registered split capacities in tie-break order and never admits a 51st writer",async()=>{
   const f=await fixture({cohort:liveCohort,writerLimit:50,capacity:[
-    {split:"train",max:30},{split:"dev",max:20},{split:"eval_open",max:20},
+    {split:"eval_open",max:20},{split:"train",max:24},{split:"dev",max:6},
   ]});
   const reviewers=Array.from({length:51},(_,i)=>"rv_"+(i+11000).toString(16).padStart(8,"0"));
   const time=new Date().toISOString();
@@ -449,18 +463,50 @@ it("balances reused sets and split counts and never admits a 51st writer",async(
     client.cookie=(await createSessionCookie(env,id)).split(";")[0]!;
     return client;
   }));
-  for (let i=0;i<49;i++)
-    expect((await f.req(actors[i]!,enrolmentRoute,usingCohort(handwritingSets[i%4]!))).status).toBe(200);
-  const last=await Promise.all(["B","C"].map((set,i)=>f.req(actors[49+i]!,enrolmentRoute,usingCohort(set))));
+  const offer=(actor: Client)=>f.req(actor,optionsRoute,{inviteCode:cohortCode,ageBand:"18_plus"}).then(res=>res.json<HandwritingOffer>());
+  const initial=["eval_open","train","dev"];
+  for (let i=0;i<49;i++) {
+    const {split,sets}=await offer(actors[i]!);
+    if (i<initial.length) expect(split).toBe(initial[i]);
+    expect(sets.every(set=>splitFor(set)===split)).toBe(true);
+    expect((await f.req(actors[i]!,enrolmentRoute,usingCohort(sets[0]!))).status).toBe(200);
+  }
+  const {sets}=await offer(actors[49]!);
+  const last=await Promise.all(actors.slice(49).map(actor=>f.req(actor,enrolmentRoute,usingCohort(sets[0]!))));
   expect(last.map(x=>x.status).sort()).toEqual([200,409]);
   const setCounts=(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster GROUP BY set_id ORDER BY n").all<{n:number}>()).results;
   const splits=(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster GROUP BY split ORDER BY n").all<{n:number}>()).results;
-  expect(setCounts.map(r=>r.n)).toEqual([12,12,13,13]);
-  expect(splits.map(r=>r.n)).toEqual([16,17,17]);
+  expect(setCounts.map(r=>r.n)).toEqual([6,12,12,20]);
+  expect(splits.map(r=>r.n)).toEqual([6,20,24]);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_enrolments").first()).toEqual({n:50});
   const rejected=last[0]!.ok?1:0;
-  const unusedSet=rejected===0?"B":"C";
   const actor=actors[49+rejected]!;
-  expect((await f.req(actor,enrolmentRoute,{...usingCohort(unusedSet),inviteCode:invitation(1)})).status).toBe(409);
-  expect((await (await f.req(actor,enrolmentRoute)).json<{signup:HandwritingSignup}>()).signup.sets).toEqual([]);
+  expect((await f.req(actor,enrolmentRoute,enrol(invitation(1),sets[0]!))).status).toBe(409);
+  expect((await f.req(actor,optionsRoute,{inviteCode:invitation(1),ageBand:"18_plus"})).status).toBe(409);
+});
+
+it.each([{}, {train:["A","B"],dev:["C"],eval_open:["C","D"]}] as FixtureOptions["setsBySplit"][])(
+  "rejects an incomplete or overlapping set allocation", async setsBySplit=>{
+    const f=await fixture({setsBySplit});
+    expect((await f.req(f.writer,enrolmentRoute)).status).toBe(404);
+  },
+);
+
+it("rejects a sentence shared across differently hashed sheets",async()=>{
+  const f=await fixture({sharedSentence:true});
+  expect((await f.req(f.writer,enrolmentRoute)).status).toBe(404);
+});
+
+it("rejects under-10 ages and refuses to pin a cross-split assignment",async()=>{
+  const f=await fixture();
+  const inviteCode=invitation(1);
+  expect((await f.req(f.writer,optionsRoute,{inviteCode,ageBand:"under_10"})).status).toBe(400);
+  expect((await f.req(f.writer,enrolmentRoute,enrol(inviteCode,"A","under_10"))).status).toBe(400);
+  const joined=await (await f.req(f.writer,enrolmentRoute,enrol(inviteCode,"A"))).json<ContributorProfile>();
+  const pin=await (await f.rosterReq()).json<{sha256:string;throughOrdinal:number;previousSha256:null}>();
+  await env.DB.prepare("UPDATE contributor_handwriting_roster SET set_id='D' WHERE writer_id=?").bind(joined.writer).run();
+  expect((await f.rosterReq()).status).toBe(404);
+  expect((await f.rosterReq(pin)).status).toBe(404);
+  expect((await f.req(f.writer,path+"/writers/"+joined.writer)).status).toBe(404);
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_pins").first()).toBeNull();
 });

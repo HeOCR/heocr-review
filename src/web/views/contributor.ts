@@ -1,4 +1,4 @@
-import { CONTRIBUTOR_API, handwritingAgeBands, type HandwritingSet, type HandwritingSignup, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
+import { CONTRIBUTOR_API, handwritingAgeBands, type HandwritingOffer, type HandwritingSet, type HandwritingSignup, type ContributorKind, type ContributorNext, type ContributorProfile, type FormField } from "../../shared/contributor";
 import { ApiFailure, get, post } from "../api";
 import { bdi, h } from "../dom";
 import { lang, t } from "../i18n";
@@ -51,7 +51,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
     } else if (err instanceof ApiFailure && err.code==="contributor_reference_changed") {
       notice(text("דף ההעתקה השתנה. טענו מחדש והשתמשו בגרסה העדכנית.","The assigned text changed. Reload and use the current version."));
     } else if (err instanceof ApiFailure && err.code==="handwriting_slot_unavailable") {
-      notice(text("הסט הזה או קוד ההזמנה אינם זמינים. טענו מחדש לבדיקת הסטים הזמינים.","This set or invitation is unavailable. Reload to see the available sets."));
+      notice(text("הסט או קוד ההזמנה אינם זמינים. חזרו לשלב הקודם כדי לבדוק שוב.","This set or invitation is unavailable. Go back to check again."));
     } else if (err instanceof ApiFailure && err.status===413) {
       notice(text("הקובץ גדול מדי. בחרו תמונה עד 16 מגה־בייט.","That file is too large. Choose a photo up to 16 MB."));
     } else if (err instanceof ApiFailure && err.code==="contributor_photo_format") {
@@ -249,27 +249,46 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
   }
   const secretInput = (max: number) => h("input",{type:"text",dir:"ltr",required:true,maxlength:max,
     autocomplete:"off",autocapitalize:"none",spellcheck:"false"});
-  function signupView(showGuardian = false) {
+  function signupView(showGuardian = false, choice?: { inviteCode: string; ageBand: string; offer: HandwritingOffer }) {
     if (!signup) return;
     notice("");
     root.replaceChildren(h("h1",{},contributorTitle()),notices);
     if (!showGuardian) {
+      const heading=h("h2",{},text("הרשמה לכתיבה ביד","Handwriting enrolment"));
+      if (choice) {
+        const {offer,inviteCode,ageBand}=choice;
+        const empty=offer.sets.length>1 ? [h("option",{value:""},text("בחרו סט אחד","Choose one set"))] : [];
+        const set=h("select",{required:true},...empty,...offer.sets.map(id=>h("option",{value:id},tr(setNames[id]))));
+        const join=h("button",{type:"submit",class:"act primary"},text("הרשמה","Enrol"));
+        root.append(h("form",{class:"card contributor-consent",onsubmit:(event:Event)=>{
+          event.preventDefault();
+          void action(join,()=>post(CONTRIBUTOR_API+"/enrolments",
+            {inviteCode,ageBand,split:offer.split,set:set.value}),"");
+        }},heading,h("label",{},text("סט להעתקה","Set to copy"), " ",set),join),
+          btn(text("חזרה","Back"),()=>signupView()));
+        set.focus();
+        return;
+      }
       const code=secretInput(32);
       const age=h("select",{required:true},h("option",{value:""},text("בחרו קבוצת גיל","Choose an age band")),
         ...handwritingAgeBands.map(band=>h("option",{value:band},tr(bands[band]))));
-      const set=h("select",{required:true},h("option",{value:""},text("בחרו סט אחד","Choose one set")),
-        ...signup.sets.map(id=>h("option",{value:id},tr(setNames[id]))));
-      const join=h("button",{type:"submit",class:"act primary",disabled:!signup.sets.length},text("הרשמה","Enrol"));
-      root.append(h("form",{class:"card contributor-consent",onsubmit:(event:Event)=>{
+      const next=h("button",{type:"submit",class:"act primary"},text("המשך","Continue"));
+      root.append(h("form",{class:"card contributor-consent",onsubmit:async (event:Event)=>{
         event.preventDefault();
-        void action(join,()=>post(CONTRIBUTOR_API+"/enrolments",
-          {inviteCode:code.value.trim(),ageBand:age.value,set:set.value}),"");
-      }},
-        h("h2",{},text("הרשמה לכתיבה ביד","Handwriting enrolment")),
+        if (busy) return;
+        const details={inviteCode:code.value.trim(),ageBand:age.value};
+        busy=true;
+        next.disabled=true;
+        notice(t("loading"));
+        try {
+          const offer=await post<HandwritingOffer>(CONTRIBUTOR_API+"/enrolments/options",details);
+          if (next.isConnected) signupView(false,{...details,offer});
+        } catch(err) { error(err); }
+        finally { busy=false; next.disabled=false; }
+      }},heading,
         h("label",{},text("קוד הזמנה","Invitation code"), " ",code),
         h("label",{},text("קבוצת גיל","Age band"), " ",age),
-        h("label",{},text("סט להעתקה","Set to copy"), " ",set),
-        signup.sets.length ? join : h("p",{},text("ההרשמה מלאה כרגע.","Enrolment is full at the moment."))),
+        next),
         btn(text("אישור הורה או אפוטרופוס","Guardian consent"),()=>signupView(true)));
       return;
     }
