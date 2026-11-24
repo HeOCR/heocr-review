@@ -1,4 +1,5 @@
 import { contributor, guardContributorLegacy, isContributorAPI } from "./contributor";
+import { hasRosterBearer, ROSTER_OPERATOR_PATH, rosterOperator } from "./contributor/roster-operator";
 import { sweepRead, sweepWrite, sweepImage } from "./page-sweep";
 import { handwriting, isHandwritingPath } from "./handwriting";
 import { isCapturePath, registeredCaptures } from "./registered-captures";
@@ -59,6 +60,9 @@ const ROUTES: [string, RegExp, Handler][] = [
 
 export async function handle(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname !== ROSTER_OPERATOR_PATH && hasRosterBearer(request)) {
+    return json({ error: "not_found" }, 404);
+  }
   const capture = isCapturePath(url.pathname), privateHandwriting = isHandwritingPath(url.pathname);
   if (!capture && !privateHandwriting && !url.pathname.startsWith("/api/")) {
     if (blockedAssetPath(url.pathname)) return json({ error: "not_found" }, 404, {
@@ -69,6 +73,7 @@ export async function handle(request: Request, env: Env, exec: ExecutionContext)
   }
   const ctx: Ctx = { env, request, url, exec, now: Date.now() };
   try {
+    if (url.pathname === ROSTER_OPERATOR_PATH) return await rosterOperator(ctx);
     if (isContributorAPI(url.pathname)) return await contributor(ctx);
     if (capture || privateHandwriting) {
       await guardContributorLegacy(ctx);

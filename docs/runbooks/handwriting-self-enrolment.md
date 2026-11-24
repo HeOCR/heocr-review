@@ -21,7 +21,8 @@ The operator can also process a verified deletion request by receipt.
 Migration `0026_handwriting_self_enrolment.sql` copies the existing
 contributor tables and adds the roster, invite revocation and checkpoint
 tables. Migration `0027_handwriting_withdrawal.sql` adds publication pins,
-withdrawal receipt digests and an opt-out flag. Use the production runbook,
+withdrawal receipt digests and an opt-out flag. Migration `0028` adds
+the roster operator's rate and access audit. Use the production runbook,
 rehearsal against a restore-readable
 export, a current
 D1 budget including the table copies and indexes, a clean deployed commit
@@ -56,11 +57,9 @@ It contains these fields:
   at `contributor-v1/sheets/<sha256>.pdf`. Read the plan and each PDF
   back against its pin.
 
-After the required approvals, configure `CONTRIBUTOR_APP_ENABLED=1`,
-`CONTRIBUTOR_HANDWRITING_CONFIG_SHA256` and
-`CONTRIBUTOR_ROSTER_REVIEWER_ID` (the eval operator's existing account
-pseudonym). Keep `CONTRIBUTOR_CONFIG_SHA256` unset for this
-handwriting-only launch. The enabled plan is immutable for the pilot.
+After the required approvals, pin `CONTRIBUTOR_HANDWRITING_CONFIG_SHA256`
+and enable `CONTRIBUTOR_APP_ENABLED=1` for collection. Keep
+`CONTRIBUTOR_CONFIG_SHA256` unset for this handwriting-only launch. The enabled plan is immutable for the pilot.
 Registration and guardian pairing have an eight-attempt-per-minute
 limit per account per isolate. Existing contributor request limits and
 the hard pilot enrolment, submission-size and per-sheet caps still apply.
@@ -76,8 +75,18 @@ and revocation checks run against the same D1 assignment write.
 
 ## Daily eval checkpoint
 
-From the canonical host using the configured eval operator session, make a
-GET to `/api/contributor/v1/operator/handwriting-roster`. Archive the
+The HeOCR organisation owns the machine principal `eval-operator`, set in
+`CONTRIBUTOR_ROSTER_REVIEWER_ID`. The bearer lives in
+`~/.config/heocr/heocr-review-eval-operator.token` (0600). Before the
+authorised deploy, set only its SHA-256, excluding the file's final LF, as
+`CONTRIBUTOR_ROSTER_TOKEN_SHA256` in the private Worker secrets used by
+`scripts/deploy.ts`. Read the token inside the HTTP client from its file.
+Keep it out of command arguments, output, URLs and the repository.
+
+Set `Authorization: Bearer <token>` and GET
+`https://review.heocr.org/api/contributor/v1/operator/handwriting-roster`.
+The credential covers only GET and POST on this exact path. It works with a
+pinned plan while collection is off. Archive the
 `canonical` string as UTF-8 exactly as returned, including its final LF.
 The rows contain ordinal, writer code, age band, set and split. No account
 IDs or consent records appear in this snapshot. Keep the snapshot in
@@ -85,11 +94,22 @@ private custody. Review the allocation and append-only prefix, and
 verify the reported SHA-256 against these bytes.
 
 POST the reviewed `{sha256,throughOrdinal,previousSha256}` back to the
-same endpoint, using the same origin. Read the head back. A stale or
-changed prefix fails. The checkpoint audits the enrolled roster. Any
+same endpoint as JSON with the bearer. Read the head back. A stale or
+changed prefix fails. The API admits up to six GET and three POST per
+five-minute UTC window, returning `429` and `Retry-After` at the limit.
+Each admitted request writes one audit row and its index in
+`contributor_handwriting_roster_access` before it runs, recording only the
+machine principal, method and timestamp. Even at the cap this is at most
+5,184 audit row and index writes per UTC day, plus any successful
+checkpoint inserts. Budget for those writes before an authenticated live
+check. Invalid credentials and denied routes add no audit rows.
+
+Evalcheck runs the GET, byte verification and approved POST. Heocr-eval
+reviews and pins the roster digests. The checkpoint audits the enrolled roster. Any
 enrolled writer with current consent can access their sheets and upload
 before the audit. The upload write matches the writer, assigned split, age
 band and sheet set to the current private plan's roster entry again.
+
 ## Withdrawal and release
 
 Withdrawal closes uploads and removes the writer's submissions from the

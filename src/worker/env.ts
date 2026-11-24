@@ -14,6 +14,8 @@ export interface Env {
   CONTRIBUTOR_CONFIG_SHA256?: string;
   CONTRIBUTOR_HANDWRITING_CONFIG_SHA256?: string;
   CONTRIBUTOR_ROSTER_REVIEWER_ID?: string;
+  /** Secret: SHA-256 verifier for the dedicated roster bearer. */
+  CONTRIBUTOR_ROSTER_TOKEN_SHA256?: string;
   /** Optional and separately provisioned for non-TRAIN writer assignments. */
   CONTRIBUTOR_DEV_MEDIA?: R2Bucket;
   CONTRIBUTOR_EVAL_MEDIA?: R2Bucket;

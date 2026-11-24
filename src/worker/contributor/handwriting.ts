@@ -6,7 +6,6 @@ import { enforce } from "../ratelimit";
 import { gone, hash, invalid, parseContributorManifest, pinnedJSON, submissionBucket, type Manifest, type Task, type Writer } from "./config";
 
 const digest = /^[a-f0-9]{64}$/;
-const account = /^rv_[a-f0-9]{8}$/;
 const splits = ["train", "dev", "eval_open"] as const;
 const pairing = /^(cw-[a-f0-9]{32})\.([A-Za-z0-9_-]{43})$/;
 const invite = /^[a-f0-9]{32}$/;
@@ -38,9 +37,7 @@ export async function handwritingPlan(ctx: Ctx) {
   const env = ctx.env;
   const pin = env.CONTRIBUTOR_HANDWRITING_CONFIG_SHA256;
   if (!pin) return null;
-  const reviewer = env.CONTRIBUTOR_ROSTER_REVIEWER_ID;
-  if (!digest.test(pin) || !reviewer || !account.test(reviewer) ||
-      !env.TRAIN_CAPTURE_MEDIA || env.CONTRIBUTOR_CONFIG_SHA256) throw gone();
+  if (!digest.test(pin) || !env.TRAIN_CAPTURE_MEDIA || env.CONTRIBUTOR_CONFIG_SHA256) throw gone();
   const plan = await pinnedJSON(env.TRAIN_CAPTURE_MEDIA, "handwriting-signup", pin, 128 * 1024) as Plan | null;
   if (plan?.schema !== "heocr.handwriting_signup.v1" || !Number.isInteger(plan.writerLimit) ||
       plan.writerLimit < 1 || plan.writerLimit > maxWriters || !Array.isArray(plan.capacity) ||
@@ -69,7 +66,7 @@ export async function handwritingPlan(ctx: Ctx) {
   const sheetPins = writers.flatMap(writer => writer.tasks.map(task => task.sheetSha256));
   if (new Set(sheetPins).size !== sheetPins.length) throw gone();
   const manifest = await parseContributorManifest({schema:"heocr.contributor.v1",approval:plan.approval,policy:plan.policy,writers});
-  return { plan, pin, reviewer, manifest: { ...manifest, writers: [] as Writer[] } };
+  return { plan, pin, manifest: { ...manifest, writers: [] as Writer[] } };
 }
 
 export type HandwritingPlan = NonNullable<Awaited<ReturnType<typeof handwritingPlan>>>;
@@ -97,7 +94,6 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
   const { inviteCode, ageBand, set } = await readJson(ctx.request);
   if (typeof inviteCode !== "string" || !invite.test(inviteCode) || !handwritingAgeBands.some(band => band === ageBand) ||
       !handwritingSets.includes(set as HandwritingSet)) throw invalid();
-  if (actor === signup.reviewer) throw gone();
   const pin = await hash(inviteCode);
   const cohort = signup.plan.cohort?.sha256 === pin ? signup.plan.cohort : null;
   if (cohort ? Date.parse(cohort.expiresAt) <= ctx.now : !signup.plan.invites.includes(pin)) throw gone();
@@ -157,7 +153,7 @@ export async function acceptGuardian(ctx: Ctx, signup: HandwritingPlan, actor: s
   const writer = match[1]!, signature = match[2]!;
   if (base64url(base64urlDecode(signature)) !== signature ||
       !await hmacVerify(requireSecret(ctx.env.SESSION_SECRET,"SESSION_SECRET"),
-        pairingMessage(signup.pin,writer),base64urlDecode(signature)) || actor === signup.reviewer) throw gone();
+        pairingMessage(signup.pin,writer),base64urlDecode(signature))) throw gone();
   const policy = signup.manifest.policy;
   if (version !== policy.version || sha256 !== policy.guardian[lang].sha256) throw new HttpError(409,"consent_changed");
   const result = await ctx.env.DB.prepare(`UPDATE contributor_enrolments
@@ -184,8 +180,7 @@ const snapshot = (pin: string, rows: RosterRow[]) =>
   JSON.stringify({schema:"heocr.handwriting_roster.v1",configSha256:pin,rows:rows.map(({ordinal,writer,ageBand,set,split}) =>
     ({ordinal,writer,ageBand,set,split}))}) + "\n";
 
-export async function handwritingRoster(ctx: Ctx, signup: HandwritingPlan, actor: string) {
-  if (actor !== signup.reviewer) throw gone();
+export async function handwritingRoster(ctx: Ctx, signup: HandwritingPlan) {
   const db = ctx.env.DB;
   const rows = (await db.prepare(`SELECT ordinal,writer_id AS writer,age_band AS ageBand,set_id AS "set",split
     FROM contributor_handwriting_roster WHERE config_sha256=? ORDER BY ordinal`).bind(signup.pin).all<RosterRow>()).results;

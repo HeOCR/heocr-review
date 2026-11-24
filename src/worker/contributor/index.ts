@@ -1,6 +1,6 @@
 import { purgeHandwritingEnrolment, recordHandwritingPublication } from "./handwriting-withdrawal";
 import {
-  acceptGuardian, guardianCode, handwritingPlan, handwritingRoster, handwritingSetOptions, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
+  acceptGuardian, guardianCode, handwritingPlan, handwritingSetOptions, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
 } from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
@@ -363,7 +363,7 @@ export async function contributor(ctx: Ctx) {
   }
 
   const revoke=suffix==="/operator/handwriting-invites/revoke";
-  if (suffix==="/enrolments" || suffix==="/guardian" || suffix==="/operator/handwriting-roster" || revoke) {
+  if (suffix==="/enrolments" || suffix==="/guardian" || revoke) {
     if (ctx.env.CONTRIBUTOR_APP_ENABLED!=="1" || !canonicalContributorOrigin(ctx.env,ctx.url)) throw gone();
     const actor=await session(ctx);
     enforce(method==="GET" ? LIMITS.readMinute : LIMITS.writeMinute,actor,ctx.now);
@@ -372,7 +372,7 @@ export async function contributor(ctx: Ctx) {
       const writers=signup ? await selfWriters(ctx,signup,actor) : (await contributorManifest(ctx.env)).writers;
       return json({enrolments:writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
         .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"})),
-        ...(signup && actor!==signup.reviewer && !await handwritingOptedOut(ctx,actor) ? {signup:{guardian:signup.manifest.policy.guardian,
+        ...(signup && !await handwritingOptedOut(ctx,actor) ? {signup:{guardian:signup.manifest.policy.guardian,
           version:signup.manifest.policy.version,sets:await handwritingSetOptions(ctx,signup)}} : {})},200,privateHeaders);
     }
     if (!signup) throw gone();
@@ -385,8 +385,6 @@ export async function contributor(ctx: Ctx) {
       const writer=await acceptGuardian(ctx,signup,actor);
       return json(await profile(await access(ctx,writer)),200,privateHeaders);
     }
-    if (suffix==="/operator/handwriting-roster" && (method==="GET" || method==="POST"))
-      return handwritingRoster(ctx,signup,actor);
     throw gone();
   }
   const route=/^\/writers\/(cw-[a-f0-9]{32})(?:\/(consent|withdraw)|\/tasks\/([A-Za-z0-9_-]{1,64})\/(sheet|crop|submit))?$/.exec(suffix);
