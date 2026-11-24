@@ -6,7 +6,7 @@ export type CaptureMode = typeof captureModes[number];
 export const requiredPrintModes = ["flat", "angle", "folded", "crumpled", "scribbled"] as const;
 export type PrintCaptureStep = { mode: CaptureMode; saved: boolean };
 export type ContributorSplit = "train" | "dev" | "eval_open";
-export const ageBands = ["10_12", "13_15", "16_17"] as const;
+export const ageBands = ["10_12", "13_15", "16_17", "18_plus"] as const;
 export type AgeBand = typeof ageBands[number];
 export type Language = "he" | "en";
 export type ConsentCopy = { text: string; sha256: string };
@@ -20,7 +20,7 @@ export type ContributorNext = {
   { kind: "print"; mode: CaptureMode; sheet: string; captureSteps?: PrintCaptureStep[] } |
   { kind: "form"; sheet: string; fields: FormField[]; referenceSha256: string } |
   { kind: "line"; crop: string; candidate: string } |
-  { kind: "handwriting"; prompt: string; rights: string; referenceSha256: string }
+  { kind: "handwriting"; prompt: string; rights: string; referenceSha256: string; sheet?: string }
 );
 
 export type PrintCapture = Extract<ContributorNext, { kind: "print" }>;

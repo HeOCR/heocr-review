@@ -14,7 +14,7 @@ const jpg = Uint8Array.from([255,216,255,192,0,11,8,0,1,0,1,1,1,17,0,255,217]);
 const writerKey = "cw-" + "1".repeat(32);
 const secondKey = "cw-" + "2".repeat(32);
 
-async function fixture(label: string, customize?: (manifest: Manifest) => void) {
+async function fixture(label: string, customize?: (manifest: Manifest) => void | Promise<void>) {
   const writer = new Client(), guardian = new Client(), stranger = new Client(), second = new Client();
   const writerAccount = await writer.signIn(label + "-writer");
   const guardianAccount = await guardian.signIn(label + "-guardian");
@@ -64,7 +64,7 @@ async function fixture(label: string, customize?: (manifest: Manifest) => void) 
     ]},{id:secondKey,writerAccount:secondAccount,guardianAccount,ageBand:"16_17",split:"dev",
       tasks:[{id:"h-dev",kind:"handwriting",page:"D-1",sentences:["עוד משפט לדוגמה"],promptSha256:await hash("עוד משפט לדוגמה"),rights:"PD: invented fixture"}]}],
   };
-  customize?.(manifest);
+  await customize?.(manifest);
   const bytes=JSON.stringify(manifest);
   const pin=await hash(bytes);
   await bucket.put(contributorRoot+"config/"+pin+".json",bytes);
@@ -326,4 +326,69 @@ it("binds the exact fictional field JSON to the form receipt and refuses stale o
   const digest=await hash(config);
   await f.bucket.put(contributorRoot+"config/"+digest+".json",config);
   expect((await f.req(f.writer,route,{...photo,reference:pin,env:{CONTRIBUTOR_CONFIG_SHA256:digest}})).status).toBe(404);
+});
+
+it("gates v3 worksheet downloads, accepts adult CC0 consent and routes scans into quarantine", async () => {
+  const adultKey = "cw-"+"a".repeat(32);
+  const exactSheet = new TextEncoder().encode("%PDF-1.4\n% invented v3 sheet\n");
+  const f = await fixture("v3-adult", async m => {
+    const w = m.writers[0]!;
+    w.id = adultKey;
+    w.ageBand = "18_plus";
+    w.guardianAccount = null;
+    w.split = "dev";
+    const sheetSha256 = await hash(new Uint8Array(exactSheet));
+    w.tasks = await Promise.all([1,2,3].map(async number => {
+      const page = `HW-V3-A0${number}`;
+      const sentences = Array.from({length:30}, (_, i) => `שורת בדיקה ${number}·${i + 1}`);
+      return {id:page,page,kind:"handwriting" as const,sentences,sheetSha256,rights:"PD: invented fixture",
+        promptSha256:await hash(sentences.join("\n"))};
+    }));
+  });
+  const pdfKey = contributorRoot+"sheets/"+await hash(new Uint8Array(exactSheet))+".pdf";
+  await f.settings.CONTRIBUTOR_DEV_MEDIA!.put(pdfKey,exactSheet);
+  expect(await f.bucket.head(pdfKey)).toBeNull();
+  const asset = f.path + "/tasks/HW-V3-A01/sheet";
+  const before = await (await f.req(f.writer,f.path)).json<ContributorProfile>();
+  expect(before).toMatchObject({state:"assent",ageBand:"18_plus",queues:[]});
+  expect((await f.req(f.writer,asset)).status).toBe(404);
+  expect((await f.consent("guardian")).status).toBe(404);
+  const accepted = await f.consent("assent");
+  expect(accepted.status).toBe(200);
+  const profile = await accepted.json<ContributorProfile>();
+  expect(profile).toMatchObject({state:"ready",licence:"cc0_open"});
+  const task = profile.queues[0]?.next;
+  expect(task).toMatchObject({kind:"handwriting",page:"HW-V3-A01",sheet:asset});
+  if (task?.kind !== "handwriting") throw new Error("missing v3 task");
+  expect(task.prompt.split("\n")).toHaveLength(30);
+  expect((await f.req(f.stranger,asset)).status).toBe(404);
+  expect((await f.req(f.writer,f.path+"/tasks/HW-V3-A02/sheet")).status).toBe(404);
+  const download = await f.req(f.writer,asset);
+  expect(download.headers.get("content-disposition")).toBe('attachment; filename="HW-V3-A01.pdf"');
+  expect(download.headers.get("cache-control")).toBe("private, no-store");
+  expect(new Uint8Array(await download.arrayBuffer())).toEqual(exactSheet);
+  const submit = f.path+"/tasks/HW-V3-A01/submit";
+  expect((await f.req(f.writer,submit,{image:pageImage,ok:true,reference:"f".repeat(64)})).status).toBe(409);
+  expect((await f.req(f.writer,submit,{image:pageImage,ok:true,reference:task.referenceSha256})).status).toBe(200);
+  expect(await env.DB.prepare("SELECT guardian_sha256, assent_sha256, reference_sha256 FROM contributor_submissions WHERE writer_id=?")
+    .bind(adultKey).first()).toEqual({guardian_sha256:null,assent_sha256:f.manifest.policy.assent.en.sha256,
+      reference_sha256:task.referenceSha256});
+  const prefix = contributorRoot+"quarantine/"+adultKey+"/";
+  const [{objects:train},{objects:dev}] = await Promise.all([f.bucket.list({prefix}),f.settings.CONTRIBUTOR_DEV_MEDIA!.list({prefix})]);
+  expect(train).toHaveLength(0);
+  expect(dev).toHaveLength(1);
+  expect(await f.settings.CONTRIBUTOR_DEV_MEDIA!.get(dev[0]!.key).then(async object =>
+    new Uint8Array(await object!.arrayBuffer()))).toEqual(pageImage);
+
+  const reused = structuredClone(f.manifest);
+  reused.writers[1]!.tasks = reused.writers[0]!.tasks;
+  await expect(parseContributorManifest(reused)).rejects.toThrow();
+  const missingPdf = structuredClone(f.manifest);
+  const taskWithoutSheet = missingPdf.writers[0]!.tasks[0]!;
+  if (taskWithoutSheet.kind!=="handwriting") throw new Error("missing fixture");
+  delete taskWithoutSheet.sheetSha256;
+  await expect(parseContributorManifest(missingPdf)).rejects.toThrow();
+
+  expect((await f.req(f.writer,f.path+"/withdraw",{body:{withdraw:true}})).status).toBe(200);
+  expect((await f.req(f.writer,f.path+"/tasks/HW-V3-A02/sheet")).status).toBe(404);
 });
