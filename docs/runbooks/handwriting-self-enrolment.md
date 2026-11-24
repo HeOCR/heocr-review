@@ -40,7 +40,9 @@ It contains these fields:
 
 - `schema` is `heocr.handwriting_signup.v1`.
 - `approval` and `policy` use the contributor v1 format, with the eval
-  allocation digest, lead authorization and unchanged CC0 consent copy.
+  allocation digest (`evalSplitSha256`), lead authorization and unchanged
+  CC0 consent copy. Include the registered calibration amendment digest as
+  `approval.allocationAmendmentSha256`.
 - `writerLimit` is the total enrolled-writer cap, initially 50. A private
   plan can set a smaller integer.
 - `capacity` lists `{split,max}` for each approved split in tie-break
@@ -50,7 +52,11 @@ It contains these fields:
   be selected.
 - `setsBySplit` maps each configured split to its permitted sets. Every
   set belongs to exactly one split. The plan validator rejects a normalized
-  sentence shared across splits, even when the sheets have different hashes.
+  sentence shared across splits in lines 1–29, even when the sheets have
+  different hashes.
+- `lineRoles` is `{"30":"calibration"}`. All 16 sheets share that exact
+  line. Keep it in the copy task. Exclude it from DEV and EVAL-open
+  references, denominators and scores. TRAIN may use it.
 - `invites` contains the SHA-256 of each individually issued single-use
   invitation. It may be empty with a cohort code.
 - Optional `cohort` specifies `{sha256,maxUses,expiresAt}` for a single
@@ -67,7 +73,10 @@ It contains these fields:
 
 Pin `CONTRIBUTOR_HANDWRITING_CONFIG_SHA256` with collection off for the eval
 operator's readback. Enable `CONTRIBUTOR_APP_ENABLED=1` only after the
-separate collection approval. Keep
+separate collection approval. Before that approval, give eval ordered
+per-sheet line hashes and hash-only counts for exact matches and policy-v2
+word six-gram tags. Report DEV and EVAL-open lines both with and without
+the tags, excluding calibration from both views. Keep
 `CONTRIBUTOR_CONFIG_SHA256` unset for this handwriting-only launch. The enabled plan is immutable for the pilot.
 Registration and guardian pairing have an eight-attempt-per-minute
 limit per account per isolate. Existing contributor request limits and

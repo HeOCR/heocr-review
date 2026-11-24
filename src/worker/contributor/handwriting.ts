@@ -10,16 +10,18 @@ const splits = ["train", "dev", "eval_open"] as const;
 const pairing = /^(cw-[a-f0-9]{32})\.([A-Za-z0-9_-]{43})$/;
 const invite = /^[a-f0-9]{32}$/;
 const maxWriters = 50;
+const calibrationLine = 30;
 const attemptLimit = { bucket: "handwriting-enrol", max: 8, windowS: 60 };
 const noStore = { "cache-control": "private, no-store", "cdn-cache-control": "no-store" };
 type Sheets = Record<HandwritingSet, Extract<Task, { kind: "handwriting" }>[]>;
 type Plan = {
   schema: "heocr.handwriting_signup.v1";
-  approval: Manifest["approval"];
+  approval: Manifest["approval"] & { allocationAmendmentSha256: string };
   policy: Manifest["policy"];
   writerLimit: number;
   capacity: { split: ContributorSplit; max: number }[];
   setsBySplit: Partial<Record<ContributorSplit, HandwritingSet[]>>;
+  lineRoles: { "30": "calibration" };
   invites: string[];
   cohort?: { sha256: string; maxUses: number; expiresAt: string };
   sheets: Sheets;
@@ -55,7 +57,10 @@ export async function handwritingPlan(ctx: Ctx) {
   if (!pin) return null;
   if (!digest.test(pin) || !env.TRAIN_CAPTURE_MEDIA || env.CONTRIBUTOR_CONFIG_SHA256) throw gone();
   const plan = await pinnedJSON(env.TRAIN_CAPTURE_MEDIA, "handwriting-signup", pin, 128 * 1024) as Plan | null;
-  if (plan?.schema !== "heocr.handwriting_signup.v1" || !Number.isInteger(plan.writerLimit) ||
+  if (plan?.schema !== "heocr.handwriting_signup.v1" ||
+      typeof plan.approval?.allocationAmendmentSha256 !== "string" || !digest.test(plan.approval.allocationAmendmentSha256) ||
+      plan.lineRoles?.[calibrationLine] !== "calibration" || Object.keys(plan.lineRoles).length !== 1 ||
+      !Number.isInteger(plan.writerLimit) ||
       plan.writerLimit < 1 || plan.writerLimit > maxWriters || !Array.isArray(plan.capacity) ||
       plan.capacity.length < 1 || plan.capacity.length > splits.length ||
       plan.capacity.some(entry => !entry || !splits.includes(entry.split) ||
@@ -86,11 +91,15 @@ export async function handwritingPlan(ctx: Ctx) {
   const manifest = await parseContributorManifest({schema:"heocr.contributor.v1",approval:plan.approval,policy:plan.policy,writers});
   // Sheet hashes alone cannot detect a sentence shared by two otherwise distinct sheets.
   const lineSplits = new Map<string,ContributorSplit>();
-  for (const writer of writers) for (const task of writer.tasks) for (const sentence of task.sentences) {
-    const line = sentence.normalize("NFC").trim().replace(/\s+/gu," ");
-    const split = lineSplits.get(line);
-    if (split && split !== writer.split) throw gone();
-    lineSplits.set(line,writer.split);
+  const calibration = writers[0]!.tasks[0]!.sentences[calibrationLine - 1];
+  for (const writer of writers) for (const task of writer.tasks) {
+    if (task.sentences[calibrationLine - 1] !== calibration) throw gone();
+    for (const sentence of task.sentences.slice(0,calibrationLine - 1)) {
+      const line = sentence.normalize("NFC").trim().replace(/\s+/gu," ");
+      const split = lineSplits.get(line);
+      if (split && split !== writer.split) throw gone();
+      lineSplits.set(line,writer.split);
+    }
   }
   return { plan, pin, splitBySet, manifest: { ...manifest, writers: [] as Writer[] } };
 }
