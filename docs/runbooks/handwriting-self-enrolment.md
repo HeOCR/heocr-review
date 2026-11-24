@@ -13,14 +13,16 @@ A writer aged 10–17 shares the pairing code privately with their guardian.
 The guardian opens the same page, signs in with a separate account, reads
 the pinned wording and submits the code with consent. The writer signs in
 again, checks for the guardian response and assents. Adult writers consent
-directly. A writer can withdraw at any time. The existing operator process
-uses the withdrawal receipt to remove quarantined submissions.
+directly. A writer or their paired guardian can withdraw in the app.
+The operator can also process a verified deletion request by receipt.
 
 ## Private launch plan
 
 Migration `0026_handwriting_self_enrolment.sql` copies the existing
 contributor tables and adds the roster, invite revocation and checkpoint
-tables. Use the production runbook, rehearsal against a restore-readable
+tables. Migration `0027_handwriting_withdrawal.sql` adds publication pins,
+withdrawal receipt digests and an opt-out flag. Use the production runbook,
+rehearsal against a restore-readable
 export, a current
 D1 budget including the table copies and indexes, a clean deployed commit
 and a rollback target. Seal all real inputs outside the source tree and
@@ -88,5 +90,34 @@ changed prefix fails. The checkpoint audits the enrolled roster. Any
 enrolled writer with current consent can access their sheets and upload
 before the audit. The upload write matches the writer, assigned split, age
 band and sheet set to the current private plan's roster entry again.
-Withdrawal closes uploads immediately. Keeping a pseudonymous roster row
-preserves the split history and the cohort count.
+## Withdrawal and release
+
+Withdrawal closes uploads and removes the writer's submissions from the
+`contributor_handwriting_release_candidates` view before R2 cleanup. It
+deletes unpublished originals in the assigned bucket, removes D1
+submission and enrolment rows, and leaves published copies and release pins
+intact. The roster keeps pseudonymous assignment history for the cap and
+the audit chain. The receipt is retained only as a digest in that history.
+The site's sign-in record keeps a handwriting opt-out flag without a link
+to the deleted enrolment so the person cannot be given another split.
+
+The receipt endpoint remains available to the operator when intake is off.
+Retry a pending cleanup by POSTing to
+`/api/contributor/v1/operator/withdrawals/<receipt>` from the canonical
+origin. Repeat after in-flight requests drain. Reconcile any staging or
+working copies governed by the withdrawal before acknowledging completion.
+Keep receipts, account IDs and working copies out of logs.
+
+Select sources for downstream review from the release candidates view.
+Check eligibility again on the live database before a separately approved
+release, after reconciling withdrawal requests. Verify the public release
+manifest and byte readback with the lead. To pin an exact published original,
+POST `{contentSha256,releaseSha256}` to
+`/api/contributor/v1/operator/handwriting-publications` as the operator.
+Pin only original bytes whose exact digest is in the release. Published
+derivatives do not pin their unpublished originals. The endpoint records a
+confirmed release, and has no publication capability.
+
+The pilot admits at most 200 submissions. Budget the withdrawal closeout
+for up to four submission and index deletions per writer, one enrolment
+and its indexes, one roster digest and its index, and the sign-in opt-out.

@@ -117,7 +117,7 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect((await f.req(f.writer,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(200);
   expect((await f.req(f.evaluator,roster,acceptPin)).status).toBe(200);
   expect((await f.req(f.evaluator,roster,acceptPin)).status).toBe(409);
-  expect((await f.req(f.writer,writerPath+"/withdraw",{withdraw:true})).status).toBe(200);
+  expect((await f.req(f.guardian,writerPath+"/withdraw",{withdraw:true})).status).toBe(200);
   expect((await f.req(f.writer,task+"/submit",photo,{},"http://localhost",photoHeaders)).status).toBe(404);
   expect((await (await f.req(f.evaluator,roster)).json<{sha256:string}>()).sha256).toBe(pin.sha256);
 });
@@ -196,6 +196,78 @@ it.each(["withdrawal","roster mismatch"] as const)("rechecks %s after R2 put and
   });
   expect((await f.req(f.writer,ready.task,photo,{TRAIN_CAPTURE_MEDIA:hooked},origin,ready.headers)).status).toBe(409);
   expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_submissions").first<{n:number}>())?.n).toBe(0);
+  expect((await bucket.list({prefix:contributorRoot+"quarantine/"+ready.writer+"/"})).objects).toHaveLength(0);
+});
+
+it("withdraws a writer, deletes unpublished files and preserves a previously published original",async()=>{
+  const f=await fixture({cohort:{maxUses:4,expiresAt:"2099-01-01T00:00:00Z"}});
+  const ready=await readyAdult(f);
+  const bucket=env.TRAIN_CAPTURE_MEDIA!;
+  const prefix=contributorRoot+"quarantine/"+ready.writer+"/";
+  const first=await (await f.req(f.writer,ready.task,photo,{},origin,ready.headers)).json<ContributorProfile>();
+  const secondPhoto=Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNkYPjPwMDAxAAGAAsfAQMU4wsAAAAAAElFTkSuQmCC"), c => c.charCodeAt(0));
+  const second=ready.writerPath+"/tasks/HW-V3-A02/submit";
+  expect((await f.req(f.writer,second,secondPhoto,{},origin,uploadHeaders(first))).status).toBe(200);
+  const published=await env.DB.prepare("SELECT storage_key FROM contributor_submissions WHERE writer_id=? AND task_id='HW-V3-A01'")
+    .bind(ready.writer).first<string>("storage_key");
+  const unpublished=await env.DB.prepare("SELECT storage_key FROM contributor_submissions WHERE writer_id=? AND task_id='HW-V3-A02'")
+    .bind(ready.writer).first<string>("storage_key");
+  expect(published).toBeTruthy();
+  expect(unpublished).toBeTruthy();
+  const before=await (await f.req(f.evaluator,roster)).json<{sha256:string}>();
+  const publicationRoute=path+"/operator/handwriting-publications";
+  const firstPin={contentSha256:await hash(photo),releaseSha256:"3".repeat(64)};
+  expect((await f.req(f.stranger,publicationRoute,firstPin)).status).toBe(404);
+  expect((await f.req(f.evaluator,publicationRoute,firstPin,{},"https://heocr-review.heocr.workers.dev")).status).toBe(404);
+  expect((await f.req(f.evaluator,publicationRoute,firstPin)).status).toBe(200);
+  expect((await f.req(f.evaluator,publicationRoute,{...firstPin,releaseSha256:"4".repeat(64)})).status).toBe(409);
+  await bucket.put(prefix+"orphan","private fixture");
+  const stopped=await f.req(f.writer,ready.writerPath+"/withdraw",{withdraw:true});
+  expect(stopped.status).toBe(200);
+  expect(await stopped.json()).toMatchObject({state:"withdrawn",receipt:first.receipt,queues:[]});
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_enrolments WHERE writer_id=?").bind(ready.writer).first()).toBeNull();
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_submissions WHERE writer_id=?").bind(ready.writer).first()).toBeNull();
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_release_candidates WHERE writer_id=?").bind(ready.writer).first()).toBeNull();
+  expect((await (await f.req(f.evaluator,roster)).json<{sha256:string}>()).sha256).toBe(before.sha256);
+  expect((await f.req(f.writer,ready.writerPath+"/consent",f.copyBody("assent"))).status).toBe(404);
+  expect((await f.req(f.writer,"/api/batches")).status).toBe(404);
+  const rejoin={inviteCode:cohortCode,ageBand:"18_plus",set:"B"};
+  expect((await f.req(f.writer,path+"/enrolments",rejoin)).status).toBe(409);
+  expect((await f.req(f.other,path+"/enrolments",rejoin)).status).toBe(200);
+  expect(await bucket.get(unpublished!)).toBeNull();
+  expect(await bucket.get(prefix+"orphan")).toBeNull();
+  expect(await hash(new Uint8Array(await (await bucket.get(published!))!.arrayBuffer()))).toBe(firstPin.contentSha256);
+  expect((await f.req(f.evaluator,publicationRoute,firstPin)).status).toBe(200);
+  expect((await f.req(f.evaluator,publicationRoute,{...firstPin,contentSha256:await hash(secondPhoto)})).status).toBe(409);
+  await bucket.put(prefix+"late-orphan","late private fixture");
+  const purge=path+"/operator/withdrawals/"+first.receipt;
+  expect((await f.req(f.evaluator,purge,{}, {CONTRIBUTOR_APP_ENABLED:"0"})).status).toBe(200);
+  expect((await bucket.list({prefix})).objects.map(object=>object.key)).toEqual([published]);
+});
+
+it("excludes unpublished material immediately and retries a failed R2 purge by receipt",async()=>{
+  const f=await fixture();
+  const ready=await readyAdult(f);
+  const saved=await (await f.req(f.writer,ready.task,photo,{},origin,ready.headers)).json<ContributorProfile>();
+  const bucket=env.TRAIN_CAPTURE_MEDIA!;
+  const broken=new Proxy(bucket,{
+    get(target,property) {
+      if (property==="delete") return async()=>{throw Error("R2 unavailable");};
+      const value=Reflect.get(target,property);
+      return typeof value==="function" ? value.bind(target) : value;
+    },
+  });
+  const purge=path+"/operator/withdrawals/"+saved.receipt;
+  const failed=await f.req(f.evaluator,purge,{}, {TRAIN_CAPTURE_MEDIA:broken});
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toMatchObject({error:"contributor_withdrawal_pending"});
+  expect((await f.req(f.writer,ready.task,photo,{},origin,ready.headers)).status).toBe(404);
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_release_candidates").first()).toBeNull();
+  expect((await f.req(f.evaluator,path+"/operator/handwriting-publications",{
+    contentSha256:await hash(photo),releaseSha256:"3".repeat(64),
+  })).status).toBe(409);
+  expect((await f.req(f.evaluator,purge,{})).status).toBe(200);
+  expect(await env.DB.prepare("SELECT 1 FROM contributor_enrolments").first()).toBeNull();
   expect((await bucket.list({prefix:contributorRoot+"quarantine/"+ready.writer+"/"})).objects).toHaveLength(0);
 });
 

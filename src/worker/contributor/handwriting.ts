@@ -87,6 +87,11 @@ export async function handwritingSetOptions(ctx: Ctx, signup: HandwritingPlan) {
   return options.results.map(row => row.set_id);
 }
 
+export async function handwritingOptedOut(ctx: Ctx, actor: string) {
+  return (await ctx.env.DB.prepare("SELECT handwriting_opted_out FROM reviewers WHERE id=?")
+    .bind(actor).first<number>("handwriting_opted_out")) === 1;
+}
+
 export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor: string) {
   enforce(attemptLimit, actor, ctx.now);
   const { inviteCode, ageBand, set } = await readJson(ctx.request);
@@ -115,6 +120,7 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
       WHERE (SELECT SUM(uses) FROM set_loads) < ?8 AND ?4 IN (${leastUsedSets})
         AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND invite_sha256=?2) < ?9
         AND NOT EXISTS (SELECT 1 FROM contributor_handwriting_revoked_invites WHERE config_sha256=?1 AND invite_sha256=?2)
+        AND EXISTS (SELECT 1 FROM reviewers WHERE id=?6 AND handwriting_opted_out=0)
         AND NOT EXISTS (SELECT 1 FROM contributor_enrolments WHERE writer_account=?6 OR guardian_account=?6)
       ON CONFLICT DO NOTHING`)
       .bind(signup.pin,pin,writer,set,ageBand,actor,JSON.stringify(signup.plan.capacity),signup.plan.writerLimit,cohort?.maxUses ?? 1),
@@ -158,6 +164,7 @@ export async function acceptGuardian(ctx: Ctx, signup: HandwritingPlan, actor: s
     SET guardian_account=?1,guardian_version=?2,guardian_sha256=?3,guardian_at=?4
     WHERE writer_id=?5 AND age_band<>'18_plus' AND guardian_account IS NULL AND withdrawn_at IS NULL
       AND EXISTS(SELECT 1 FROM contributor_handwriting_roster WHERE writer_id=?5 AND config_sha256=?6)
+      AND EXISTS (SELECT 1 FROM reviewers WHERE id=?1 AND handwriting_opted_out=0)
       AND NOT EXISTS(SELECT 1 FROM contributor_enrolments WHERE writer_account=?1)`)
     .bind(actor,policy.version+":"+policy.licence,sha256,new Date(ctx.now).toISOString(),writer,signup.pin).run();
   if (result.meta.changes !== 1) throw gone();

@@ -10,6 +10,7 @@
  * asked to accept again.
  * Privacy policy 2026-11-20-v1: admin synthetic realism review (docs/decisions/2026-11-20-synth-realism.md).
  * Privacy policy 2026-11-20-v2: training page transcription (docs/decisions/2026-11-20-page-paste-train.md).
+ * Privacy policy 2026-11-24-v3: handwriting enrolment and withdrawal (docs/decisions/2026-11-24-handwriting-v3-privacy.md).
  * Terms 2026-11-18-v1: the scope covers handwritten pages and typing text, and CC0 covers text you type
  * (docs/decisions/2026-11-18-terms-handwriting.md); every reviewer is asked again.
  * Any change to this text, public/terms.html or public/privacy.html needs the maintainer's approval and a new
@@ -20,7 +21,7 @@ export const TERMS_VERSION = "2026-11-18-v1";
 export const TERMS_LICENSE = "CC0 1.0";
 export const TERMS_LICENSE_URL = "https://creativecommons.org/publicdomain/zero/1.0/";
 /** The public pages carry the same versions (test/node/pages.test.ts checks them). */
-export const PRIVACY_VERSION = "2026-11-20-v2";
+export const PRIVACY_VERSION = "2026-11-24-v3";
 export const CONTACT_EMAIL = "heocrproject@gmail.com";
 
 export interface TermsText {
