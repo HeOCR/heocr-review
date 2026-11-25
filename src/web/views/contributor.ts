@@ -19,7 +19,8 @@ const ltr = (range: string) => `\u2066${range}\u2069`;
 const bands: Record<ContributorProfile["ageBand"], Pair> = {
   "10_12": [ltr("10–12"), "10–12"], "13_15": [ltr("13–15"), "13–15"], "16_17": [ltr("16–17"), "16–17"], "13_17": [ltr("13–17"), "13–17"], "18_plus": [ltr("18+"), "18+"],
 };
-const setNames: Record<HandwritingSet, Pair> = {
+// F (TEST) and G (DEV) are never offered: kids get them with their pack, so they have no picker name.
+const setNames: Partial<Record<HandwritingSet, Pair>> = {
   A: ["מקורות", "Sources"],
   B: ["מסמכי יסוד", "Founding texts"],
   C: ["שירה עברית ישנה", "Old Hebrew poetry"],
@@ -262,7 +263,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       if (choice) {
         const {offer,inviteCode,ageBand}=choice;
         const empty=offer.sets.length>1 ? [h("option",{value:""},text("בחרו סט אחד","Choose one set"))] : [];
-        const set=h("select",{required:true},...empty,...offer.sets.map(id=>h("option",{value:id},tr(setNames[id]))));
+        const set=h("select",{required:true},...empty,...offer.sets.map(id=>h("option",{value:id},tr(setNames[id] ?? [id,id]))));
         const join=h("button",{type:"submit",class:"act primary"},text("הרשמה","Enrol"));
         root.append(h("form",{class:"card contributor-consent",onsubmit:(event:Event)=>{
           event.preventDefault();

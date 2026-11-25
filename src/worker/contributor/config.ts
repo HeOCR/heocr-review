@@ -9,7 +9,7 @@ export const quarantinePrefix = (writer: string) => `${contributorRoot}quarantin
 const digest = /^[a-f0-9]{64}$/;
 const opaque = /^[A-Za-z0-9_-]{1,64}$/;
 const account = /^rv_[a-f0-9]{8}$/;
-const v3Page = /^HW-V3-([A-E])0[1-4]$/;
+const v3Page = /^HW-V3-([A-G])0[1-4]$/;
 const writerKey = /^cw-[a-f0-9]{32}$/;
 type Copy = Record<Language, ConsentCopy>;
 
