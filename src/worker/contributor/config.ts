@@ -15,7 +15,7 @@ type Copy = Record<Language, ConsentCopy>;
 
 type CommonTask = { id: string; page: string };
 export type Task = CommonTask & (
-  { kind: "print"; mode: CaptureMode; sheetSha256: string; sequence?: true } |
+  { kind: "print"; mode: CaptureMode; sheetSha256: string; sequence?: true; variant?: "kids" } |
   { kind: "form"; pack: "TRN-FM01"; variant: "worksheet"; sheetSha256: string; referenceSha256: string } |
   { kind: "line"; proposalId: number; proposalSha256: string; cropSha256: string } |
   { kind: "handwriting"; sentences: string[]; promptSha256: string; rights: string; sheetSha256?: string }
@@ -67,7 +67,8 @@ function validTask(task: Task, split: ContributorSplit) {
   }
   if (split !== "train") return false;
   if (task.kind === "print") return captureModes.includes(task.mode) && digest.test(task.sheetSha256) &&
-    (task.sequence === undefined || task.sequence === true);
+    (task.sequence === undefined || task.sequence === true) &&
+    (task.variant === undefined || (task.variant === "kids" && task.sequence === true));
   if (task.kind === "form") return task.pack === "TRN-FM01" && task.variant === "worksheet" &&
     digest.test(task.sheetSha256) && digest.test(task.referenceSha256);
   return task.kind === "line" && Number.isSafeInteger(task.proposalId) && task.proposalId > 0 &&
@@ -84,7 +85,7 @@ function validPrintSequences(tasks: Task[]) {
     const n = requiredPrintModes.length;
     if (slots.length !== n && slots.length !== n + 1) return false;
     if (!slots.every((task, index) => task.sequence && task === print[offset + index] &&
-      task.sheetSha256 === first.sheetSha256 && task.mode === (index === n ? "shadow" : requiredPrintModes[index]))) return false;
+      task.sheetSha256 === first.sheetSha256 && task.variant === first.variant && task.mode === (index === n ? "shadow" : requiredPrintModes[index]))) return false;
   }
   return true;
 }

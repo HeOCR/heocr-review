@@ -182,12 +182,15 @@ it("enforces each sheet's required photo order and saves the server-assigned var
     const first = manifest.writers[0]!;
     first.id = sequenceWriter;
     const pin = (first.tasks[0] as PrintTask).sheetSha256;
-    first.tasks = [...printSequence("P1", pin), ...printSequence("P2", pin, false)];
+    first.tasks = [
+      ...printSequence("P1", pin).map(task => ({ ...task, variant: "kids" as const })),
+      ...printSequence("P2", pin, false),
+    ];
   });
   expect((await f.consent("guardian")).status).toBe(200);
   const ready = await (await f.consent("assent")).json<ContributorProfile>();
   const queue = ready.queues[0]!;
-  expect(queue).toMatchObject({ total: 10, done: 0, next: { id: "P1-flat", captureSteps: [...requiredPrintModes,"shadow"].map(mode=>({mode,saved:false})) } });
+  expect(queue).toMatchObject({ total: 10, done: 0, next: { id: "P1-flat", variant: "kids", captureSteps: [...requiredPrintModes,"shadow"].map(mode=>({mode,saved:false})) } });
   expect(queue.optionalPrint).toBeUndefined();
   const submit = (id: string, size: number) => {
     const image = jpg.slice();
@@ -200,7 +203,7 @@ it("enforces each sheet's required photo order and saves the server-assigned var
   expect((await f.req(f.writer, `${f.path}/tasks/P1-angle/sheet`)).status).toBe(404);
   for (const [index, mode] of requiredPrintModes.entries()) expect((await submit(`P1-${mode}`, index + 1)).status).toBe(200);
   const after = (await (await f.req(f.writer, f.path)).json<ContributorProfile>()).queues[0]!;
-  expect(after).toMatchObject({ done: 5, total: 10, next: { id: "P2-flat" }, optionalPrint: [{ id: "P1-shadow" }] });
+  expect(after).toMatchObject({ done: 5, total: 10, next: { id: "P2-flat" }, optionalPrint: [{ id: "P1-shadow", variant: "kids" }] });
   expect((await submit("P2-flat", 7)).status).toBe(200);
   expect((await submit("P1-shadow", 6)).status).toBe(200);
   const optionalDone = (await (await f.req(f.writer, f.path)).json<ContributorProfile>()).queues[0]!;
@@ -229,6 +232,14 @@ it("rejects incomplete, reordered or mixed-digest capture sequences and accepts 
   (writer.tasks[4] as PrintTask).sheetSha256 = "b".repeat(64);
   await expect(parseContributorManifest(manifest)).rejects.toThrow();
   writer.tasks = printSequence("P1", pin);
+  (writer.tasks[4] as PrintTask).variant = "kids";
+  await expect(parseContributorManifest(manifest)).rejects.toThrow();
+  writer.tasks = [{ ...slots[0]!, variant: "kids", sequence: undefined }];
+  await expect(parseContributorManifest(manifest)).rejects.toThrow();
+  writer.tasks = printSequence("P1", pin).map(task => ({ ...task, variant: "kids" }));
+  manifest.writers[1]!.tasks.push(...writer.tasks);
+  await expect(parseContributorManifest(manifest)).rejects.toThrow();
+  manifest.writers[1]!.tasks.splice(1);
   const hand = manifest.writers[1]!.tasks[0]!;
   if (hand.kind !== "handwriting") throw new Error("missing fixture prompt");
   hand.rights = "CC0-1.0: original invented fixture";
