@@ -1265,8 +1265,8 @@
   "Write each sentence on the line next to it on the printed sheet (the \"כאן כותבים\" column), in order, with punctuation. Don't write a name or any personal details."
  ],
  "cg_copy_alt": [
-  "אין מדפסת, או שכבר כתבתם על דף נפרד? זה בסדר. כתבו את מזהה הדף בראש הדף והעתיקו משפט אחד בכל שורה, לפי הסדר.",
-  "No printer, or already wrote on a separate page? That's fine. Write the page ID at the top and copy one sentence per line, in order."
+  "אין מדפסת, או שכבר כתבתם על דף נפרד? זה בסדר. כתבו את מזהה הדף בראש הדף והעתיקו את כל המשפטים, משפט אחד בכל שורה, לפי הסדר, כולל המשפט האחרון.",
+  "No printer, or already wrote on a separate page? That's fine. Write the page ID at the top and copy all the sentences, one per line, in order, including the last one."
  ],
  "cg_photo_h": [
   "מצלמים את הדף",
