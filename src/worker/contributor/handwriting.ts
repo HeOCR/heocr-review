@@ -218,7 +218,11 @@ const kidsOffer = (split: ContributorSplit): HandwritingOffer =>
 
 export async function handwritingOffer(ctx: Ctx, signup: HandwritingPlan, actor: string): Promise<HandwritingOffer> {
   const { args, ageBand } = await invitation(ctx,signup,actor);
-  if (signup.kids && isKidsBand(ageBand)) return kidsOffer((await kidsSlot(ctx,signup,ageBand,args)).split);
+  if (isKidsBand(ageBand)) {
+    // Every minor goes through the kids' block (amendment 3); with no kids block pinned, minors cannot enrol.
+    if (!signup.kids) throw unavailable();
+    return kidsOffer((await kidsSlot(ctx,signup,ageBand,args)).split);
+  }
   const { results } = await ctx.env.DB.prepare(`WITH ${offerScope} SELECT split,set_id FROM offer ORDER BY set_id`)
     .bind(...args).all<{split:ContributorSplit;set_id:HandwritingSet}>();
   if (!results.length) throw unavailable();
@@ -234,7 +238,8 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
     JOIN contributor_handwriting_roster r ON r.writer_id=e.writer_id
     WHERE writer_account=? AND config_sha256=?`).bind(actor,signup.pin).first<{writer:string}>();
   if (existing) return existing.writer;
-  if (signup.kids && isKidsBand(ageBand)) {
+  if (isKidsBand(ageBand)) {
+    if (!signup.kids) throw unavailable();
     const { slot, split: slotSplit } = await kidsSlot(ctx,signup,ageBand,args);
     const offer = kidsOffer(slotSplit);
     if (split !== slotSplit || !offer.sets.includes(set as HandwritingSet)) throw unavailable();

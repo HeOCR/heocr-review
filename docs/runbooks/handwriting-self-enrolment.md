@@ -176,7 +176,7 @@ and heocr-clean's CLEAN receipt.
 
 ## Kids' cohort (allocation amendment 3, restricted-eval #960)
 
-Kids' collection is **OFF** until the pinned plan carries a `kids` block. Without it, nothing below applies.
+Kids' collection is **OFF** until the pinned plan carries a `kids` block. Without it, no minor (10–12 or 13–17) can enrol at all: every minor goes through the kids' block, never the adult route.
 
 - **Switch on:** upload eval's `kids_slots_v1.json` unchanged to `TRAIN_CAPTURE_MEDIA` at
   `contributor-v1/handwriting-kids-slots/<sha256>.json` (sha `3463517a…`). Then pin a new plan that adds
