@@ -24,6 +24,7 @@ const setNames: Record<HandwritingSet, Pair> = {
   B: ["מסמכי יסוד", "Founding texts"],
   C: ["שירה עברית ישנה", "Old Hebrew poetry"],
   D: ["פרוזה יומיומית", "Everyday prose"],
+  E: ["שירה עברית", "Hebrew poetry"],
 };
 const btn = (label: string, action: () => void, primary = false) =>
   h("button", {type:"button", class: primary ? "act primary" : "act", onclick:action}, label);

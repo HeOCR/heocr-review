@@ -62,7 +62,7 @@ async function fixture(options: FixtureOptions = {}) {
     policy, sheets, writerLimit:options.writerLimit??4, invites:await Promise.all([1,2,3,4].map(i=>hash(invitation(i)))),
     lineRoles:options.lineRoles??{"30":"calibration"},
     capacity:options.capacity??[{split:"train",max:2},{split:"dev",max:1},{split:"eval_open",max:1}],
-    setsBySplit:options.setsBySplit??{train:["A","B"],dev:["C"],eval_open:["D"]},
+    setsBySplit:options.setsBySplit??{train:["A","B","E"],dev:["C"],eval_open:["D"]},
     ...(options.cohort ? {cohort:{sha256:await hash(cohortCode),...options.cohort}} : {}) };
   const pin = await hash(JSON.stringify(plan));
   await env.TRAIN_CAPTURE_MEDIA!.put(contributorRoot+"handwriting-signup/"+pin+".json",JSON.stringify(plan));
@@ -150,7 +150,7 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect((await f.req(f.writer,path+"/enrolments",join,{ENVIRONMENT:"production"},"https://heocr-review.heocr.workers.dev")).status).toBe(404);
   expect((await f.req(f.writer,path+"/enrolments",{...join,inviteCode:invitation(9)})).status).toBe(404);
   expect(await (await f.req(f.writer,optionsRoute,{inviteCode:join.inviteCode,ageBand:join.ageBand})).json())
-    .toEqual({split:"train",sets:["A","B"]});
+    .toEqual({split:"train",sets:["A","B","E"]});
   const response=await f.req(f.writer,path+"/enrolments",join);
   expect(response.status).toBe(200);
   const profile=await response.json<ContributorProfile>();
@@ -406,7 +406,7 @@ it("rejects a stale split offer when two writers sign up concurrently",async()=>
   const offers=await Promise.all(actors.map((actor,index)=>f.req(actor,optionsRoute,{
     inviteCode:invitation(index+1),ageBand:"18_plus",
   }).then(res=>res.json())));
-  expect(offers).toEqual([{split:"train",sets:["A","B"]},{split:"train",sets:["A","B"]}]);
+  expect(offers).toEqual([{split:"train",sets:["A","B","E"]},{split:"train",sets:["A","B","E"]}]);
   const replies=await Promise.all(actors.map((actor,index)=>f.req(actor,enrolmentRoute,enrol(invitation(index+1),"A"))));
   expect(replies.map(reply=>reply.status).sort()).toEqual([200,409]);
   const totals=await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM contributor_enrolments) AS enrolled,
@@ -481,7 +481,7 @@ it("fills the registered split capacities in tie-break order and never admits a 
   expect(last.map(x=>x.status).sort()).toEqual([200,409]);
   const setCounts=(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster GROUP BY set_id ORDER BY n").all<{n:number}>()).results;
   const splits=(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster GROUP BY split ORDER BY n").all<{n:number}>()).results;
-  expect(setCounts.map(r=>r.n)).toEqual([6,12,12,20]);
+  expect(setCounts.map(r=>r.n)).toEqual([6,8,8,8,20]);
   expect(splits.map(r=>r.n)).toEqual([6,20,24]);
   expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_enrolments").first()).toEqual({n:50});
   const rejected=last[0]!.ok?1:0;

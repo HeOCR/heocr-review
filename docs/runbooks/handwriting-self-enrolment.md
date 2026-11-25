@@ -54,7 +54,7 @@ It contains these fields:
   set belongs to exactly one split. The plan validator rejects a normalized
   sentence shared across splits in lines 1–29, even when the sheets have
   different hashes.
-- `lineRoles` is `{"30":"calibration"}`. All 16 sheets share that exact
+- `lineRoles` is `{"30":"calibration"}`. All 20 sheets share that exact
   line. Keep it in the copy task. Exclude it from DEV and EVAL-open
   references, denominators and scores. TRAIN may use it.
 - `invites` contains the SHA-256 of each individually issued single-use
@@ -64,7 +64,7 @@ It contains these fields:
   an absolute UTC ISO date and time. Hash independently generated
   128-bit lower-case hex codes as UTF-8 text with no trailing newline.
   Give plaintext codes to the organiser through private custody.
-- `sheets` maps `A`, `B`, `C`, `D` to four ordered handwriting tasks
+- `sheets` maps `A` to `E` to four ordered handwriting tasks
   `HW-V3-<set>01` through `04`. Include the approved 30
   sentences, prompt SHA, rights and PDF SHA for each. Use the contributor
   v1 handwriting task shape. Store each PDF only in the private bucket
@@ -164,3 +164,12 @@ confirmed release, and has no publication capability.
 The pilot admits at most 200 submissions. Budget the withdrawal closeout
 for up to four submission and index deletions per writer, one enrolment
 and its indexes, one roster digest and its index, and the sign-in opt-out.
+
+## Set E · Hebrew poetry
+
+Set E, "שירה עברית" / "Hebrew poetry", holds kid-friendly public-domain poems by Bialik, Rachel and Tchernichovsky.
+Its sheets are `HW-V3-E01` to `HW-V3-E04`. It is a TRAIN set: a plan maps it under `setsBySplit.train`, next to A and
+B. Migration `0030_handwriting_set_e.sql` widens the roster's `set_id` check. It rebuilds the roster table with the
+same rows and indexes, and recreates the release-candidates view. The source and provenance are in heocr-ops
+`codex-pool/open-sets/handwriting-v3/set-e/`. Before the set goes in a pinned plan, it needs eval's TRAIN approval
+and heocr-clean's CLEAN receipt.
