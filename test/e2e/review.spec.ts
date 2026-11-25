@@ -65,9 +65,9 @@ test("daily quota message on 429", async ({ page }) => {
 test("audit and accessibility", async ({ page }) => {
   await signIn(page, "audit-e2e", audit);
   await expect(page.locator(".review")).toBeVisible();
-  // Existing unnamed progressbar is tracked in docs/known-issues.md; keep the baseline explicit.
+  // The progress bars carry an accessible name now: no WCAG A/AA violations remain.
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
-  expect(results.violations.map((v) => [v.id, v.nodes.map((n) => n.target)])).toEqual([["aria-progressbar-name", [[".progress"]]]]);
+  expect(results.violations.map((v) => [v.id, v.nodes.map((n) => n.target)])).toEqual([]);
   const save = page.waitForResponse((r) => /\/decision$/.test(r.url()) && r.ok());
   await page.locator('.dock [data-value="accepted"]').click();
   await save;
