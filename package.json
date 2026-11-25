@@ -21,6 +21,7 @@
     "check-public": "tsx scripts/check-public.ts",
     "maintainer-decided": "tsx scripts/maintainer-decided.ts",
     "batch-setting": "tsx scripts/batch-setting.ts",
+    "ops-health": "tsx scripts/ops-health.ts",
     "prefill-swap": "tsx scripts/prefill-swap.ts",
     "import-plants": "tsx scripts/import-plants.ts",
     "import-gold": "tsx scripts/import-gold.ts",
