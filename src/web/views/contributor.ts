@@ -13,8 +13,11 @@ const names: Record<ContributorKind, Pair> = {
   line: ["בדיקת שורות", "Check lines"],
   handwriting: ["כתיבה ביד", "Write by hand"],
 };
+// A number range inside Hebrew text reads backwards ("12–10") unless it is isolated left to right. An <option>
+// cannot hold a <bdi>, so the Hebrew labels carry the isolate characters (LRI … PDI) themselves.
+const ltr = (range: string) => `\u2066${range}\u2069`;
 const bands: Record<ContributorProfile["ageBand"], Pair> = {
-  "10_12": ["10–12", "10–12"], "13_15": ["13–15", "13–15"], "16_17": ["16–17", "16–17"], "13_17": ["13–17", "13–17"], "18_plus": ["18+", "18+"],
+  "10_12": [ltr("10–12"), "10–12"], "13_15": [ltr("13–15"), "13–15"], "16_17": [ltr("16–17"), "16–17"], "13_17": [ltr("13–17"), "13–17"], "18_plus": [ltr("18+"), "18+"],
 };
 const setNames: Record<HandwritingSet, Pair> = {
   A: ["מקורות", "Sources"],
