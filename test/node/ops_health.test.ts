@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appState, oneLine, ph1State, type Health } from "../../scripts/ops-health";
+import { appState, BY_WRITER_SQL, oneLine, ph1State, writerTable, type Health } from "../../scripts/ops-health";
 
 const health: Health = {
   at: "2026-11-26T05:00:00.000Z",
@@ -25,5 +25,14 @@ describe("ops health", () => {
       "2026-11-26T05:00Z production | contributor on | hw enrol 0 / sub 0 / roster 0 | PH1 ON 12/420 photos (1 recompressed) | triage: b1 4/10 (desk 2) | decisions 1000 | D1 writes today 1234",
     );
     expect(oneLine({ ...health, ph1: "off", triage: [] })).toContain("PH1 OFF | triage: none");
+  });
+
+  it("lists writer codes with sheets uploaded and never an account", () => {
+    const table = writerTable([
+      { writer: "cw-" + "a".repeat(32), cohort: "kid", total: 8, uploaded: 3, withdrawn: 0 },
+      { writer: "cw-" + "b".repeat(32), cohort: "adult", total: 4, uploaded: 4, withdrawn: 1 },
+    ], "2026-11-26T05:00:00.000Z");
+    expect(table.split("\n").slice(1, 4)).toEqual(["writer\tcohort\tsheets", `cw-${"a".repeat(32)}\tkid\t3 / 8`, `cw-${"b".repeat(32)}\tadult\t4 / 4\twithdrawn`]);
+    expect(BY_WRITER_SQL).not.toMatch(/writer_account|guardian_account|reviewers|email/);
   });
 });
