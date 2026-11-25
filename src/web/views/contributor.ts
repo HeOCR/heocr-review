@@ -245,6 +245,8 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       const count=`${q.done} / ${q.total}`;
       return h("section",{class:"contributor-queue"},
         h("h2",{},name),h("p",{class:"contributor-count"},bdi(count,"ltr")),
+        ...(q.kind==="handwriting" && p!.paymentCode
+          ? [h("p",{class:"contributor-payment"},text("קוד לתשלום","Payment code")," ",bdi(p!.paymentCode,"ltr"))] : []),
         h("progress",{value:q.done,max:q.total,"aria-label":name}),
         q.next?btn(text("המשך","Continue"),()=>{selected=q.kind;printPage=null;render();focusTask();}):
           h("p",{class:"small muted"},text("הושלם","Complete")),

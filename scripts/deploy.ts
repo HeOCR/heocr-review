@@ -89,7 +89,7 @@ function main(): void {
   const secretsPath = join(homedir(), ".config", "heocr", `${workerName}.secrets.json`);
   const secrets: Record<string, string> = existsSync(secretsPath) ? (JSON.parse(readFileSync(secretsPath, "utf8")) as Record<string, string>) : {};
   let changed = false;
-  for (const key of ["SESSION_SECRET", "REVIEWER_ID_SECRET"]) {
+  for (const key of ["SESSION_SECRET", "REVIEWER_ID_SECRET", "CONTRIBUTOR_PAYMENT_CODE_SECRET"]) {
     if (!secrets[key]) {
       secrets[key] = randomBytes(32).toString("hex");
       changed = true;

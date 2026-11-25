@@ -3,6 +3,8 @@ import { expect, it, vi } from "vitest";
 import { CONTRIBUTOR_API, handwritingSets, type ContributorProfile, type ContributorSplit, type HandwritingOffer, type HandwritingSet } from "../../src/shared/contributor";
 import { createSessionCookie } from "../../src/worker/auth/session";
 import { contributorRoot, hash, ROSTER_OPERATOR_ID } from "../../src/worker/contributor/config";
+import { hmacSha256 } from "../../src/worker/crypto";
+import { paymentCodeFromMac, paymentMessage } from "../../src/shared/payment-code";
 import type { Env } from "../../src/worker/env";
 import { handle } from "../../src/worker/index";
 import { Client } from "./helpers";
@@ -84,7 +86,7 @@ async function fixture(options: FixtureOptions = {}) {
     }),{...env,CONTRIBUTOR_APP_ENABLED:"1",CONTRIBUTOR_HANDWRITING_CONFIG_SHA256:pin,CONTRIBUTOR_ROSTER_REVIEWER_ID:ROSTER_OPERATOR_ID,
       CONTRIBUTOR_ROSTER_TOKEN_SHA256:rosterTokenSha256,
       CONTRIBUTOR_DEV_MEDIA:env.HANDWRITING_MEDIA,CONTRIBUTOR_EVAL_MEDIA:env.HANDWRITING_CONTROL,
-      ADMIN_REVIEWER_IDS:evaluationAccount,...overrides},execution);
+      ADMIN_REVIEWER_IDS:evaluationAccount,CONTRIBUTOR_PAYMENT_CODE_SECRET:"fixture-payment-secret",...overrides},execution);
   const copyBody = (role: "guardian"|"assent") =>
     ({version:policy.version,accept:true,lang:"en",sha256:policy[role].en.sha256});
   const rosterReq = (body?: object, overrides: Partial<Env> = {}) =>
@@ -578,6 +580,12 @@ it("assigns kids the band's next slot, an 8-sheet pack in seeded order and X of 
   await f.req(guardian,path+"/guardian",{...f.copyBody("guardian"),code:t.profile.guardianPairingCode});
   const ready=await (await f.req(kids[3]!,path+"/writers/"+t.profile.writer+"/consent",f.copyBody("assent"))).json<ContributorProfile>();
   expect(ready.queues).toMatchObject([{kind:"handwriting",total:8,done:0}]);
+  // Payment code (amendment 3b): six symbols, HMAC of the writer code under the operator secret.
+  expect(ready.paymentCode).toBe(paymentCodeFromMac(new Uint8Array(await hmacSha256("fixture-payment-secret",paymentMessage(t.profile.writer)))));
+  expect(ready.paymentCode).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
+  expect((await (await f.req(guardian,path+"/writers/"+t.profile.writer)).json<ContributorProfile>()).paymentCode).toBeUndefined();
+  const unset=await (await f.req(kids[3]!,path+"/writers/"+t.profile.writer,undefined,{CONTRIBUTOR_PAYMENT_CODE_SECRET:undefined})).json<ContributorProfile>();
+  expect(unset.paymentCode).toBeUndefined();
   const pages=["E01","E02","E03","E04","B01","B02","B03","B04"].map(p=>"HW-V3-"+p);
   const seed=await hash("20261125:hw3-kids-order:"+t.profile.writer);
   const keyed=await Promise.all(pages.map(async p=>[await hash(seed+":"+p),p] as const));

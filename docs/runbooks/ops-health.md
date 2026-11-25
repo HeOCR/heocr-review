@@ -16,14 +16,24 @@ time; `--json` for the full record). It is read-only and counts only:
 
 It never writes to D1, never fetches a photo and needs no deploy. `--target local` reads a local Worker on 8787.
 
-## Per writer (gift-card payments)
+## Payment codes (gift-card payments, amendment 3b)
 
-`npm run ops-health -- --by-writer --target production --yes-production [--out handwriting-by-writer.tsv]`
+`npm run ops-health -- --by-writer --target production --yes-production [--out handwriting-payments.tsv]`
 
-For the maintainer's payments. It prints, for each handwriting v3 writer:
-- the pseudonymous writer code (the one the writer sees on their own screen);
+For the maintainer's payments. Each handwriting v3 writer has a **payment code**: six symbols from
+`23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0, O, 1, I or L). The code is HMAC-SHA256 of
+`"heocr-payment-code/v1/" + writer code`, keyed by the Worker secret `CONTRIBUTOR_PAYMENT_CODE_SECRET`. Nothing stores
+it. The writer sees it on their own handwriting card, labelled "קוד לתשלום" / "Payment code", next to "X / 8".
+
+The operator table shows **only** these columns, sorted by payment code:
+- the payment code;
 - adult or kid;
-- sheets uploaded out of the pack (4 for an adult, 8 for a kid);
-- a withdrawn mark, if they withdrew.
+- sheets uploaded of the pack (4 or 8);
+- a withdrawn mark.
 
-It shows no account id, e-mail or name. `--out` takes a bare file name and writes it with mode 0600 under `~/.config/heocr/`, never into the repo. It's read-only: one SELECT, and no deploy needed. "Readable" for pay is the maintainer's call and isn't recorded here.
+It never shows the writer code, slot, split, set, account, e-mail or name. The writer ids are used in memory to derive
+the codes and are then dropped.
+
+A collision within the plan's roster fails loudly here, and the app then shows no code to anyone. The key lives only
+in the Worker secrets file, mode 0600, and is never logged or exported. `--out` writes a 0600 file under
+`~/.config/heocr/`. It's read-only, with no deploy needed to run it. "Readable" for pay stays the maintainer's call.

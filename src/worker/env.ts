@@ -35,6 +35,8 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   /** Secret: signs session cookies. Rotating it signs everyone out. */
   SESSION_SECRET?: string;
+  /** HMAC key for handwriting payment codes (amendment 3b); never logged or exported. Unset = no payment codes. */
+  CONTRIBUTOR_PAYMENT_CODE_SECRET?: string;
   /** Secret: keys the reviewer pseudonym. Never rotate it, or every reviewer gets a new id. */
   REVIEWER_ID_SECRET?: string;
   /** Secret or var: comma-separated reviewer ids (rv_...) that may see progress and export. */
