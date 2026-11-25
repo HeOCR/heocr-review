@@ -36,6 +36,8 @@ export type ContributorProfile = {
   state: "guardian" | "assent" | "ready" | "withdrawn";
   receipt: string | null;
   guardianPairingCode?: string;
+  /** Handwriting v3 writer only: the 6-symbol gift-card payment code (amendment 3b). */
+  paymentCode?: string;
   licence: "cc0_open";
   version: string;
   copy: Record<Language, ConsentCopy>;

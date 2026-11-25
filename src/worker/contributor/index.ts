@@ -1,3 +1,4 @@
+import { collisionFree, paymentCodeFromMac, paymentMessage } from "../../shared/payment-code";
 import { purgeHandwritingEnrolment, recordHandwritingPublication } from "./handwriting-withdrawal";
 import {
   acceptGuardian, guardianCode, handwritingOffer, handwritingPlan, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
@@ -13,7 +14,7 @@ import { readSession } from "../auth/session";
 import type { Ctx } from "../api";
 import { getBatch, getProposal, getReviewer } from "../db";
 import { captureImageType } from "../capture-image";
-import { randomId } from "../crypto";
+import { hmacSha256, randomId } from "../crypto";
 import { assertSameOrigin, HttpError, json, readBytes, readJson } from "../http";
 import { enforce, LIMITS } from "../ratelimit";
 import {
@@ -142,6 +143,20 @@ async function nextView(a: Access, task: Task, done: Set<string>): Promise<Contr
       ...(task.sheetSha256 ? {sheet:path+"/sheet"} : {})};
   }
 }
+/**
+ * The writer's payment code, derived over the whole roster of their plan so a collision is caught: then no code is
+ * shown to anyone (fail closed), and the operator view refuses to run.
+ */
+async function paymentCode(a: Access): Promise<string | null> {
+  const secret = a.ctx.env.CONTRIBUTOR_PAYMENT_CODE_SECRET;
+  if (!secret || !a.selfPin || a.role !== "writer") return null;
+  const { results } = await a.ctx.env.DB.prepare("SELECT writer_id FROM contributor_handwriting_roster WHERE config_sha256=?")
+    .bind(a.selfPin).all<{ writer_id: string }>();
+  const codes = new Map<string, string>();
+  for (const { writer_id } of results) codes.set(writer_id, paymentCodeFromMac(new Uint8Array(await hmacSha256(secret, paymentMessage(writer_id)))));
+  return collisionFree(codes)?.get(a.writer.id) ?? null;
+}
+
 async function profile(a: Access): Promise<ContributorProfile> {
   const phase=state(a);
   const queues: ContributorQueue[]=[];
@@ -164,10 +179,12 @@ async function profile(a: Access): Promise<ContributorProfile> {
     }
   }
   const policy=current(a);
+  const payment=await paymentCode(a);
   return {role:a.role,writer:a.writer.id,ageBand:a.writer.ageBand,state:phase,receipt:a.row?.receipt??null,
     licence:policy.licence, version:policy.version,copy:a.role==="guardian"?policy.guardian:policy.assent,queues,
     ...(a.selfPin && a.role==="writer" && phase==="guardian" && !a.writer.guardianAccount
-      ? {guardianPairingCode:await guardianCode(a.ctx,a.selfPin,a.writer.id)} : {})};
+      ? {guardianPairingCode:await guardianCode(a.ctx,a.selfPin,a.writer.id)} : {}),
+    ...(payment ? {paymentCode:payment} : {})};
 }
 
 function enrolment(a: Access) {

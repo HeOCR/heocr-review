@@ -2,20 +2,24 @@
  * The daily ops health report: read-only and counts only (docs/runbooks/ops-health.md).
  *
  *   npm run ops-health -- [--target local|production --yes-production] [--json]
+ *   npm run ops-health -- --by-writer [--out <file name under ~/.config/heocr/>] [--target ...]   (payment codes only)
  *
  * It never writes: one batch of SELECT COUNT(*) statements on D1, signed-out GETs on the canonical host, the account's
  * D1 analytics, and (production, PH1 on) the operator export, of which it keeps only the photo and recompressed counts.
  * It prints no names, no text, no hashes of uploads and no credential.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { createHmac } from "node:crypto";
+import { basename, join } from "node:path";
+import { paymentCodeFromMac, paymentMessage } from "../src/shared/payment-code";
 import { parseArgs, target, type Target } from "./lib/args";
 import { todayRowsWritten } from "./lib/d1budget";
 import { d1Query, loadCredentials } from "./lib/wrangler";
 
 const HOST = "https://review.heocr.org";
 const LOCAL = "http://127.0.0.1:8787";
+const SECRETS = join(homedir(), ".config", "heocr", "heocr-review.secrets.json");
 const PH1_TOKEN = join(homedir(), ".config", "heocr", "heocr-review-ph1-operator.token");
 
 /** Every contributor / handwriting table, by name, with its row count. */
@@ -33,6 +37,40 @@ export const TRIAGE_SQL = `SELECT b.id, b.status,
       OR (d.value IN ('correct', 'niqqud_mismatch') AND EXISTS (SELECT 1 FROM triage_plants tp WHERE tp.proposal_id = d.proposal_id)))) AS to_desktop,
   (SELECT COUNT(*) FROM triage_plants tp WHERE tp.batch_id = b.id) AS plants
   FROM batches b JOIN batch_settings s ON s.batch_id = b.id WHERE s.mode = 'triage' ORDER BY b.id`;
+
+/**
+ * Handwriting v3 for the maintainer's gift-card payments (amendment 3b): per writer, ONLY the 6-symbol payment code,
+ * adult or kid, sheets uploaded of the pack (4 adult, 8 kid) and a withdrawn mark. The writer code, slot, split and
+ * set never leave this process: the query's writer ids are used in memory to derive the codes, then dropped, and rows
+ * are sorted by payment code (not signup order, which would reveal the slot).
+ */
+export const BY_WRITER_SQL = `SELECT r.writer_id AS writer,
+  CASE WHEN r.kids_slot IS NULL THEN 'adult' ELSE 'kid' END AS cohort,
+  CASE WHEN r.kids_slot IS NULL THEN 4 ELSE 8 END AS total,
+  (SELECT COUNT(*) FROM contributor_submissions s WHERE s.writer_id = r.writer_id AND s.kind = 'handwriting'
+    AND s.task_id GLOB 'HW-V3-[A-G]0[1-4]') AS uploaded,
+  (r.withdrawal_receipt_sha256 IS NOT NULL OR e.withdrawn_at IS NOT NULL) AS withdrawn
+  FROM contributor_handwriting_roster r LEFT JOIN contributor_enrolments e ON e.writer_id = r.writer_id
+  WHERE r.config_sha256 = ?`;
+
+export interface WriterRow { writer: string; cohort: "adult" | "kid"; total: number; uploaded: number; withdrawn: number }
+export interface PaymentRow { code: string; cohort: "adult" | "kid"; total: number; uploaded: number; withdrawn: boolean }
+
+/** Payment codes for the roster, or an error on any collision (fail loudly; the app then shows no code either). */
+export function paymentRows(rows: WriterRow[], secret: string): PaymentRow[] {
+  const out = rows.map((r) => ({
+    code: paymentCodeFromMac(createHmac("sha256", secret).update(paymentMessage(r.writer)).digest()),
+    cohort: r.cohort, total: r.total, uploaded: r.uploaded, withdrawn: r.withdrawn === 1,
+  }));
+  if (new Set(out.map((r) => r.code)).size !== out.length) throw new Error("payment code collision in this plan's roster: stop, tell ops");
+  return out.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+}
+
+/** A plain table: payment code, adult or kid, "uploaded / total", and a withdrawn mark. */
+export function paymentTable(rows: PaymentRow[], at: string): string {
+  const lines = rows.map((r) => `${r.code}\t${r.cohort}\t${r.uploaded} / ${r.total}${r.withdrawn ? "\twithdrawn" : ""}`);
+  return [`# handwriting v3 sheets uploaded per payment code, ${at.slice(0, 16)}Z (${rows.length} writers)`, "payment_code\tcohort\tsheets", ...lines].join("\n") + "\n";
+}
 
 export interface Health {
   at: string;
@@ -88,6 +126,21 @@ async function ph1Counts(base: string): Promise<{ photos: number; recompressed: 
 async function main(): Promise<void> {
   const { flags } = parseArgs(process.argv.slice(2));
   const t = target(flags);
+  if (flags["by-writer"] === true) {
+    const secrets = JSON.parse(readFileSync(SECRETS, "utf8")) as Record<string, string>;
+    const secret = secrets.CONTRIBUTOR_PAYMENT_CODE_SECRET, pin = secrets.CONTRIBUTOR_HANDWRITING_CONFIG_SHA256;
+    if (!secret || !pin || !/^[a-f0-9]{64}$/.test(pin)) throw new Error("payment code secret or plan pin missing from the Worker secrets file");
+    const table = paymentTable(paymentRows(d1Query<WriterRow>(t, BY_WRITER_SQL.replace("?", `'${pin}'`))[0]!, secret), new Date().toISOString());
+    if (typeof flags.out === "string") {
+      // A bare file name only, written mode 0600 under ~/.config/heocr/ (never inside the repo).
+      if (basename(flags.out) !== flags.out || !/^[A-Za-z0-9._-]+$/.test(flags.out)) throw new Error("--out takes a file name, written under ~/.config/heocr/");
+      const path = join(homedir(), ".config", "heocr", flags.out);
+      writeFileSync(path, table, { mode: 0o600 });
+      chmodSync(path, 0o600);
+      console.log(`wrote the payment table to ${path}`);
+    } else process.stdout.write(table);
+    return;
+  }
   const base = t === "production" ? HOST : LOCAL;
   const tables = d1Query<{ name: string }>(t, CONTRIBUTOR_TABLES_SQL)[0]!.map((r) => r.name);
   const rows = d1Query<Record<string, number | string>>(t, [...tables.map((n) => `SELECT COUNT(*) AS n FROM "${n}"`), TRIAGE_SQL, "SELECT COUNT(*) AS n FROM decisions WHERE superseded_at IS NULL"].join("; "));
