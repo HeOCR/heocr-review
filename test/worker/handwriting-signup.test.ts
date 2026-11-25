@@ -25,8 +25,12 @@ type FixtureOptions = {
   lineRoles?: Record<string,string>;
   amendmentSha256?: string;
   cohort?: {maxUses:number;expiresAt:string};
+  kids?: boolean;
 };
 const cohortCode = invitation(8);
+// Invented slot lists in kids_slots_v1.json's shape: 10-12 runs TEST, TEST, DEV, TRAIN, TRAIN; 13-17 TRAIN, DEV.
+const kidsSlotsFile = JSON.stringify({schema:"heocr.handwriting_v3.kids_slots.v1",date:"2026-11-25",rule:"fixture",
+  bands:{"10-12":["TEST","TEST","DEV","TRAIN","TRAIN"],"13-17":["TRAIN","DEV"]}},null,1)+"\n";
 const splitFor = (set: string): ContributorSplit => set==="D" ? "eval_open" : set==="C" ? "dev" : "train";
 const enrol = (inviteCode: string, set: string, ageBand = "18_plus") => ({inviteCode,ageBand,split:splitFor(set),set});
 async function fixture(options: FixtureOptions = {}) {
@@ -44,7 +48,9 @@ async function fixture(options: FixtureOptions = {}) {
     return {he:{text:he,sha256:await hash(he)},en:{text:en,sha256:await hash(en)}};
   };
   const policy = { version: "fixture", licence:"cc0_open", guardian:await copy("guardian"), assent:await copy("assent") };
-  const sheets = Object.fromEntries(await Promise.all(handwritingSets.map(async set => {
+  const setsBySplit = options.setsBySplit??{train:["A","B","E"],dev:["C"],eval_open:["D"]};
+  const planSets = options.kids ? handwritingSets : handwritingSets.filter(set => Object.values(setsBySplit).flat().includes(set));
+  const sheets = Object.fromEntries(await Promise.all(planSets.map(async set => {
     return [set,await Promise.all(Array.from({length:4},async (_, index) => {
       const page = `HW-V3-${set}0${index+1}`;
       const sentences = Array.from({length:30},(_, i) => `שורת בדיקה ${page} ${i+1}`);
@@ -62,8 +68,10 @@ async function fixture(options: FixtureOptions = {}) {
     policy, sheets, writerLimit:options.writerLimit??4, invites:await Promise.all([1,2,3,4].map(i=>hash(invitation(i)))),
     lineRoles:options.lineRoles??{"30":"calibration"},
     capacity:options.capacity??[{split:"train",max:2},{split:"dev",max:1},{split:"eval_open",max:1}],
-    setsBySplit:options.setsBySplit??{train:["A","B","E"],dev:["C"],eval_open:["D"]},
+    setsBySplit,
+    ...(options.kids ? {kids:{slotsSha256:await hash(kidsSlotsFile)}} : {}),
     ...(options.cohort ? {cohort:{sha256:await hash(cohortCode),...options.cohort}} : {}) };
+  if (options.kids) await env.TRAIN_CAPTURE_MEDIA!.put(contributorRoot+"handwriting-kids-slots/"+await hash(kidsSlotsFile)+".json",kidsSlotsFile);
   const pin = await hash(JSON.stringify(plan));
   await env.TRAIN_CAPTURE_MEDIA!.put(contributorRoot+"handwriting-signup/"+pin+".json",JSON.stringify(plan));
   const rosterTokenSha256 = await hash(fixtureToken);
@@ -522,4 +530,73 @@ it("rejects under-10 ages and refuses to pin a cross-split assignment",async()=>
   expect((await f.rosterReq(pin)).status).toBe(404);
   expect((await f.req(f.writer,path+"/writers/"+joined.writer)).status).toBe(404);
   expect(await env.DB.prepare("SELECT 1 FROM contributor_handwriting_pins").first()).toBeNull();
+});
+
+it("loads a plan with only the sets it maps (production's A-D shape) and keeps kids OFF without a slot list",async()=>{
+  const f=await fixture({setsBySplit:{train:["A","B"],dev:["C"],eval_open:["D"]}});
+  expect(await (await f.req(f.writer,optionsRoute,{inviteCode:invitation(1),ageBand:"18_plus"})).json())
+    .toEqual({split:"train",sets:["A","B"]});
+  expect((await f.req(f.writer,enrolmentRoute,enrol(invitation(1),"F"))).status).toBe(409);
+});
+
+it("assigns kids the band's next slot, an 8-sheet pack in seeded order and X of 8 progress",async()=>{
+  const f=await fixture({kids:true,writerLimit:1,capacity:[{split:"train",max:1},{split:"dev",max:1},{split:"eval_open",max:1}],
+    cohort:{maxUses:20,expiresAt:"2099-01-01T00:00:00Z"}});
+  const kids=await Promise.all(Array.from({length:6},async(_, i)=>{ const c=new Client(); await c.signIn("signup-kid-"+i); return c; }));
+  const join=async(kid: Client, ageBand: string, pick?: string)=>{
+    const offer=await (await f.req(kid,optionsRoute,{inviteCode:cohortCode,ageBand})).json<HandwritingOffer>();
+    const res=await f.req(kid,enrolmentRoute,{inviteCode:cohortCode,ageBand,split:offer.split,set:pick??offer.sets[0]});
+    expect(res.status).toBe(200);
+    return {offer,profile:await res.json<ContributorProfile>()};
+  };
+  // 10-12 slots: TEST, TEST, DEV, TRAIN; 13-17 slot 1: TRAIN. Adult capacity is untouched by kids.
+  const a=await join(kids[0]!,"10_12");
+  expect(a.offer).toEqual({split:"eval_open",sets:["D"]});
+  expect((await join(kids[1]!,"10_12")).offer.split).toBe("eval_open");
+  expect((await join(kids[2]!,"10_12")).offer).toEqual({split:"dev",sets:["C"]});
+  const train=await (await f.req(kids[3]!,optionsRoute,{inviteCode:cohortCode,ageBand:"10_12"})).json<HandwritingOffer>();
+  expect(train).toEqual({split:"train",sets:["A","B"]});
+  expect((await f.req(kids[3]!,enrolmentRoute,{inviteCode:cohortCode,ageBand:"10_12",split:"train",set:"E"})).status).toBe(409);
+  expect((await f.req(kids[3]!,enrolmentRoute,{inviteCode:cohortCode,ageBand:"10_12",split:"dev",set:"C"})).status).toBe(409);
+  const t=await join(kids[3]!,"10_12","B");
+  expect((await join(kids[4]!,"13_17","A")).offer.split).toBe("train");
+  expect(await (await f.req(f.writer,optionsRoute,{inviteCode:cohortCode,ageBand:"18_plus"})).json()).toMatchObject({split:"train"});
+
+  const rows=(await env.DB.prepare("SELECT age_band,split,set_id,kids_slot,kids_second_set FROM contributor_handwriting_roster ORDER BY ordinal").all()).results;
+  expect(rows).toEqual([
+    {age_band:"10_12",split:"eval_open",set_id:"D",kids_slot:1,kids_second_set:"F"},
+    {age_band:"10_12",split:"eval_open",set_id:"D",kids_slot:2,kids_second_set:"F"},
+    {age_band:"10_12",split:"dev",set_id:"C",kids_slot:3,kids_second_set:"G"},
+    {age_band:"10_12",split:"train",set_id:"E",kids_slot:4,kids_second_set:"B"},
+    {age_band:"13_17",split:"train",set_id:"E",kids_slot:1,kids_second_set:"A"},
+  ]);
+
+  // The pack: E01-E04 + B01-B04, ranked by sha256(seed + ":" + page) with seed = sha256(prefix + writer code).
+  const guardian=new Client(); await guardian.signIn("signup-kid-parent");
+  await f.req(guardian,path+"/guardian",{...f.copyBody("guardian"),code:t.profile.guardianPairingCode});
+  const ready=await (await f.req(kids[3]!,path+"/writers/"+t.profile.writer+"/consent",f.copyBody("assent"))).json<ContributorProfile>();
+  expect(ready.queues).toMatchObject([{kind:"handwriting",total:8,done:0}]);
+  const pages=["E01","E02","E03","E04","B01","B02","B03","B04"].map(p=>"HW-V3-"+p);
+  const seed=await hash("20261125:hw3-kids-order:"+t.profile.writer);
+  const keyed=await Promise.all(pages.map(async p=>[await hash(seed+":"+p),p] as const));
+  const order=keyed.sort(([x],[y])=>x<y?-1:1).map(([,p])=>p);
+  expect(ready.queues[0]!.next?.page).toBe(order[0]);
+  const second=path+"/writers/"+t.profile.writer+"/tasks/"+order[1]+"/submit";
+  expect((await f.req(kids[3]!,second,photo,{},origin,uploadHeaders(ready))).status).toBe(404);
+  const first=path+"/writers/"+t.profile.writer+"/tasks/"+order[0]+"/submit";
+  expect((await f.req(kids[3]!,first,photo,{},origin,uploadHeaders(ready))).status).toBe(200);
+  const after=await (await f.req(kids[3]!,path+"/writers/"+t.profile.writer)).json<ContributorProfile>();
+  expect(after.queues).toMatchObject([{kind:"handwriting",total:8,done:1,next:{page:order[1]}}]);
+
+  // Checkpoint: kids' rows carry their slot and second set; a pin makes the kid's B page a release candidate.
+  const pin=await (await f.rosterReq()).json<{sha256:string;canonical:string;throughOrdinal:number;previousSha256:null}>();
+  expect(JSON.parse(pin.canonical).rows[3]).toEqual({ordinal:expect.any(Number),writer:t.profile.writer,ageBand:"10_12",set:"E",split:"train",slot:4,second:"B"});
+  const {canonical:_c,...accept}=pin;
+  expect((await f.rosterReq(accept)).status).toBe(200);
+  expect((await env.DB.prepare("SELECT task_id FROM contributor_handwriting_release_candidates").all()).results).toEqual([{task_id:order[0]}]);
+
+  // Withdrawal keeps the slot: the next 10-12 kid gets slot 5 (TRAIN), never slot 4 again.
+  await f.req(guardian,path+"/writers/"+t.profile.writer+"/withdraw",{withdraw:true});
+  await join(kids[5]!,"10_12","A");
+  expect(await env.DB.prepare("SELECT MAX(kids_slot) AS n FROM contributor_handwriting_roster WHERE age_band='10_12'").first()).toEqual({n:5});
 });

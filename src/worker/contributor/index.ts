@@ -276,11 +276,12 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
       ${a.selfPin ? `AND EXISTS (
         SELECT 1 FROM contributor_handwriting_roster r
         WHERE r.writer_id=contributor_enrolments.writer_id AND r.config_sha256=?
-          AND r.split=contributor_enrolments.split AND r.age_band=contributor_enrolments.age_band AND r.set_id=?)` : ""}
+          AND r.split=contributor_enrolments.split AND r.age_band=contributor_enrolments.age_band
+          AND (r.set_id=? OR r.kids_second_set=?))` : ""}
     ON CONFLICT DO NOTHING
   `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
     w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256,
-    ...(a.selfPin ? [a.selfPin,task.page.slice("HW-V3-".length,"HW-V3-".length+1)] : [])).run();
+    ...(a.selfPin ? [a.selfPin,task.page.slice("HW-V3-".length,"HW-V3-".length+1),task.page.slice("HW-V3-".length,"HW-V3-".length+1)] : [])).run();
   if (result.meta.changes===1) return true;
   const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
     .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();

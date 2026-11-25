@@ -1,4 +1,4 @@
-import { handwritingAgeBands, handwritingSets, type ContributorSplit, type HandwritingOffer, type HandwritingSet } from "../../shared/contributor";
+import { handwritingAgeBands, handwritingSets, kidsAgeBands, type ContributorSplit, type HandwritingOffer, type HandwritingSet } from "../../shared/contributor";
 import type { Ctx } from "../api";
 import { base64url, base64urlDecode, hmacSha256, hmacVerify, randomId, requireSecret } from "../crypto";
 import { HttpError, json, readJson } from "../http";
@@ -24,10 +24,24 @@ type Plan = {
   lineRoles: { "30": "calibration" };
   invites: string[];
   cohort?: { sha256: string; maxUses: number; expiresAt: string };
+  /** Kids' cohort (restricted-eval #960, amendment 3): the pinned per-band slot list. Absent = kids' collection OFF. */
+  kids?: { slotsSha256: string };
   sheets: Sheets;
 };
+type KidsBand = typeof kidsAgeBands[number];
+type KidsSlots = Record<KidsBand, ContributorSplit[]>;
+/** Amendment 3's 8-sheet packs: the primary set (roster set_id) and the allowed second sets (TRAIN: the kid's pick). */
+export const KIDS_PACKS = {
+  train: { primary: "E", second: ["A", "B"] },
+  dev: { primary: "C", second: ["G"] },
+  eval_open: { primary: "D", second: ["F"] },
+} as const satisfies Record<ContributorSplit, { primary: HandwritingSet; second: readonly HandwritingSet[] }>;
+export const KIDS_ORDER_PREFIX = "20261125:hw3-kids-order:";
+const kidsSlotSplit = { TRAIN: "train", DEV: "dev", TEST: "eval_open" } as const;
+const isKidsBand = (band: unknown): band is KidsBand => kidsAgeBands.some(b => b === band);
 type RosterRow = {
   ordinal: number; writer: string; ageBand: typeof handwritingAgeBands[number]; set: HandwritingSet; split: ContributorSplit;
+  slot: number | null; second: HandwritingSet | null;
 };
 
 function validExpiry(value: string) {
@@ -47,8 +61,39 @@ function splitForSets(plan: Plan) {
       bySet.set(set,split);
     }
   }
-  if (bySet.size !== handwritingSets.length) throw gone();
+  if (plan.kids) for (const [split,pack] of Object.entries(KIDS_PACKS) as [ContributorSplit,(typeof KIDS_PACKS)[ContributorSplit]][]) {
+    for (const set of [pack.primary,...pack.second]) {
+      const old = bySet.get(set);
+      if (old && old !== split) throw gone();
+      bySet.set(set,split);
+    }
+  }
+  const sheetSets = Object.keys(plan.sheets);
+  if (sheetSets.length !== bySet.size || sheetSets.some(set => !bySet.has(set as HandwritingSet))) throw gone();
   return bySet;
+}
+
+/** The pinned kids_slots_v1.json (eval's bytes, by sha), as splits per band. */
+async function kidsSlots(bucket: R2Bucket, pin: string): Promise<KidsSlots> {
+  const file = await pinnedJSON(bucket, "handwriting-kids-slots", pin, 16 * 1024) as
+    { schema?: string; bands?: Record<string, unknown> } | null;
+  const bands = file?.bands;
+  if (file?.schema !== "heocr.handwriting_v3.kids_slots.v1" || !bands || Object.keys(bands).length !== 2) throw gone();
+  const out = {} as KidsSlots;
+  for (const band of kidsAgeBands) {
+    const list = bands[band.replace("_","-")];
+    if (!Array.isArray(list) || !list.length || list.length > maxWriters ||
+        !list.every(v => typeof v === "string" && Object.hasOwn(kidsSlotSplit, v))) throw gone();
+    out[band] = list.map(v => kidsSlotSplit[v as keyof typeof kidsSlotSplit]);
+  }
+  return out;
+}
+
+/** A kid's 8 sheets in seeded order: rank each page by sha256(seed + ":" + page), seed = sha256(prefix + writer code). */
+export async function kidsSheetOrder<T extends { page: string }>(writer: string, tasks: T[]): Promise<T[]> {
+  const seed = await hash(KIDS_ORDER_PREFIX + writer);
+  const keyed = await Promise.all(tasks.map(async task => [await hash(seed + ":" + task.page), task] as const));
+  return keyed.sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0).map(([,task]) => task);
 }
 
 export async function handwritingPlan(ctx: Ctx) {
@@ -75,10 +120,13 @@ export async function handwritingPlan(ctx: Ctx) {
         typeof plan.cohort.sha256 !== "string" || !digest.test(plan.cohort.sha256) ||
         plan.invites.includes(plan.cohort.sha256) || !Number.isInteger(plan.cohort.maxUses) ||
         plan.cohort.maxUses < 1 || plan.cohort.maxUses > maxWriters || !validExpiry(plan.cohort.expiresAt)) ||
-      !plan.sheets || Object.keys(plan.sheets).length !== handwritingSets.length) throw gone();
+      !plan.sheets || typeof plan.sheets !== "object" ||
+      (plan.kids !== undefined && (!plan.kids || typeof plan.kids.slotsSha256 !== "string" || !digest.test(plan.kids.slotsSha256)))) throw gone();
   const splitBySet = splitForSets(plan);
+  const kids = plan.kids ? await kidsSlots(env.TRAIN_CAPTURE_MEDIA, plan.kids.slotsSha256) : null;
+  if (kids && Object.values(kids).flat().some(split => !submissionBucket(env, split))) throw gone();
   // Reuse the approved terms and handwriting-sheet validation for every page in the set.
-  const writers = handwritingSets.map((set, i) => {
+  const writers = handwritingSets.filter(set => splitBySet.has(set)).map((set, i) => {
     const tasks = plan.sheets[set];
     if (!Array.isArray(tasks) || tasks.length !== 4 ||
         tasks.some((task, j) => task?.kind !== "handwriting" || task.page !== `HW-V3-${set}0${j + 1}` ||
@@ -101,7 +149,7 @@ export async function handwritingPlan(ctx: Ctx) {
       lineSplits.set(line,writer.split);
     }
   }
-  return { plan, pin, splitBySet, manifest: { ...manifest, writers: [] as Writer[] } };
+  return { plan, pin, splitBySet, kids, manifest: { ...manifest, writers: [] as Writer[] } };
 }
 
 export type HandwritingPlan = NonNullable<Awaited<ReturnType<typeof handwritingPlan>>>;
@@ -112,17 +160,19 @@ const offerScope = `split_room AS (
     SELECT json_extract(choice.value,'$.split') AS split
     FROM json_each(?2) AS choice
     LEFT JOIN contributor_handwriting_roster r ON r.split=json_extract(choice.value,'$.split') AND r.config_sha256=?1
+      AND r.kids_slot IS NULL
     GROUP BY choice.key HAVING COUNT(r.split) < json_extract(choice.value,'$.max')
     ORDER BY COUNT(r.split), choice.key LIMIT 1
   ), set_loads AS (
     SELECT split_room.split, choices.value AS set_id, COUNT(r.set_id) AS uses
     FROM split_room JOIN json_each(?3, '$.' || split_room.split) AS choices
     LEFT JOIN contributor_handwriting_roster r ON r.set_id=choices.value AND r.split=split_room.split AND r.config_sha256=?1
+      AND r.kids_slot IS NULL
     GROUP BY split_room.split, choices.key
   ), offer AS (
     SELECT split,set_id FROM set_loads
     WHERE uses=(SELECT MIN(uses) FROM set_loads)
-      AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1) < ?4
+      AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND kids_slot IS NULL) < ?4
       AND (SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND invite_sha256=?5) < ?6
       AND NOT EXISTS (SELECT 1 FROM contributor_handwriting_revoked_invites WHERE config_sha256=?1 AND invite_sha256=?5)
       AND EXISTS (SELECT 1 FROM reviewers WHERE id=?7 AND handwriting_opted_out=0)
@@ -149,8 +199,26 @@ async function invitation(ctx: Ctx, signup: HandwritingPlan, actor: string) {
 
 const unavailable = () => new HttpError(409,"handwriting_slot_unavailable");
 
+// Kids: the next unused slot of the band, in signup order. Withdrawn kids keep their roster row, so a slot is never reused.
+const kidsGuards = `(SELECT COUNT(*) FROM contributor_handwriting_roster WHERE config_sha256=?1 AND invite_sha256=?2) < ?3
+    AND NOT EXISTS (SELECT 1 FROM contributor_handwriting_revoked_invites WHERE config_sha256=?1 AND invite_sha256=?2)
+    AND EXISTS (SELECT 1 FROM reviewers WHERE id=?4 AND handwriting_opted_out=0)
+    AND NOT EXISTS (SELECT 1 FROM contributor_enrolments WHERE writer_account=?4 OR guardian_account=?4)`;
+
+async function kidsSlot(ctx: Ctx, signup: HandwritingPlan, band: KidsBand, args: readonly unknown[]) {
+  const row = await ctx.env.DB.prepare(`SELECT
+      (SELECT COALESCE(MAX(kids_slot),0)+1 FROM contributor_handwriting_roster WHERE config_sha256=?1 AND age_band=?5) AS slot,
+      (${kidsGuards}) AS open`).bind(signup.pin,args[4],args[5],args[6],band).first<{slot:number;open:number}>();
+  const split = row?.open === 1 ? signup.kids![band][row.slot - 1] : undefined;
+  if (!row || !split) throw unavailable();
+  return { slot: row.slot, split };
+}
+const kidsOffer = (split: ContributorSplit): HandwritingOffer =>
+  ({ split, sets: split === "train" ? [...KIDS_PACKS.train.second] : [KIDS_PACKS[split].primary] });
+
 export async function handwritingOffer(ctx: Ctx, signup: HandwritingPlan, actor: string): Promise<HandwritingOffer> {
-  const { args } = await invitation(ctx,signup,actor);
+  const { args, ageBand } = await invitation(ctx,signup,actor);
+  if (signup.kids && isKidsBand(ageBand)) return kidsOffer((await kidsSlot(ctx,signup,ageBand,args)).split);
   const { results } = await ctx.env.DB.prepare(`WITH ${offerScope} SELECT split,set_id FROM offer ORDER BY set_id`)
     .bind(...args).all<{split:ContributorSplit;set_id:HandwritingSet}>();
   if (!results.length) throw unavailable();
@@ -166,6 +234,26 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
     JOIN contributor_handwriting_roster r ON r.writer_id=e.writer_id
     WHERE writer_account=? AND config_sha256=?`).bind(actor,signup.pin).first<{writer:string}>();
   if (existing) return existing.writer;
+  if (signup.kids && isKidsBand(ageBand)) {
+    const { slot, split: slotSplit } = await kidsSlot(ctx,signup,ageBand,args);
+    const offer = kidsOffer(slotSplit);
+    if (split !== slotSplit || !offer.sets.includes(set as HandwritingSet)) throw unavailable();
+    const pack = KIDS_PACKS[slotSplit];
+    const second = slotSplit === "train" ? set as HandwritingSet : pack.second[0];
+    const [assigned] = await db.batch([
+      db.prepare(`INSERT INTO contributor_handwriting_roster
+          (config_sha256,invite_sha256,writer_id,set_id,age_band,split,kids_slot,kids_second_set)
+        SELECT ?1,?2,?6,?7,?5,?8,?9,?10 WHERE ${kidsGuards}
+          AND ?9=(SELECT COALESCE(MAX(kids_slot),0)+1 FROM contributor_handwriting_roster WHERE config_sha256=?1 AND age_band=?5)
+        ON CONFLICT DO NOTHING`)
+        .bind(signup.pin,args[4],args[5],args[6],ageBand,writer,pack.primary,slotSplit,slot,second),
+      db.prepare(`INSERT INTO contributor_enrolments(writer_id,writer_account,age_band,split,receipt)
+        SELECT writer_id,?,age_band,split,? FROM contributor_handwriting_roster WHERE writer_id=?`)
+        .bind(actor,randomId("cw-withdraw-",16),writer),
+    ]);
+    if (assigned?.meta.changes !== 1) throw unavailable();
+    return writer;
+  }
   const [assigned] = await db.batch([
     db.prepare(`WITH ${offerScope}
       INSERT INTO contributor_handwriting_roster(config_sha256,invite_sha256,writer_id,set_id,age_band,split)
@@ -221,27 +309,41 @@ export async function acceptGuardian(ctx: Ctx, signup: HandwritingPlan, actor: s
 
 export async function selfWriters(ctx: Ctx, signup: HandwritingPlan, actor: string) {
   const rows = await ctx.env.DB.prepare(`SELECT e.writer_id AS id, e.writer_account AS writerAccount,
-      e.guardian_account AS guardianAccount, r.age_band AS ageBand, r.split, r.set_id AS "set"
+      e.guardian_account AS guardianAccount, r.age_band AS ageBand, r.split, r.set_id AS "set",
+      r.kids_slot AS slot, r.kids_second_set AS second
     FROM contributor_handwriting_roster r JOIN contributor_enrolments e USING(writer_id)
     WHERE r.config_sha256=? AND (writer_account=? OR guardian_account=?) ORDER BY r.ordinal`)
-    .bind(signup.pin,actor,actor).all<Omit<Writer,"tasks">&{set:HandwritingSet}>();
-  return rows.results.map(({set,...writer}) => {
+    .bind(signup.pin,actor,actor).all<Omit<Writer,"tasks">&{set:HandwritingSet;slot:number|null;second:HandwritingSet|null}>();
+  return Promise.all(rows.results.map(async ({set,slot,second,...writer}) => {
     if (signup.splitBySet.get(set) !== writer.split) throw gone();
-    return {...writer,tasks:signup.plan.sheets[set]};
-  });
+    if (slot === null && second === null) return {...writer,tasks:signup.plan.sheets[set]};
+    if (!validKidsRow(signup,{ageBand:writer.ageBand as RosterRow["ageBand"],set,split:writer.split,slot,second})) throw gone();
+    return {...writer,tasks:await kidsSheetOrder(writer.id,[...signup.plan.sheets[set],...signup.plan.sheets[second!]])};
+  }));
 }
 
+/** A kid's roster row matches the pinned slot list and amendment 3's pack for its split. */
+function validKidsRow(signup: HandwritingPlan, row: Pick<RosterRow,"ageBand"|"set"|"split"|"slot"|"second">) {
+  if (!signup.kids || !isKidsBand(row.ageBand) || row.slot === null || row.second === null) return false;
+  const pack = KIDS_PACKS[row.split] as { primary: HandwritingSet; second: readonly HandwritingSet[] };
+  return signup.kids[row.ageBand][row.slot - 1] === row.split && pack.primary === row.set && pack.second.includes(row.second);
+}
+
+// Adult rows keep the v1 shape, so earlier pins still verify; kids' rows add their slot and second set.
 const snapshot = (pin: string, rows: RosterRow[]) =>
-  JSON.stringify({schema:"heocr.handwriting_roster.v1",configSha256:pin,rows:rows.map(({ordinal,writer,ageBand,set,split}) =>
-    ({ordinal,writer,ageBand,set,split}))}) + "\n";
+  JSON.stringify({schema:"heocr.handwriting_roster.v1",configSha256:pin,rows:rows.map(({ordinal,writer,ageBand,set,split,slot,second}) =>
+    ({ordinal,writer,ageBand,set,split,...(slot === null ? {} : {slot,second})}))}) + "\n";
 
 export async function handwritingRoster(ctx: Ctx, signup: HandwritingPlan) {
   const db = ctx.env.DB;
-  const rows = (await db.prepare(`SELECT ordinal,writer_id AS writer,age_band AS ageBand,set_id AS "set",split
+  const rows = (await db.prepare(`SELECT ordinal,writer_id AS writer,age_band AS ageBand,set_id AS "set",split,
+      kids_slot AS slot,kids_second_set AS second
     FROM contributor_handwriting_roster WHERE config_sha256=? ORDER BY ordinal`).bind(signup.pin).all<RosterRow>()).results;
-  if (rows.length > signup.plan.writerLimit ||
+  const adults = rows.filter(row => row.slot === null && row.second === null);
+  if (adults.length > signup.plan.writerLimit ||
       rows.some(row => signup.splitBySet.get(row.set) !== row.split || !handwritingAgeBands.includes(row.ageBand)) ||
-      signup.plan.capacity.some(({split,max}) => rows.filter(row => row.split === split).length > max)) throw gone();
+      rows.some(row => (row.slot !== null || row.second !== null) && !validKidsRow(signup,row)) ||
+      signup.plan.capacity.some(({split,max}) => adults.filter(row => row.split === split).length > max)) throw gone();
   const prior = await db.prepare(`SELECT roster_sha256,through_ordinal FROM contributor_handwriting_pins
     WHERE config_sha256=? ORDER BY through_ordinal DESC LIMIT 1`).bind(signup.pin)
     .first<{roster_sha256:string;through_ordinal:number}>();

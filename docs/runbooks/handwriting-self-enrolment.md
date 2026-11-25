@@ -173,3 +173,22 @@ B. Migration `0030_handwriting_set_e.sql` widens the roster's `set_id` check. It
 same rows and indexes, and recreates the release-candidates view. The source and provenance are in heocr-ops
 `codex-pool/open-sets/handwriting-v3/set-e/`. Before the set goes in a pinned plan, it needs eval's TRAIN approval
 and heocr-clean's CLEAN receipt.
+
+## Kids' cohort (allocation amendment 3, restricted-eval #960)
+
+Kids' collection is **OFF** until the pinned plan carries a `kids` block. Without it, nothing below applies.
+
+- **Switch on:** upload eval's `kids_slots_v1.json` unchanged to `TRAIN_CAPTURE_MEDIA` at
+  `contributor-v1/handwriting-kids-slots/<sha256>.json` (sha `3463517a…`). Then pin a new plan that adds
+  `"kids": {"slotsSha256": "<that sha>"}` and sheets for all seven sets A–G. Sets F (TEST) and G (DEV) come from
+  eval; this repo never holds their text.
+- **Signup:** a kid (age band 10–12 or 13–17) takes the next unused slot of their band, in signup order. The slot's
+  split is fixed then (TRAIN / DEV / TEST → train / dev / eval_open). The roster row stores `kids_slot` and the second
+  set; withdrawal keeps the row, so a slot is never reused. No name or exact age is stored.
+- **Packs (8 sheets):** TRAIN = E01–E04 + the kid's pick of A or B; DEV = C01–C04 + G01–G04; TEST = D01–D04 + F01–F04.
+- **Order:** `seed = sha256("20261125:hw3-kids-order:" + writer code)`; the 8 pages sorted ascending by
+  `sha256(seed + ":" + page)` (hex). The kid's screen serves them in that order and shows "X / 8".
+- **Adults are unchanged:** kids' rows never count toward the adult capacity or `writerLimit`. The checkpoint
+  snapshot keeps the v1 row shape for adults and adds `slot` and `second` on kids' rows.
+- **Before ON:** a dry signup on a local Worker only (`npm run dev` with a local plan), never production. Then
+  eval's read-only checks: the deployed slot-list sha, the pack per split, and the checkpoint.
