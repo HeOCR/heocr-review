@@ -1245,8 +1245,8 @@
   "Download and print only the assigned page on A4 paper. Use actual size (100%) and check that the page ID is visible."
  ],
  "cg_hand_print_p": [
-  "הדפיסו את דף המשפטים של המשימה על נייר A4 והכינו עוד דף ריק ואת כלי הכתיבה.",
-  "Print the assigned sentence sheet on A4 paper. Get a separate blank sheet and something to write with."
+  "הדפיסו את דף המשפטים של המשימה על נייר A4 והכינו כלי כתיבה. אין צורך בדף ריק נוסף.",
+  "Print the assigned sentence sheet on A4 paper and get something to write with. You don't need an extra blank sheet."
  ],
  "cg_form_h": [
   "ממלאים לפי הפרטים לדוגמה",
@@ -1257,12 +1257,16 @@
   "Write each value by hand in its matching field, exactly as shown on the card. Use only the fictional details on the card and leave other fields blank."
  ],
  "cg_copy_h": [
-  "מעתיקים בכתב יד",
-  "Copy by hand"
+  "כותבים על הדף",
+  "Write on the sheet"
  ],
  "cg_copy_p": [
-  "כתבו את מזהה הדף בראש דף תשובות נקי. העתיקו כל משפט לשורה משלו, לפי הסדר, כולל סימני הפיסוק. השאירו מעט רווח בין השורות.",
-  "Write the page ID at the top of a clean answer sheet. Copy the sentences in order, one per line, with punctuation. Leave a little space between lines."
+  "כתבו כל משפט על השורה שלידו בדף המודפס (בעמודה ״כאן כותבים״), לפי הסדר, כולל סימני הפיסוק. אל תכתבו שם או פרטים אישיים.",
+  "Write each sentence on the line next to it on the printed sheet (the \"כאן כותבים\" column), in order, with punctuation. Don't write a name or any personal details."
+ ],
+ "cg_copy_alt": [
+  "אין מדפסת, או שכבר כתבתם על דף נפרד? זה בסדר. כתבו את מזהה הדף בראש הדף והעתיקו את כל המשפטים, משפט אחד בכל שורה, לפי הסדר, כולל המשפט האחרון.",
+  "No printer, or already wrote on a separate page? That's fine. Write the page ID at the top and copy all the sentences, one per line, in order, including the last one."
  ],
  "cg_photo_h": [
   "מצלמים את הדף",

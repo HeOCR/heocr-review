@@ -198,6 +198,7 @@ export function contributorView(account: string, enabled: boolean, signedOut: ()
       const sheet=h("section",{class:"contributor-prompt"},
         h("h4",{},text("דף כתיבה","Handwriting sheet")," · ",bdi(task.page,"ltr")),
         h("p",{class:"contributor-print-help"},t("cg_copy_p")),
+        h("p",{class:"contributor-print-help small muted"},t("cg_copy_alt")),
         h("ol",{dir:"rtl"},...task.prompt.split("\n").map(sentence=>h("li",{},sentence))), h("p",{class:"small muted"},task.rights));
       const print=btn(text("הדפסת דף כתיבה","Print handwriting sheet"),()=>{
         document.body.classList.add("contributor-printing");
