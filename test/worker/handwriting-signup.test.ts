@@ -151,14 +151,14 @@ it("limits concurrent roster requests in a five-minute window and keeps GET and 
 });
 
 it("allows the owner an upload after guardian consent and assent before the first daily audit",async()=>{
-  const f=await fixture();
+  const f=await fixture({kids:true});
   const join=enrol(invitation(1),"A","13_17");
   expect((await f.req(null,path+"/enrolments",join)).status).toBe(401);
   expect((await f.req(f.writer,path+"/enrolments",join,{CONTRIBUTOR_APP_ENABLED:"0"})).status).toBe(404);
   expect((await f.req(f.writer,path+"/enrolments",join,{ENVIRONMENT:"production"},"https://heocr-review.heocr.workers.dev")).status).toBe(404);
   expect((await f.req(f.writer,path+"/enrolments",{...join,inviteCode:invitation(9)})).status).toBe(404);
   expect(await (await f.req(f.writer,optionsRoute,{inviteCode:join.inviteCode,ageBand:join.ageBand})).json())
-    .toEqual({split:"train",sets:["A","B","E"]});
+    .toEqual({split:"train",sets:["A","B"]});
   const response=await f.req(f.writer,path+"/enrolments",join);
   expect(response.status).toBe(200);
   const profile=await response.json<ContributorProfile>();
@@ -167,7 +167,7 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect(profile.writer).toMatch(/^cw-[a-f0-9]{32}$/);
   expect(profile.guardianPairingCode).toBeTruthy();
   const writerPath=path+"/writers/"+profile.writer;
-  const task=writerPath+"/tasks/HW-V3-A01";
+  let task=writerPath+"/tasks/HW-V3-A01";
   expect((await f.req(f.stranger,writerPath)).status).toBe(404);
   expect((await f.req(f.writer,"/api/batches")).status).toBe(404);
   expect((await f.req(f.writer,task+"/sheet")).status).toBe(404);
@@ -187,15 +187,17 @@ it("allows the owner an upload after guardian consent and assent before the firs
   expect((await f.req(f.stranger,roster)).status).toBe(404);
   const pin=await (await f.rosterReq()).json<{sha256:string;canonical:string;throughOrdinal:number;previousSha256:null}>();
   expect(await hash(pin.canonical)).toBe(pin.sha256);
-  expect(JSON.parse(pin.canonical).rows).toEqual([{ordinal:pin.throughOrdinal,writer:profile.writer,ageBand:"13_17",set:"A",split:"train"}]);
+  expect(JSON.parse(pin.canonical).rows).toEqual([{ordinal:pin.throughOrdinal,writer:profile.writer,ageBand:"13_17",set:"E",split:"train",slot:1,second:"A"}]);
   const {canonical, ...acceptPin}=pin;
   expect(canonical).not.toContain("rv_");
   expect((await f.req(f.stranger,roster,acceptPin)).status).toBe(404);
   expect((await f.rosterReq({...acceptPin,sha256:"2".repeat(64)})).status).toBe(409);
   const assent=await f.req(f.writer,writerPath+"/consent",f.copyBody("assent"));
   const ready=await assent.json<ContributorProfile>();
-  expect(ready).toMatchObject({state:"ready",queues:[{kind:"handwriting",total:4,done:0}]});
-  expect(new TextDecoder().decode(await (await f.req(f.writer,task+"/sheet")).arrayBuffer())).toBe("%PDF-1.4\n% invented fixture HW-V3-A01");
+  expect(ready).toMatchObject({state:"ready",queues:[{kind:"handwriting",total:8,done:0}]});
+  const first=ready.queues[0]!.next!.page;
+  task=writerPath+"/tasks/"+first;
+  expect(new TextDecoder().decode(await (await f.req(f.writer,task+"/sheet")).arrayBuffer())).toBe("%PDF-1.4\n% invented fixture "+first);
   const photoHeaders=uploadHeaders(ready);
   expect((await f.req(f.guardian,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(404);
   expect((await f.req(f.stranger,task+"/submit",photo,{},origin,photoHeaders)).status).toBe(404);
@@ -599,4 +601,14 @@ it("assigns kids the band's next slot, an 8-sheet pack in seeded order and X of 
   await f.req(guardian,path+"/writers/"+t.profile.writer+"/withdraw",{withdraw:true});
   await join(kids[5]!,"10_12","A");
   expect(await env.DB.prepare("SELECT MAX(kids_slot) AS n FROM contributor_handwriting_roster WHERE age_band='10_12'").first()).toEqual({n:5});
+});
+
+it("refuses every minor on the adult route while no kids block is pinned",async()=>{
+  const f=await fixture();
+  for (const ageBand of ["10_12","13_17"]) {
+    expect((await f.req(f.writer,optionsRoute,{inviteCode:invitation(1),ageBand})).status).toBe(409);
+    expect((await f.req(f.writer,enrolmentRoute,{inviteCode:invitation(1),ageBand,split:"train",set:"A"})).status).toBe(409);
+  }
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM contributor_handwriting_roster").first()).toEqual({n:0});
+  expect((await f.req(f.writer,enrolmentRoute,enrol(invitation(1),"A"))).status).toBe(200);
 });
