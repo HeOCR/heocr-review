@@ -25,6 +25,14 @@ Worker secrets file (0600). Do not move credentials into URLs or logs.
   approved wording below exactly. Each upload records the selected
   language and SHA-256 of its exact UTF-8 wording. The operator manifest
   also exposes both policy digests before there are any captures.
+  The value must reach the Worker as raw JSON. In a `.dev.vars` file for a
+  local rehearsal, write it unquoted on one line
+  (`PH1_CONSENT={"version":"...","text":{...}}`): a double-quoted value
+  keeps its backslash escapes, the consent check rejects it, and every
+  `/ph1` and `/api/ph1/upload` request returns 404 while the operator
+  export still answers. Single quotes don't work either, because the
+  English wording contains an apostrophe. A 404 on `/ph1` with the flag
+  set is the sign to check this first.
 - `PH1_EVENT_CODE_SHA256` is the lowercase SHA-256 of the event code as
   entered, excluding any trailing line feed. Generate the code using at
   least 128 random bits and share it only with the organiser and participants.
