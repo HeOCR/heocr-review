@@ -8,7 +8,7 @@ import { uploadPage, uploadScript } from "./page";
 
 const event = "ph1-phone-2026-11-26-to-2026-11-29";
 const opens = "2026-11-26T00:00:00+02:00";
-const closes = "2026-11-30T00:00:00+02:00";
+const closes = "2026-12-01T00:00:00+02:00";
 const startsAt = Date.parse(opens);
 const closesAt = Date.parse(closes);
 const prefix = `ph1/quarantine/${event}/photos/`;

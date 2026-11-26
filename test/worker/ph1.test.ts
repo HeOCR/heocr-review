@@ -82,12 +82,12 @@ it("denies signed-out uploads without the event code and requires an exact conse
 });
 
 it("honours Israel local midnight and fails closed until the flag, code and consent are configured",async () => {
-  for (const time of ["2026-11-25T23:59:59+02:00","2026-11-30T00:00:00+02:00"]) {
+  for (const time of ["2026-11-25T23:59:59+02:00","2026-12-01T00:00:00+02:00"]) {
     vi.setSystemTime(new Date(time));
     expect((await get("/ph1")).status).toBe(403);
     expect((await send()).status).toBe(403);
   }
-  vi.setSystemTime(new Date("2026-11-29T23:59:59+02:00"));
+  vi.setSystemTime(new Date("2026-11-30T23:59:59+02:00"));
   expect((await get("/ph1")).status).toBe(200);
   config.PH1_CONSENT=undefined;
   expect((await get("/ph1")).status).toBe(404);
@@ -118,7 +118,7 @@ it("sanitizes JPEG, PNG and HEIC before R2 and exports only to the scoped operat
     expect([...safe.meta.removed]).toContain("Exif.GPSLongitude");
     expect(new TextDecoder().decode(safe.bytes)).not.toContain("Fixtureville");
     expect(sanitizePhoto(safe.bytes).bytes).toEqual(safe.bytes);
-    if (i===1) vi.setSystemTime(new Date("2026-11-29T00:15:00+02:00"));
+    if (i===1) vi.setSystemTime(new Date("2026-11-30T23:59:59+02:00"));
     const res = await send(original,{"x-ph1-filename":encodeURIComponent("צילום 0"+i+"."+ext),
       ...(i===1 ? {"x-ph1-consent-language":"en","x-ph1-transfer":"recompressed","x-ph1-participant":"P20"} : {}),
     });
@@ -137,14 +137,14 @@ it("sanitizes JPEG, PNG and HEIC before R2 and exports only to the scoped operat
   expect((await get("/api/ph1/operator/photos/001")).status).toBe(404);
   expect((await get("/api/config",operatorToken)).status).toBe(404);
   config.PH1_CAPTURE_ENABLED=undefined;
-  vi.setSystemTime(new Date("2026-11-30T00:00:00+02:00"));
+  vi.setSystemTime(new Date("2026-12-01T00:00:00+02:00"));
   expect(await (await get(manifestPath,operatorToken)).json()).toMatchObject({
     count:3, cap:420, event:"ph1-phone-2026-11-26-to-2026-11-29",
-    window:{opens_at:"2026-11-26T00:00:00+02:00",closes_at:"2026-11-30T00:00:00+02:00"},
+    window:{opens_at:"2026-11-26T00:00:00+02:00",closes_at:"2026-12-01T00:00:00+02:00"},
     consent_policy:{version:consent.version,sha256:{he:await hash(consent.text.he),en:await hash(consent.text.en)}},
     consents:[
       {participant:"P03",date:"2026-11-26",version:consent.version,language:"he",sha256:await hash(consent.text.he)},
-      {participant:"P20",date:"2026-11-29",version:consent.version,language:"en",sha256:await hash(consent.text.en)},
+      {participant:"P20",date:"2026-11-30",version:consent.version,language:"en",sha256:await hash(consent.text.en)},
     ],
     photos:[{participant:"P03", original_filename:"צילום 00.jpg",original_sha256:await hash(photoFixture("jpg")),
       sanitized_sha256:await hash(sanitizePhoto(photoFixture("jpg")).bytes), make:"FixtureCamera",model:"Fixture Phone 1",
