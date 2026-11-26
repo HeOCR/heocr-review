@@ -5,7 +5,10 @@ still HEIC and PNG files, one request per photo. Inputs are capped at 20 MiB
 per photo and 420 distinct receipts for the event. Participants pick their
 assigned code and confirm the wording shown. No Google account is used.
 The event is `ph1-phone-2026-11-26-to-2026-11-29`. Its upload window runs
-from 26 November 2026 at 00:00 to 30 November at 00:00 Israel time.
+from 26 November 2026 at 00:00 through Monday, 30 November at 23:59
+Israel time (exclusive cutoff 1 December at 00:00). Office captures for
+packs 1–6 are on Sunday, 29 November. The event identifier preserves the
+original storage namespace and receipt sequence.
 Files the sanitizer cannot safely process must stay with the participant
 and use the approved offline transfer and sanitization path.
 
