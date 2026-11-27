@@ -79,6 +79,7 @@ export function proofreadExport(batch: BatchRecord, proposals: ProposalRecord[],
     return [{
       id: p.externalId, position: p.payload.order, leaf: p.payload.leaf, region: p.payload.region,
       ordinal: p.payload.line_index, crop_sha256: p.payload.crop_sha256,
+      region_sha256: p.payload.region_sha256, slice_box: p.payload.slice_box,
       action, masked, before, before_sha256: sha256Hex(before), after, after_sha256: sha256Hex(after),
       note: action === "unclear" ? d.text : null, decision_id: d.id, decided_at: d.createdAt,
     }];

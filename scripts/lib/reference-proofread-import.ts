@@ -21,6 +21,7 @@ interface SourceLine {
   hard: boolean;
   before: string;
   crop_sha256: string;
+  region_sha256: string;
   width: number;
   height: number;
   box: [number, number, number, number];
@@ -68,7 +69,8 @@ export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, ti
     leaves.set(row.leaf, { ordinal: row.ordinal, region: row.region });
     const region = `${row.leaf}-r${row.region}`;
     const pinned = regions.get(region);
-    if (!pinned || !Array.isArray(row.box) || row.box.length !== 4 || !row.box.every(Number.isSafeInteger)) throw new Error("missing region or line box");
+    if (!pinned || row.region_sha256 !== pinned.source.sha256 || !Array.isArray(row.box) ||
+        row.box.length !== 4 || !row.box.every(Number.isSafeInteger)) throw new Error("line region pin or slice box differs");
     const [x0, y0, x1, y1] = row.box;
     const { width, height } = pinned.source;
     const prev = pinned.region.bands.at(-1);
@@ -94,13 +96,10 @@ export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, ti
       externalId: `${row.leaf}-${row.ordinal}`,
       itemExternalId: `${row.leaf}-r${row.region}`,
       category: "proofread", confidence: "", rank, pageBox: null,
-      contentKey: { manifestSha, position: row.position, cropSha: row.crop_sha256, before: row.before },
+      contentKey: { manifestSha, position: row.position, cropSha: row.crop_sha256, regionSha: row.region_sha256, box: row.box, before: row.before },
       payload: {
-        candidate_text: row.before, candidate_provenance: "sealed_reference", attention_spans: [],
-        line_index: row.ordinal, pass: 1, order: row.position, leaf: row.leaf, region: row.region,
-        crop_sha256: row.crop_sha256, split: "test", trainable: false,
-        page: { source: "held_out_reference", book_title: row.leaf, page_label: `${row.leaf}/${row.region}`,
-          attribution: "", text_license: "", release_split: "test" },
+        candidate_text: row.before, line_index: row.ordinal, pass: 1, order: row.position, leaf: row.leaf, region: row.region,
+        crop_sha256: row.crop_sha256, region_sha256: row.region_sha256, slice_box: row.box, split: "test", trainable: false,
       },
     })),
   };
@@ -123,14 +122,30 @@ export async function proofreadMedia(stage: ReturnType<typeof proofreadBundle>, 
       put?.(namespaced, bytes);
       objects.set(namespaced, { size: bytes.length, etag: createHash("md5").update(bytes).digest("hex") });
     }
-    return key;
+    return { key, bytes };
   }
-  for (const region of stage.regions) await verifyPng(region.sha256, region.width, region.height);
-  for (const [i, row] of stage.queue.entries()) {
-    const key = await verifyPng(row.crop_sha256, row.width, row.height);
-    media.set(stage.bundle.proposals[i]!.externalId, {
-      crop: { ref: { source: "r2", key }, width: row.width, height: row.height, box: [0, 0, 1, 1] },
-    });
+  const byRegion = new Map<string, SourceLine[]>();
+  for (const row of stage.queue) {
+    const id = `${row.leaf}-r${row.region}`;
+    const rows = byRegion.get(id) ?? [];
+    rows.push(row);
+    byRegion.set(id, rows);
+  }
+  for (const region of stage.regions) {
+    const { bytes } = await verifyPng(region.sha256, region.width, region.height);
+    const parent = await sharp(bytes).raw().toBuffer({ resolveWithObject: true });
+    const stride = region.width * parent.info.channels;
+    for (const row of byRegion.get(`${region.leaf}-r${region.region}`)!) {
+      const crop = await verifyPng(row.crop_sha256, row.width, row.height);
+      const child = await sharp(crop.bytes).raw().toBuffer({ resolveWithObject: true });
+      const [, y0, , y1] = row.box;
+      if (child.info.channels !== parent.info.channels || !child.data.equals(parent.data.subarray(y0 * stride, y1 * stride))) {
+        throw new Error("proofread PNG is not the lossless slice of its pinned region");
+      }
+      media.set(`${row.leaf}-${row.ordinal}`, {
+        crop: { ref: { source: "r2", key: crop.key }, width: row.width, height: row.height, box: [0, 0, 1, 1] },
+      });
+    }
   }
   return { media, objects };
 }
