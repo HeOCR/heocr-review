@@ -453,25 +453,30 @@ it("uses sealed line order and blank audit typing while keeping real answers and
   expect(decisions.results).toContainEqual({ proposal_id: audit!.id, value: "edited", text: "טיוטה", superseded_at: null });
 });
 
-it("keeps held-out proofread crops, prefills and structured answers on the one restricted reviewer account", async () => {
+it("keeps proofread items unanchored and records masks and scoped additions for the sole reviewer", async () => {
   const { owner, admin, volunteer, req } = await fixtureUsers();
   const batch = "private-ref-proofread-fixture";
   const source = JSON.stringify({
-    restricted_review: "held_out_line_proofread", split: "test", trainable: false,
+    restricted_review: "held_out_line_proofread", proofread_schema: "reference_proofread.v2", split: "test", trainable: false,
     reference_sha256: "f".repeat(64), manifest_sha256: "b".repeat(64),
   });
   await env.DB.prepare(`INSERT INTO batches(id,task_type,title,source_json,min_reviewers,status,imported_at,restricted_reference)
     VALUES (?1,'line_verify','Proofread fixture',?2,1,'open','2026-11-27',1)`).bind(batch, source).run();
+  const region = { leaf: "leaf", region: 1, sha256: "a".repeat(64), image, bands: [
+    { ordinal: 1, box: [0, 0, 1, 0.25] }, { ordinal: 2, box: [0, 0.25, 1, 0.5] },
+    { ordinal: 3, box: [0, 0.5, 1, 0.75] }, { ordinal: 4, box: [0, 0.75, 1, 1] },
+  ] };
   const item = await env.DB.prepare(`INSERT INTO items(batch_id,external_id,title,payload_json)
-    VALUES (?1,'leaf-r1','Invented region','{}') RETURNING id`).bind(batch).first<number>("id");
+    VALUES (?1,'leaf-r1','candidate lane hint',?2) RETURNING id`).bind(batch, JSON.stringify({ proofread_region: region })).first<number>("id");
   await env.DB.prepare("INSERT INTO restricted_reference_pages(batch_id,item_id,first_allowed,blind_allowed) VALUES (?1,?2,1,0)").bind(batch, item).run();
   const ids: number[] = [];
-  for (const [i, text] of ["דפוס ישן", "[?]", "נֹסַח מֻמְצָא"].entries()) {
-    const payload = { candidate_text: text, candidate_provenance: "sealed_reference", order: i + 1, leaf: "leaf", region: 1,
-      crop_sha256: "a".repeat(64), line_index: i + 1, attention_spans: [], page: { source: "held_out_reference" } };
+  for (const [i, text] of ["דפוס ישן", "[?]", "נֹסַח מֻמְצָא", "שורה עודפת"].entries()) {
+    const payload = { candidate_text: text, candidate_provenance: "lane secret", order: i + 1, leaf: "leaf", region: 1,
+      crop_sha256: "a".repeat(64), line_index: i + 1, attention_spans: [[0, 1]], model_output: "hidden output",
+      score: 0.73, page: { source: "held_out_reference" } };
     const row = await env.DB.prepare(`INSERT INTO proposals(batch_id,item_id,external_id,category,confidence,rank,payload_json,media_json,content_sha256,active)
-      VALUES (?1,?2,?3,'review','sealed',?4,?5,?6,?7,1) RETURNING id`).bind(batch, item, `leaf-${i + 1}`,
-        [2, 0, 1][i], JSON.stringify(payload), JSON.stringify({ crop: image }), sha256Hex(text)).first<number>("id");
+      VALUES (?1,?2,?3,'lane secret','test confidence',?4,?5,?6,?7,1) RETURNING id`).bind(batch, item, `leaf-${i + 1}`,
+        [3, 0, 1, 2][i], JSON.stringify(payload), JSON.stringify({ crop: image }), sha256Hex(text)).first<number>("id");
     ids.push(row!);
   }
   await env.RESTRICTED_REFERENCE_MEDIA!.put(`${batch}/${key}`, "exact fixture raster");
@@ -479,42 +484,71 @@ it("keeps held-out proofread crops, prefills and structured answers on the one r
   const exported = `/api/admin/batches/${batch}/export`;
   const line = (i: number) => `/api/proposals/${ids[i]}`;
   const decide = (i: number, value: string, text?: string) => req("POST", line(i) + "/decision", owner.cookie, host, { value, text });
+  const regionPath = line(1) + "/proofread-region";
+  const regionImage = `/api/restricted-media/v1/proposals/${ids[1]}/region`;
+  const box = [0.2, 0.27, 0.8, 0.33];
+  const add = { box, text: "שׁוּרָה חדשה" };
   for (const [cookie, origin, status] of [
     ["", host, 401], [admin.cookie, host, 404], [volunteer.cookie, host, 404], [owner.cookie, alternate, 404],
   ] as const) {
-    expect((await req("GET", queue, cookie, origin)).status).toBe(status);
-    expect((await req("GET", line(1), cookie, origin)).status).toBe(status);
-    expect((await req("GET", proposalMedia(ids[1]!, "crop"), cookie, origin)).status).toBe(status);
+    for (const path of [queue, line(1), proposalMedia(ids[1]!, "crop"), regionImage, regionPath]) {
+      expect((await req("GET", path, cookie, origin)).status).toBe(status);
+    }
     expect((await req("POST", line(1) + "/decision", cookie, origin, { value: "exact" })).status).toBe(status);
+    expect((await req("POST", regionPath + "/lines", cookie, origin, add)).status).toBe(status);
     const list = await req("GET", "/api/batches", cookie, origin);
     expect(await list.text()).not.toContain(batch);
   }
   expect((await req("GET", exported, admin.cookie)).status).toBe(404);
-  const png = await req("GET", proposalMedia(ids[1]!, "crop"));
-  expect(png.headers.get("cache-control")).toContain("no-store");
-  expect(new TextDecoder().decode(await png.arrayBuffer())).toBe("exact fixture raster");
+  for (const path of [proposalMedia(ids[1]!, "crop"), regionImage]) {
+    const raster = await req("GET", path);
+    expect(raster.headers.get("cache-control")).toContain("no-store");
+    expect(new TextDecoder().decode(await raster.arrayBuffer())).toBe("exact fixture raster");
+  }
   expect((await req("GET", proposalMedia(ids[1]!, "page"))).status).toBe(404);
-  expect(await (await req("GET", queue)).json()).toMatchObject({
-    proposal: { id: ids[1], view: { referenceProofread: true, candidate: "[?]" },
-      options: [{ value: "exact" }, { value: "edited" }, { value: "unclear" }] },
-    progress: { total: 3, remainingForMe: 3 },
+  const next = await (await req("GET", queue)).json() as { proposal: { view: Record<string, unknown> } };
+  expect(Object.keys(next.proposal.view).sort()).toEqual(["candidate", "crop", "kind"]);
+  expect(next).toMatchObject({
+    proposal: { id: ids[1], externalId: "", itemTitle: "", view: { kind: "reference_proofread", candidate: "[?]" },
+      options: [{ value: "edited" }, { value: "unclear" }, { value: "not_in_image" }] },
+    progress: { total: 4, remainingForMe: 4 },
   });
+  expect(JSON.stringify(next)).not.toMatch(/lane secret|candidate lane hint|hidden output|test confidence|0.73/u);
+  const before = await (await req("GET", regionPath)).json();
+  expect(before).toMatchObject({ proofread: true, boxes: [], added: [], image: { url: regionImage } });
+  expect(JSON.stringify(before)).not.toContain("[?]");
+  expect((await req("POST", regionPath + "/lines", owner.cookie, host, { ...add, box: [0, 0, 2, 2] })).status).toBe(400);
+  expect((await req("POST", regionPath + "/lines", owner.cookie, host, { ...add, text: "א ב" })).status).toBe(400);
+  expect((await req("POST", regionPath + "/lines", owner.cookie, host, { ...add, merge: true })).status).toBe(400);
+  const write = () => req("POST", regionPath + "/lines", owner.cookie, host, add);
+  const added = await (await write()).json() as { id: string };
+  expect(added.id).toMatch(/^pl-/);
+  expect(await (await write()).json()).toEqual(added);
+  expect(await (await req("GET", regionPath)).json()).toMatchObject({ added: [{ id: added.id, text: add.text }] });
   expect((await req("POST", line(1) + "/skip")).status).toBe(400);
+  expect((await decide(1, "exact")).status).toBe(400);
   expect((await decide(1, "unclear", "  ")).status).toBe(400);
   expect((await decide(1, "unclear", "דיו דהוי")).status).toBe(200);
   expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: { id: ids[2] } });
+  expect((await decide(2, "edited", "יו\nרג")).status).toBe(400);
   expect((await decide(2, "edited", "נֹסַח [?]")).status).toBe(200);
+  expect((await decide(3, "not_in_image")).status).toBe(200);
   expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: { id: ids[0] } });
   expect((await decide(0, "exact")).status).toBe(200);
-  expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: null, progress: { covered: 3, remainingForMe: 0 } });
+  expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: null, progress: { covered: 4, remainingForMe: 0 } });
+  await env.DB.prepare("UPDATE batches SET status='closed' WHERE id=?1").bind(batch).run();
+  expect((await write()).status).toBe(404);
   const output = await req("GET", exported);
   expect(output.headers.get("cache-control")).toContain("no-store");
   expect(await output.json()).toMatchObject({
-    counts: { exact: 1, edited: 1, unclear: 1, pending: 0 },
+    counts: { confirm: 1, correct: 1, unclear: 1, not_in_image: 1, masked: 2, add: 1, pending: 0 },
     files: { "reference_proofread.json": { split: "test", trainable: false, lines: [
-      { position: 1, action: "exact", before: "דפוס ישן", after: "דפוס ישן", after_sha256: sha256Hex("דפוס ישן"), note: null },
-      { position: 2, action: "unclear", before: "[?]", after: null, note: "דיו דהוי" },
-      { position: 3, action: "edited", before: "נֹסַח מֻמְצָא", after: "נֹסַח [?]", note: null },
-    ] } },
+      { position: 1, action: "confirm", before: "דפוס ישן", after: "דפוס ישן", after_sha256: sha256Hex("דפוס ישן"), note: null },
+      { position: 2, action: "unclear", before: "[?]", after: "[?]", masked: true, note: "דיו דהוי" },
+      { position: 3, action: "correct", before: "נֹסַח מֻמְצָא", after: "נֹסַח [?]", note: null },
+      { position: 4, action: "not_in_image", masked: true, after_sha256: sha256Hex("[?]") },
+    ], added: [{ id: added.id, action: "add", leaf: "leaf", region: 1, after_ordinal: 1,
+      region_sha256: "a".repeat(64), before_sha256: null, after_sha256: sha256Hex(add.text) }],
+    } },
   });
 });

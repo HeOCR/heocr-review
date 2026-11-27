@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
 import { lineTextProblems } from "../../src/tasks/line_verify/schema";
-import { PROOFREAD_KIND, PROOFREAD_PREFIX } from "../../src/tasks/reference_proofread";
+import { PROOFREAD_KIND, PROOFREAD_PREFIX, PROOFREAD_SCHEMA, type ProofreadRegion } from "../../src/tasks/reference_proofread";
 import type { ImportBundle } from "../../src/tasks/import";
 import type { ProposalMedia } from "../../src/tasks/types";
 import { buildImportStatements } from "./importsql";
@@ -23,6 +23,14 @@ interface SourceLine {
   crop_sha256: string;
   width: number;
   height: number;
+  box: [number, number, number, number];
+}
+interface SourceRegion {
+  leaf: string;
+  region: number;
+  sha256: string;
+  width: number;
+  height: number;
 }
 
 export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, title: string) {
@@ -30,11 +38,21 @@ export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, ti
     throw new Error("expected a restricted proofread batch id and title");
   }
   if (!sha.test(manifestSha) || proofreadDigest(raw) !== manifestSha) throw new Error("proofread manifest pin mismatch");
-  const doc = JSON.parse(raw.toString("utf8")) as { schema: string; reference_sha256: string; rows: SourceLine[] };
-  if (doc.schema !== "reference_proofread.v1" || !sha.test(doc.reference_sha256) || !Array.isArray(doc.rows) || !doc.rows.length) {
+  const doc = JSON.parse(raw.toString("utf8")) as { schema: string; reference_sha256: string; rows: SourceLine[]; regions: SourceRegion[] };
+  if (doc.schema !== PROOFREAD_SCHEMA || !sha.test(doc.reference_sha256) || !Array.isArray(doc.rows) || !doc.rows.length || !Array.isArray(doc.regions)) {
     throw new Error("invalid proofread manifest");
   }
   const items = new Map<string, ImportBundle["items"][number]>();
+  const regions = new Map<string, { source: SourceRegion; region: ProofreadRegion }>();
+  for (const source of doc.regions) {
+    if (!source || typeof source.leaf !== "string" || !leafId.test(source.leaf) || !sha.test(source.sha256) ||
+      ![source.region, source.width, source.height].every(v => Number.isSafeInteger(v) && v > 0)) throw new Error("invalid region pin");
+    const id = `${source.leaf}-r${source.region}`;
+    if (regions.has(id)) throw new Error("duplicate proofread region");
+    regions.set(id, { source, region: { leaf: source.leaf, region: source.region, sha256: source.sha256,
+      image: { ref: { source: "r2", key: source.sha256 + ".png" }, width: source.width, height: source.height, box: null },
+      bands: [] } });
+  }
   const leaves = new Map<string, { ordinal: number; region: number }>();
   for (const [i, row] of doc.rows.entries()) {
     if (!row || typeof row.leaf !== "string" || !leafId.test(row.leaf) || typeof row.hard !== "boolean" ||
@@ -49,7 +67,19 @@ export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, ti
     }
     leaves.set(row.leaf, { ordinal: row.ordinal, region: row.region });
     const region = `${row.leaf}-r${row.region}`;
-    if (!items.has(region)) items.set(region, { externalId: region, title: region, payload: { split: "test", trainable: false }, imageStem: null });
+    const pinned = regions.get(region);
+    if (!pinned || !Array.isArray(row.box) || row.box.length !== 4 || !row.box.every(Number.isSafeInteger)) throw new Error("missing region or line box");
+    const [x0, y0, x1, y1] = row.box;
+    const { width, height } = pinned.source;
+    const prev = pinned.region.bands.at(-1);
+    if (x0 !== 0 || x1 !== width || y0 / height !== (prev?.box[3] ?? 0) || y1 > height ||
+        row.width !== width || row.height !== y1 - y0) throw new Error("crop dimensions or reading bands differ from the pinned region");
+    pinned.region.bands.push({ ordinal: row.ordinal, box: [0, y0 / height, 1, y1 / height] });
+    if (!items.has(region)) items.set(region, { externalId: region, title: region,
+      payload: { split: "test", trainable: false, proofread_region: pinned.region }, imageStem: null });
+  }
+  if (items.size !== regions.size || [...regions.values()].some(r => r.region.bands.at(-1)?.box[3] !== 1)) {
+    throw new Error("regions and line bands must cover the same scope");
   }
   if (proofreadDigest(doc.rows.map(row => row.before + "\n").join("")) !== doc.reference_sha256) {
     throw new Error("prefill differs from the sealed reference");
@@ -57,13 +87,13 @@ export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, ti
   const queue = [...doc.rows].sort((a, b) => Number(b.hard) - Number(a.hard) || a.position - b.position);
   const bundle: ImportBundle = {
     batch: { id, title, taskType: "line_verify", source: {
-      restricted_review: PROOFREAD_KIND, split: "test", trainable: false, manifest_sha256: manifestSha, reference_sha256: doc.reference_sha256,
+      restricted_review: PROOFREAD_KIND, proofread_schema: PROOFREAD_SCHEMA, split: "test", trainable: false, manifest_sha256: manifestSha, reference_sha256: doc.reference_sha256,
     } },
     items: [...items.values()],
     proposals: queue.map((row, rank) => ({
       externalId: `${row.leaf}-${row.ordinal}`,
       itemExternalId: `${row.leaf}-r${row.region}`,
-      category: row.hard ? "disagreed" : "agreed", confidence: "sealed_reference", rank, pageBox: null,
+      category: "proofread", confidence: "", rank, pageBox: null,
       contentKey: { manifestSha, position: row.position, cropSha: row.crop_sha256, before: row.before },
       payload: {
         candidate_text: row.before, candidate_provenance: "sealed_reference", attention_spans: [],
@@ -74,25 +104,30 @@ export function proofreadBundle(raw: Buffer, manifestSha: string, id: string, ti
       },
     })),
   };
-  return { bundle, queue, leaves: leaves.size, hard: queue.filter(row => row.hard).length };
+  return { bundle, queue, regions: doc.regions, leaves: leaves.size, hard: queue.filter(row => row.hard).length };
 }
 
 export async function proofreadMedia(stage: ReturnType<typeof proofreadBundle>, root: string, put?: (key: string, bytes: Buffer) => void) {
   const media = new Map<string, ProposalMedia>();
   const objects = new Map<string, { size: number; etag: string }>();
-  for (const [i, row] of stage.queue.entries()) {
-    const key = row.crop_sha256 + ".png";
+  async function verifyPng(sha256: string, width: number, height: number) {
+    const key = sha256 + ".png";
     const namespaced = stage.bundle.batch.id + "/" + key;
     const path = join(root, key);
-    if (!lstatSync(path).isFile()) throw new Error("expected a regular pinned crop");
+    if (!lstatSync(path).isFile()) throw new Error("expected a regular pinned PNG");
     const bytes = readFileSync(path);
-    if (proofreadDigest(bytes) !== row.crop_sha256) throw new Error("proofread crop pin mismatch");
+    if (proofreadDigest(bytes) !== sha256) throw new Error("proofread media pin mismatch");
     const meta = await sharp(bytes, { failOn: "error" }).metadata();
-    if (meta.format !== "png" || meta.width !== row.width || meta.height !== row.height) throw new Error("proofread crop dimensions or format differ");
+    if (meta.format !== "png" || meta.width !== width || meta.height !== height) throw new Error("proofread PNG dimensions or format differ");
     if (!objects.has(namespaced)) {
       put?.(namespaced, bytes);
       objects.set(namespaced, { size: bytes.length, etag: createHash("md5").update(bytes).digest("hex") });
     }
+    return key;
+  }
+  for (const region of stage.regions) await verifyPng(region.sha256, region.width, region.height);
+  for (const [i, row] of stage.queue.entries()) {
+    const key = await verifyPng(row.crop_sha256, row.width, row.height);
     media.set(stage.bundle.proposals[i]!.externalId, {
       crop: { ref: { source: "r2", key }, width: row.width, height: row.height, box: [0, 0, 1, 1] },
     });

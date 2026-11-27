@@ -58,7 +58,6 @@ export interface LineVerifyView {
   draft: boolean;
   /** Restricted review of a pinned draft using the normal correction diff. */
   draftVerification?: boolean;
-  referenceProofread?: boolean;
   candidate: string;
   /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
   runs: AttentionRun[];
@@ -80,6 +79,13 @@ export interface LineVerifyView {
   crop: ImageView | null;
   /** The reduced full page with the line's ink box. */
   page: ImageView | null;
+}
+
+/** A held-out review response carries only the sealed reference and protected crop. */
+export interface ProofreadLineView {
+  kind: "reference_proofread";
+  candidate: string;
+  crop: ImageView | null;
 }
 
 /** One pre-fill line of a page under review, with its "look here" flags (never a proposed correction). */
@@ -142,7 +148,7 @@ export interface LineConsensusView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView;
+export type ProposalViewBody = TextCorrectionView | LineVerifyView | ProofreadLineView | PageReviewView | LineConsensusView;
 
 export interface DecisionOption {
   value: string;
@@ -239,6 +245,7 @@ export interface PageCheckView {
   pageId: string;
   title: string;
   mode: "check" | "add";
+  proofread?: boolean;
   image: ImageView | null;
   boxes: PageLineBox[];
   added: { id: string; box: Box; text: string | null; value: "typed" | "unreadable" }[];

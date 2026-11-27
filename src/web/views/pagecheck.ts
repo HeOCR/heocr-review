@@ -8,7 +8,7 @@
 import type { PageCheckView } from "../../shared/api";
 import type { Box } from "../../shared/media";
 import { h } from "../dom";
-import { t } from "../i18n";
+import { lang, t } from "../i18n";
 import { icon } from "../icons";
 
 export interface PageScreenHooks {
@@ -35,7 +35,7 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
   const frame = h(
     "div",
     { class: "frame pageframe" },
-    v.image ? h("img", { src: v.image.url, width: v.image.width, height: v.image.height, alt: `${t("pg")} · ${v.title}`, decoding: "async", draggable: "false" }) : h("p", { class: "muted" }, t("no_image")),
+    v.image ? h("img", { src: v.image.url, width: v.image.width, height: v.image.height, alt: v.proofread ? (lang() === "he" ? "צילום האזור" : "Region image") : `${t("pg")} · ${v.title}`, decoding: "async", draggable: "false" }) : h("p", { class: "muted" }, t("no_image")),
     ...v.boxes.map((b) => h("div", { class: "pb", style: pct(b.box) })),
     ...v.added.map((a, k) => h("div", { class: "pb added", style: pct(a.box) }, h("span", {}, String(k + 1)))),
   );
@@ -75,7 +75,19 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
   }
 
   // ---------- add (desktop): drag a box, type the line ----------
+  const proofread = v.proofread === true;
+  const label = (he: string, en: string) => lang() === "he" ? he : en;
   const form = h("div", { class: "addform", hidden: true });
+  let armed = !proofread;
+  const arm = h("button", { type: "button", class: "act", "aria-pressed": "false", onclick: () => setArmed(!armed) },
+    label("סימון שורה", "Draw line box"));
+  const setArmed = (on: boolean) => {
+    armed = on;
+    frame.classList.toggle("draw-armed", on);
+    arm.setAttribute("aria-pressed", String(on));
+  };
+  const zoom = h("button", { type: "button", class: "act", "aria-pressed": "false", onclick: () =>
+    zoom.setAttribute("aria-pressed", String(frame.classList.toggle("region-zoom"))) }, label("הגדלת תמונה", "Zoom image"));
   let drawn: Box | null = null;
   let temp: HTMLElement | null = null;
   let start: [number, number] | null = null;
@@ -85,7 +97,7 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
   };
   const boxOf = (a: [number, number], b: [number, number]): Box => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
   frame.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !form.hidden) return;
+    if (e.button !== 0 || !form.hidden || !armed || (proofread && !frame.querySelector("img")?.naturalWidth)) return;
     e.preventDefault();
     frame.setPointerCapture(e.pointerId);
     start = at(e);
@@ -97,6 +109,11 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
     if (!start || !temp) return;
     temp.setAttribute("style", pct(boxOf(start, at(e))));
   });
+  frame.addEventListener("pointercancel", () => {
+    start = null;
+    temp?.remove();
+    temp = null;
+  });
   frame.addEventListener("pointerup", (e) => {
     if (!start) return;
     const b = boxOf(start, at(e));
@@ -107,6 +124,7 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
       return;
     }
     drawn = b;
+    if (proofread) setArmed(false);
     openForm();
   });
 
@@ -122,11 +140,16 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
     };
     const save = run(async () => {
       if (!drawn) return;
-      const text = area.value.replace(/[\r\n]+/g, " ").trim();
-      if (!text) return void msg.replaceChildren(t("type_line"));
-      const id = await hooks.add(drawn, "typed", text);
-      if (id === null) return void msg.replaceChildren(t("type_letters"));
-      close();
+      const text = (proofread ? area.value : area.value.replace(/[\r\n]+/g, " ")).trim();
+      if (!text || (proofread && /[\r\n\u2028\u2029]/u.test(text))) return void msg.replaceChildren(t("type_line"));
+      try {
+        const id = await hooks.add(drawn, "typed", text);
+        if (id === null) return void msg.replaceChildren(t("type_letters"));
+        close();
+      } catch (err) {
+        if (!proofread) throw err;
+        msg.replaceChildren(label("השורה לא נשמרה. בדקו את המסגרת והטקסט ונסו שוב.", "Line not saved. Check the box and text and try again."));
+      }
     });
     const unreadable = run(async () => {
       if (!drawn) return;
@@ -151,7 +174,7 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
         "div",
         { class: "savebar" },
         h("button", { type: "button", class: "act primary", onclick: save }, t("pa_save"), " ", h("kbd", {}, "Enter")),
-        h("button", { type: "button", class: "act", onclick: unreadable }, t("unread")),
+        proofread ? null : h("button", { type: "button", class: "act", onclick: unreadable }, t("unread")),
         h("button", { type: "button", class: "act quiet", onclick: close }, t("cancel"), " ", h("kbd", {}, "Esc")),
       ),
     );
@@ -174,14 +197,14 @@ export function pageScreen(v: PageCheckView, hooks: PageScreenHooks): { el: HTML
   );
   const el = h(
     "div",
-    { class: "review lineverify pageadd" },
-    h("p", { class: "ask" }, t("pa_title")),
-    h("p", { class: "muted small" }, h("bdi", {}, v.title), ` · ${t("pa_hint")}`),
+    { class: proofread ? "review lineverify pageadd proofread-region" : "review lineverify pageadd" },
+    h("p", { class: "ask" }, proofread ? label("הוספת שורה חסרה", "Add a missing line") : t("pa_title")),
+    proofread ? h("div", { class: "savebar" }, arm, zoom) : h("p", { class: "muted small" }, h("bdi", {}, v.title), ` · ${t("pa_hint")}`),
     h("div", { class: "pagewrap" }, frame),
     form,
     h("h2", { class: "small" }, t("pa_added", { n: v.added.length })),
     list,
-    h("div", { class: "savebar" }, h("button", { type: "button", class: "act primary", onclick: run(() => hooks.done()) }, t("pa_done"))),
+    h("div", { class: "savebar" }, h("button", { type: "button", class: "act primary", onclick: run(() => hooks.done()) }, proofread ? label("חזרה לשורה", "Back to line") : t("pa_done"))),
   );
   return { el, dispose: () => {} };
 }

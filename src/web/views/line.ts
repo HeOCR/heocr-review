@@ -209,9 +209,20 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   let page: PageColumn | null = null;
   let keysOpen = false;
 
-  const view = (): LineVerifyView | null => (current && current.view.kind === "line_verify" ? current.view : null);
+  const view = (): (LineVerifyView & { referenceProofread?: boolean }) | null => {
+    const v = current?.view;
+    if (v?.kind === "line_verify") return v;
+    if (v?.kind !== "reference_proofread") return null;
+    const blank = { id: "", label: { he: "", en: "" } };
+    return {
+      kind: "line_verify", mode: "verify", pass: 1, lineKind: "verify", draft: false, draftVerification: true,
+      referenceProofread: true, candidate: v.candidate, crop: v.crop, page: null, runs: [], lineIndex: 0,
+      provenance: blank, source: blank, bookTitle: "", pageLabel: "", attribution: "", textLicense: "", script: null, precheck: null,
+    };
+  };
   let waiting = batch.triage ?? { triage: 0, fix: 0 };
   let pageDispose: (() => void) | null = null;
+  let regionOpen = false;
   /** This line is answered by triage: the triage queue, pass 1, with a candidate (the server's own test, triage.ts). */
   const triaging = (): boolean => {
     const v = view();
@@ -289,7 +300,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (!current || busy) return;
     const v = view();
     if (["exact", "pointed_print", "typed", "correct", "niqqud_mismatch"].includes(value) && !ready) return status(t("img_loading"));
-    if (v?.referenceProofread && value === "edited" && !ready) return status(t("img_loading"));
+    if (v?.referenceProofread && !current.options.some(o => o.value === value)) return;
+    if (v?.referenceProofread && !ready) return status(t("img_loading"));
     if ((value === "exact" || value === "correct") && v && exactNeedsPage(Boolean(v.precheck), pageOpened, desktop())) return status(t("flag_phone"));
     busy = true;
     const id = current.id;
@@ -518,7 +530,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const preview = h("div", { class: "preview desktop-only" });
     const update = () => {
       // A line is one line: a pasted line break becomes a space.
-      if (/[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
+      if (!v.referenceProofread && /[\r\n]/.test(area.value)) area.value = area.value.replace(/[\r\n]+/g, " ");
       if (!sourceOnly) writeDraft(p.id, area.value);
       if (typing || asMisaligned) return; // nothing to compare with: the candidate is never sent on a blind pass
       changes.replaceChildren(...changesLine(v.candidate, area.value));
@@ -526,6 +538,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     };
     const save = () => {
       const text = area.value;
+      if (v.referenceProofread && /[\r\n\u2028\u2029]/u.test(text)) {
+        return status(lang() === "he" ? "הקלידו שורה אחת." : "Enter one line.");
+      }
       if (asMisaligned) {
         if (!text.trim()) return status(t("type_line"));
         if (hasNiqqud(text)) return status(t("type_letters"));
@@ -660,6 +675,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   function render(): void {
+    regionOpen = false;
     const p = current!;
     const v = view();
     if (!v) throw new Error(`lineVerifyView cannot show ${p.view.kind}`);
@@ -672,7 +688,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     body.toggle("typing", typing);
     const option = (value: string) => p.options.find((o) => o.value === value);
     const mine = p.mine ? option(p.mine.value) : undefined;
-    hooks.where?.(t("where", { line: v.lineIndex, page: v.pageLabel || "–" }));
+    hooks.where?.(v.referenceProofread ? null : t("where", { line: v.lineIndex, page: v.pageLabel || "–" }));
     const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle || p.itemTitle;
     const credit = v.draftVerification && !v.attribution && !v.textLicense
       ? [] : [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)];
@@ -688,11 +704,16 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
         ]
       : typing
       ? []
+      : v.referenceProofread
+      ? p.options.map(o => h("button", { type: "button", class: o.value === "exact" ? "act primary" : "act",
+          "data-value": o.value, onclick: () => {
+            if (o.value === "edited") startEdit();
+            else if (o.value === "unclear") startProofreadNote();
+            else void act(o.value);
+          } }, h("span", {}, o.label[lang()])))
       : [
           h("button", { type: "button", class: "act primary", "data-value": "exact", onclick: () => void act("exact") }, h("span", {}, t("exact")), h("kbd", {}, "Enter")),
           h("button", { type: "button", class: "act", "data-value": "edited", onclick: () => startEdit() }, h("span", {}, t("fix")), h("kbd", {}, "E")),
-          ...(v.referenceProofread ? [h("button", { type: "button", class: "act", "data-value": "unclear", onclick: startProofreadNote },
-            h("span", {}, option("unclear")?.label[lang()] ?? ""), h("kbd", {}, "S"))] : []),
         ];
     // Triage has the three answers only (no skip, no rarer answers); Back stays.
     const rare = triage || v.referenceProofread
@@ -743,6 +764,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           h("button", { type: "button", class: "act quiet zoom", "aria-label": t("zoom_in"), onclick: () => setZoom(1) }, icon("zoom-in", { sm: true }), h("kbd", {}, "+")),
           revisiting ? h("button", { type: "button", class: "act quiet", onclick: () => void loadNext().catch(failScreen) }, t("to_queue")) : null,
           h("span", { class: "savestate", role: "status" }),
+          v.referenceProofread ? h("button", { type: "button", class: "act quiet", onclick: () => void openProofreadRegion(p.id).catch(() => status(t("e_srv_h"))) },
+            lang() === "he" ? "הוספת שורה חסרה" : "Add missing line") : null,
           triage || v.referenceProofread ? null : h("button", { type: "button", class: "act quiet more-btn", "aria-haspopup": "true", "aria-expanded": "false", onclick: () => setMore(!moreOpen()) }, icon("more", { sm: true }), t("more")),
         ),
       ),
@@ -758,6 +781,28 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     renderStrip();
     if (typing && (!mine || v.pass !== 2)) startEdit();
     else (q<HTMLButtonElement>(".dock .act.primary") ?? q<HTMLButtonElement>(".dock .act"))?.focus({ preventScroll: true });
+  }
+
+  async function openProofreadRegion(id: number): Promise<void> {
+    const base = `/api/proposals/${id}/proofread-region`;
+    const region = await get<PageCheckView>(base);
+    if (current?.id !== id) return;
+    regionOpen = true;
+    closeEditor();
+    const screen = pageScreen(region, {
+      answer: async () => {},
+      add: async (box, _value, text) => {
+        const saved = await post<{ id: string }>(base + "/lines", { box, text });
+        await openProofreadRegion(id);
+        return saved.id;
+      },
+      remove: async lineId => {
+        await del(base + "/lines/" + encodeURIComponent(lineId));
+        await openProofreadRegion(id);
+      },
+      done: async () => render(),
+    });
+    mount(root, screen.el);
   }
 
   /** The line among its neighbours, with the line in the brand box; on a phone the band opens the page. */
@@ -877,14 +922,15 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
   }
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || regionOpen) return;
     const target = e.target as HTMLElement | null;
     if (e.key === "Escape" && escape()) return e.preventDefault();
     if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable)) return;
     // A focused button or link handles its own Enter and Space.
     if (target && (target.tagName === "BUTTON" || target.tagName === "A") && (e.key === "Enter" || e.key === " ")) return;
-    if (!current || current.view.kind !== "line_verify") return;
-    const typing = current.view.mode === "type" && !triaging();
+    const v = view();
+    if (!current || !v) return;
+    const typing = v.mode === "type" && !triaging();
     // Holding a key down must not decide line after line.
     if (e.repeat) return e.preventDefault();
     if (e.key === "?") {
@@ -930,8 +976,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       });
     }
     // Typing has no verdict keys: Enter or E goes back to the typing box; the other answers have their own keys.
-    else if (current.view.draftVerification && !typing) {
+    else if (v.draftVerification && !typing) {
       for (const key of ["KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) delete actions[key];
+      if (v.referenceProofread) delete actions.KeyP;
     } else if (typing) {
       for (const k of ["Enter", "NumpadEnter", "Digit1", "KeyE", "Digit2", "KeyN", "KeyU", "Digit3", "KeyM", "Digit4"]) actions[k] = () => startEdit();
       for (const o of current.options) {

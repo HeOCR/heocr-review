@@ -10,9 +10,10 @@ it("preserves sealed scan text and orders the hard positions before agreed ones"
     { leaf: "leaf-b", region: 1, ordinal: 1, hard: false },
   ];
   const manifest = {
-    schema: "reference_proofread.v1",
+    schema: "reference_proofread.v2",
+    regions: positions.filter((row, i) => i !== 1).map(row => ({ leaf: row.leaf, region: row.region, sha256: "b".repeat(64), width: 80, height: row.leaf === "leaf-a" && row.region === 1 ? 60 : 30 })),
     reference_sha256: proofreadDigest(before.join("\n") + "\n"),
-    rows: positions.map((row, i) => ({ ...row, position: i + 1, before: before[i], crop_sha256: "a".repeat(64), width: 80, height: 30 })),
+    rows: positions.map((row, i) => ({ ...row, position: i + 1, before: before[i], crop_sha256: "a".repeat(64), width: 80, height: 30, box: [0, i === 1 ? 30 : 0, 80, i === 1 ? 60 : 30] })),
   };
   const raw = Buffer.from(JSON.stringify(manifest));
   const id = "private-ref-proofread-fixture";

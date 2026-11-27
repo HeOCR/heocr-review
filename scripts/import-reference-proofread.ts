@@ -22,8 +22,9 @@ async function main() {
   const cropRoot = realpathSync(str(flags, "crop-root"));
   outsideCheckout(manifest);
   outsideCheckout(cropRoot);
-  const { bundle, queue, leaves, hard } = proofreadBundle(readFileSync(manifest), str(flags, "manifest-sha256"),
+  const stage = proofreadBundle(readFileSync(manifest), str(flags, "manifest-sha256"),
     str(flags, "batch"), str(flags, "title"));
+  const { bundle, queue, leaves, hard } = stage;
   const mediaOut = typeof flags["media-out"] === "string" ? resolve(flags["media-out"]) : null;
   if (dest === "production" && mediaOut) throw new Error("prepare private media offline before production");
   if (mediaOut) {
@@ -31,7 +32,7 @@ async function main() {
     mkdirSync(mediaOut, { mode: 0o700 });
     mkdirSync(join(mediaOut, bundle.batch.id), { mode: 0o700 });
   }
-  const prepared = await proofreadMedia({ bundle, queue, leaves, hard }, cropRoot,
+  const prepared = await proofreadMedia(stage, cropRoot,
     mediaOut ? (key, bytes) => writeFileSync(join(mediaOut, key), bytes, { flag: "wx", mode: 0o600 }) : undefined);
   if (mediaOut) writeFileSync(join(mediaOut, accessFixture.key), accessFixture.text, { flag: "wx", mode: 0o600 });
   const counts = {
@@ -73,16 +74,22 @@ async function main() {
   }
 
   const [batches, items, lines] = d1Query<{
-    id: string; ok: number; rank: number; content: string; parent: string; crop: string;
+    id: string; ok: number; rank: number; content: string; parent: string; crop: string; payload: string;
   }>(dest, `SELECT id, status='closed' AND restricted_reference=1 AND source_json=${lit(JSON.stringify(bundle.batch.source))} AS ok
     FROM batches WHERE id=${b};
-    SELECT i.external_id AS id, r.first_allowed=1 AND r.blind_allowed=0 AS ok
+    SELECT i.external_id AS id, r.first_allowed=1 AND r.blind_allowed=0 AS ok,i.payload_json AS payload
     FROM restricted_reference_pages r JOIN items i ON i.id=r.item_id AND i.batch_id=r.batch_id WHERE r.batch_id=${b};
     SELECT p.external_id AS id,p.rank,p.content_sha256 AS content,i.external_id AS parent,json_extract(p.media_json,'$.crop.ref.key') AS crop,
       p.active=1 AND p.gate_kind IS NULL AND json_extract(p.payload_json,'$.split')='test' AND json_extract(p.payload_json,'$.trainable')=0
         AND json_extract(p.media_json,'$.crop.ref.source')='r2' AND json_type(p.media_json,'$.page') IS NULL AS ok
     FROM proposals p JOIN items i ON i.id=p.item_id AND i.batch_id=p.batch_id WHERE p.batch_id=${b} ORDER BY p.rank;`);
-  if (!batches?.[0]?.ok || items?.length !== bundle.items.length || items.some(row => !row.ok) || lines?.length !== queue.length ||
+  if (!batches?.[0]?.ok || items?.length !== bundle.items.length || items.some(row => !row.ok) ||
+    !bundle.items.every(item => {
+      const stored = items!.find(row => row.id === item.externalId);
+      if (!stored) return false;
+      const { proofread_region, split, trainable } = JSON.parse(stored.payload);
+      return split === "test" && trainable === false && JSON.stringify(proofread_region) === JSON.stringify(item.payload.proofread_region);
+    }) || lines?.length !== queue.length ||
     !bundle.proposals.every((p, i) => {
       const row = lines[i];
       const ref = prepared.media.get(p.externalId)?.crop?.ref;

@@ -14,7 +14,7 @@ import { assignReserves, type ReserveRow } from "./reserves";
 import { servedMembers, type CurrentDecisionRow, type SubsetMemberRow } from "./subsets";
 import { NOT_GOLD, dueGold, isVolunteerV11 } from "./phist_gold";
 import { VOLUNTEER_DONE, isVolunteerV1, volunteerOpen } from "./verify_resolution";
-import { isReferenceProofread } from "../tasks/reference_proofread";
+import { MASKED_LINE, isReferenceProofread } from "../tasks/reference_proofread";
 import { CONTENT_MATCH_SQL, PENDING_SQL, TRIAGEABLE_SQL, candidateOf, isTriageBatch, triageable } from "../tasks/line_verify/triage";
 
 /** How long a served proposal stays leased to its reviewer before others are offered it first. */
@@ -296,6 +296,22 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     .prepare("SELECT value, text, decided_on FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL AND (?3 IS NULL OR proposal_sha256 = ?3)")
     .bind(p.id, reviewerId, isTriageBatch(batch) || verification ? p.contentSha256 : null)
     .first<{ value: string; text: string | null; decided_on: string }>();
+  if (proofread) {
+    const crop = referenceImage(p.media.crop, `${RESTRICTED_MEDIA_PATH}/proposals/${p.id}/crop`);
+    const candidate = String(p.payload.candidate_text);
+    return {
+      id: p.id, batchId: p.batchId, externalId: "", itemTitle: "",
+      view: { kind: "reference_proofread", candidate,
+        crop: crop ? { url: imageUrl(crop.ref), width: crop.width, height: crop.height, box: crop.box } : null },
+      options: [
+        ...(candidate === MASKED_LINE ? [] : [{ value: "exact", label: { he: "אישור", en: "Confirm" }, withText: false }]),
+        { value: "edited", label: { he: "תיקון", en: "Correct" }, withText: true },
+        { value: "unclear", label: { he: "לא ברור", en: "Unclear" }, withText: true },
+        { value: "not_in_image", label: { he: "לא בתמונה", en: "Not in image" }, withText: false },
+      ],
+      mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
+    };
+  }
   const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
   const rawView = type.toView(batch.restrictedReference ? {
     ...p, media: {
@@ -318,12 +334,9 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     externalId: p.externalId,
     itemTitle: p.itemTitle,
     view: verification && rawView.kind === "line_verify"
-      ? { ...rawView, draftVerification: true, ...(proofread ? { referenceProofread: true } : {}) }
+      ? { ...rawView, draftVerification: true }
       : masked ? await asTriaged(db, batch, p, rawView) : rawView,
-    options: verification ? [
-      ...options.filter(option => option.value === "exact" || option.value === "edited"),
-      ...(proofread ? [{ value: "unclear", label: { he: "לא ברור / דילוג", en: "Unclear / skip" }, withText: true }] : []),
-    ] : options,
+    options: verification ? options.filter(option => option.value === "exact" || option.value === "edited") : options,
     mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
     ...(batch.taskType === PAGE_REVIEW ? { draft } : {}),
   };
