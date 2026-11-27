@@ -472,7 +472,7 @@ it("keeps proofread items unanchored and records masks and scoped additions for 
   const ids: number[] = [];
   for (const [i, text] of ["דפוס ישן", "[?]", "נֹסַח מֻמְצָא", "שורה עודפת"].entries()) {
     const payload = { candidate_text: text, candidate_provenance: "lane secret", order: i + 1, leaf: "leaf", region: 1,
-      crop_sha256: "a".repeat(64), line_index: i + 1, attention_spans: [[0, 1]], model_output: "hidden output",
+      crop_sha256: "a".repeat(64), region_sha256: "a".repeat(64), slice_box: [0, i * 450, 1200, (i + 1) * 450], line_index: i + 1, attention_spans: [[0, 1]], model_output: "hidden output",
       score: 0.73, page: { source: "held_out_reference" } };
     const row = await env.DB.prepare(`INSERT INTO proposals(batch_id,item_id,external_id,category,confidence,rank,payload_json,media_json,content_sha256,active)
       VALUES (?1,?2,?3,'lane secret','test confidence',?4,?5,?6,?7,1) RETURNING id`).bind(batch, item, `leaf-${i + 1}`,
@@ -543,7 +543,7 @@ it("keeps proofread items unanchored and records masks and scoped additions for 
   expect(await output.json()).toMatchObject({
     counts: { confirm: 1, correct: 1, unclear: 1, not_in_image: 1, masked: 2, add: 1, pending: 0 },
     files: { "reference_proofread.json": { split: "test", trainable: false, lines: [
-      { position: 1, action: "confirm", before: "דפוס ישן", after: "דפוס ישן", after_sha256: sha256Hex("דפוס ישן"), note: null },
+      { position: 1, action: "confirm", before: "דפוס ישן", after: "דפוס ישן", after_sha256: sha256Hex("דפוס ישן"), region_sha256: "a".repeat(64), slice_box: [0, 0, 1200, 450], note: null },
       { position: 2, action: "unclear", before: "[?]", after: "[?]", masked: true, note: "דיו דהוי" },
       { position: 3, action: "correct", before: "נֹסַח מֻמְצָא", after: "נֹסַח [?]", note: null },
       { position: 4, action: "not_in_image", masked: true, after_sha256: sha256Hex("[?]") },
