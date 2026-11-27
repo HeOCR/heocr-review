@@ -309,3 +309,8 @@ main#app.task .state { padding-inline: 16px; }
   body.contributor-printing .contributor-prompt { color: black; background: white; }
   body.contributor-printing .contributor-print-help { display: block; }
 }
+
+/* Crop-only proofreading has three visible actions and no full-page pane. */
+.rv .dock .proofread-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.rv .dock .proofread-actions .act { font-size: 1rem; padding-inline: 6px; }
+.task .proofread-deck { grid-template-columns: minmax(0, 1fr); }

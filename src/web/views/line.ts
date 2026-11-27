@@ -82,7 +82,7 @@ export function stripPieces(img: ImageView, box: Box, width: number, desktop: bo
  * (Hebrew reads right to left), with a little overlap so no letter is lost at a cut. Every piece shows the same image
  * file, so the browser fetches it once.
  */
-export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, onLoad: () => void, maxPieces = MAX_SEGMENTS, label = "השורה בסריקה / the line on the scan"): HTMLElement {
+export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: number, onLoad: () => void, maxPieces = MAX_SEGMENTS, label = "השורה בסריקה / the line on the scan", requireImage = false): HTMLElement {
   const W = img.width;
   const H = img.height;
   const lh = Math.max(1, (box[3] - box[1]) * H);
@@ -116,8 +116,8 @@ export function lineStrip(img: ImageView, box: Box, inkHeight: number, width: nu
     image.style.cssText = `width:${W * scale}px;left:${-left * scale}px;top:${-y0 * scale}px`;
     if (k === 0) {
       image.addEventListener("load", done);
-      image.addEventListener("error", done);
-      if (image.complete) queueMicrotask(done);
+      if (!requireImage) image.addEventListener("error", done);
+      if (image.complete && (!requireImage || image.naturalWidth > 0)) queueMicrotask(done);
     }
     const seg = h("div", { class: "seg" }, image);
     seg.style.cssText = `width:${segW * scale}px;height:${(y1 - y0) * scale}px`;
@@ -289,6 +289,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     if (!current || busy) return;
     const v = view();
     if (["exact", "pointed_print", "typed", "correct", "niqqud_mismatch"].includes(value) && !ready) return status(t("img_loading"));
+    if (v?.referenceProofread && value === "edited" && !ready) return status(t("img_loading"));
     if ((value === "exact" || value === "correct") && v && exactNeedsPage(Boolean(v.precheck), pageOpened, desktop())) return status(t("flag_phone"));
     busy = true;
     const id = current.id;
@@ -303,7 +304,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     } catch (err) {
       if (err instanceof ApiFailure && err.status === 401) return hooks.signedOut();
       const kind = failureKind(err, navigator.onLine);
-      const kept = keepable(kind) && keepPending({ proposalId: id, batchId: batch.id, value, ...(text === undefined ? {} : { text }), keptAt: new Date().toISOString() });
+      const kept = !v?.referenceProofread && keepable(kind) && keepPending({ proposalId: id, batchId: batch.id, value, ...(text === undefined ? {} : { text }), keptAt: new Date().toISOString() });
       failure = { kind, kept, value, ...(text === undefined ? {} : { text }), ...(err instanceof ApiFailure && err.message ? { reason: err.message } : {}) };
       saveState = "failed";
       render();
@@ -347,6 +348,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
 
   async function doSkip(): Promise<void> {
     if (!current || busy) return;
+    if (view()?.referenceProofread) return startProofreadNote();
     busy = true;
     setSaving("skip");
     try {
@@ -409,14 +411,14 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const holder = q(".linebox .strip");
     if (!v || !holder) return;
     if (!v.crop || !v.crop.box) {
-      ready = true;
+      ready = !v.referenceProofread;
       holder.replaceChildren(h("p", { class: "muted" }, t("no_image")));
       return;
     }
     const width = Math.max(200, holder.clientWidth || root.clientWidth || 360);
     // A phone shows two pieces (or one, "Fit width"); a desktop one strip when it fits, else two.
     const pieces = stripPieces(v.crop, v.crop.box, width, desktop(), fitWidth);
-    const strip = lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true), pieces, t("line_on_scan"));
+    const strip = lineStrip(v.crop, v.crop.box, LINE_HEIGHTS[zoom]!, width, () => (ready = true), pieces, t("line_on_scan"), v.referenceProofread);
     holder.replaceChildren(strip);
     fitCandidate(strip.children.length);
   }
@@ -508,7 +510,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const mineText = p.mine && ["edited", "pointed_print", "typed", "misaligned"].includes(p.mine.value) && p.mine.text !== null ? p.mine.text : null;
     // "" on a blind pass; a typed line's draft (v.draft) starts the box until the reviewer has saved their own text.
     const start = asMisaligned ? (p.mine?.value === "misaligned" ? (mineText ?? "") : "") : (mineText ?? v.candidate);
-    const sourceOnly = typing && v.draftVerification;
+    const sourceOnly = v.referenceProofread || (typing && v.draftVerification);
     area.value = sourceOnly ? start : (readDraft(p.id) ?? start);
     const pointed = h("input", { type: "checkbox", id: "lv-pointed" }) as HTMLInputElement;
     pointed.checked = p.mine?.value === "pointed_print";
@@ -584,6 +586,38 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     area.setSelectionRange(area.value.length, area.value.length);
   }
 
+  function startProofreadNote(): void {
+    const p = current;
+    const box = q(".editbox");
+    if (!box || !p || busy || !view()?.referenceProofread) return;
+    const noteLabel = lang() === "he" ? "הערה על השורה (חובה)" : "Line note (required)";
+    const note = h("textarea", { rows: 2, maxlength: 1000, dir: "auto", "aria-label": noteLabel }) as HTMLTextAreaElement;
+    note.value = p.mine?.value === "unclear" ? (p.mine.text ?? "") : "";
+    note.addEventListener("input", () => {
+      if (/[\r\n]/.test(note.value)) note.value = note.value.replace(/[\r\n]+/g, " ");
+    });
+    const save = () => note.value.trim() ? void act("unclear", note.value) : note.focus();
+    const cancel = () => {
+      closeEditor();
+      q<HTMLButtonElement>('[data-value="unclear"]')?.focus();
+    };
+    note.addEventListener("keydown", e => {
+      if (e.isComposing) return;
+      if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) save();
+      }
+    });
+    box.replaceChildren(h("p", {}, noteLabel), note, h("div", { class: "savebar" },
+      h("button", { type: "button", class: "act primary", onclick: save }, t("save")),
+      h("button", { type: "button", class: "act", onclick: cancel }, t("cancel"))));
+    box.hidden = false;
+    body.add("editing");
+    editing = note;
+    note.focus();
+  }
+
   /** Misaligned: with a typed text where the line needs one (v1.2 verify lines), else a verdict alone. */
   function misaligned(): void {
     setMore(false);
@@ -642,7 +676,8 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const where = v.pageLabel ? t("src", { book: v.bookTitle, page: v.pageLabel }) : v.bookTitle || p.itemTitle;
     const credit = v.draftVerification && !v.attribution && !v.textLicense
       ? [] : [h("bdi", {}, v.attribution), " · ", `${t("licence")}: `, h("bdi", {}, v.textLicense)];
-    page = pageColumn(v.page, where, credit, () => ((pageOpened = true), updateFlag()), () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
+    page = v.referenceProofread ? null : pageColumn(v.page, where, credit, () => ((pageOpened = true), updateFlag()),
+      () => q<HTMLButtonElement>(".ctxbox .open")?.focus());
 
     // Triage: three answers, big, and nothing to edit (the maintainer, 2026-11-20).
     const answers = triage
@@ -656,9 +691,11 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       : [
           h("button", { type: "button", class: "act primary", "data-value": "exact", onclick: () => void act("exact") }, h("span", {}, t("exact")), h("kbd", {}, "Enter")),
           h("button", { type: "button", class: "act", "data-value": "edited", onclick: () => startEdit() }, h("span", {}, t("fix")), h("kbd", {}, "E")),
+          ...(v.referenceProofread ? [h("button", { type: "button", class: "act", "data-value": "unclear", onclick: startProofreadNote },
+            h("span", {}, option("unclear")?.label[lang()] ?? ""), h("kbd", {}, "S"))] : []),
         ];
     // Triage has the three answers only (no skip, no rarer answers); Back stays.
-    const rare = triage
+    const rare = triage || v.referenceProofread
       ? []
       : typing
       ? [
@@ -675,7 +712,9 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     const work = h(
       "div",
       { class: `review lineverify${triage ? " triage" : ""}` },
-      h("p", { class: "ask" }, typing ? [t("type_ask"), " ", v.pass === 2 ? t("type_ask_final") : t("type_ask_more")] : t("ask")),
+      h("p", { class: "ask" }, typing ? [t("type_ask"), " ", v.pass === 2 ? t("type_ask_final") : t("type_ask_more")] : v.referenceProofread ? (lang() === "he"
+        ? "זהו סט מבחן. השוו את התעתיק לסריקה, שמרו על הכתיב והפיסוק שבדפוס וסמנו קטע שאינו קריא ב־[?]."
+        : "This is a test set. Keep the scan’s spelling and punctuation. Mark unreadable text with [?].") : t("ask")),
       h(
         "div",
         { class: "linebox" },
@@ -690,11 +729,12 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
       typing ? null : h("div", { class: "txt cand", dir: "rtl", lang: "he" }, ...(v.runs.length ? candidateNodes(v.runs, v.precheck || v.draftVerification ? "precheck" : "ocr") : [v.candidate])),
       triage ? null : h("div", { class: "slot" }, ...slotNodes(p, v, mine)),
       h("div", { class: "editbox", hidden: true }),
-      contextBandFor(v),
+      v.referenceProofread ? null : contextBandFor(v),
       h(
         "footer",
         { class: "dock" },
-        h("nav", { class: "actions" }, ...answers, h("div", { class: "moregroup", role: "group", "aria-label": t("more") }, ...rare)),
+        h("nav", { class: v.referenceProofread ? "actions proofread-actions" : "actions" }, ...answers,
+          v.referenceProofread ? null : h("div", { class: "moregroup", role: "group", "aria-label": t("more") }, ...rare)),
         h(
           "div",
           { class: "subnav" },
@@ -703,7 +743,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
           h("button", { type: "button", class: "act quiet zoom", "aria-label": t("zoom_in"), onclick: () => setZoom(1) }, icon("zoom-in", { sm: true }), h("kbd", {}, "+")),
           revisiting ? h("button", { type: "button", class: "act quiet", onclick: () => void loadNext().catch(failScreen) }, t("to_queue")) : null,
           h("span", { class: "savestate", role: "status" }),
-          triage ? null : h("button", { type: "button", class: "act quiet more-btn", "aria-haspopup": "true", "aria-expanded": "false", onclick: () => setMore(!moreOpen()) }, icon("more", { sm: true }), t("more")),
+          triage || v.referenceProofread ? null : h("button", { type: "button", class: "act quiet more-btn", "aria-haspopup": "true", "aria-expanded": "false", onclick: () => setMore(!moreOpen()) }, icon("more", { sm: true }), t("more")),
         ),
       ),
       h("div", { class: "scrim", onclick: () => setMore(false) }),
@@ -711,7 +751,7 @@ export function lineVerifyView(batch: BatchSummary, hooks: ReviewHooks, startAt?
     mount(
       root,
       progressLine(progress),
-      h("div", { class: "deck" }, work, page.el),
+      h("div", { class: v.referenceProofread ? "deck proofread-deck" : "deck" }, work, page?.el ?? null),
     );
     renderSaveState();
     updateFlag();

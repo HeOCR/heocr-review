@@ -1,4 +1,5 @@
 import { enforceReferenceRoute, referenceConsensusActive, referenceFilter, referenceLane } from "./reference-consensus";
+import { isReferenceProofread, normalizeProofread, proofreadExport, PROOFREAD_FILE } from "../tasks/reference_proofread";
 import { normalizeLineDecision } from "../tasks/line_verify";
 import { isContributorWriter } from "./contributor";
 import { canonicalContributorOrigin } from "./contributor/config";
@@ -382,7 +383,8 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     throw new HttpError(400, "invalid_decision", "a draft verification decision must be exact or edited");
   }
   // Triage answers (migrations/0012_triage.sql): only in a triage batch, only on a line with a candidate, never text.
-  const normalized = lane === "audit" ? normalizeLineDecision("", "edited", body.text) : batch.taskType === "line_verify" && isTriageValue(body.value)
+  const normalized = isReferenceProofread(batch) ? normalizeProofread(body.value, body.text, String(proposal.payload.candidate_text))
+    : lane === "audit" ? normalizeLineDecision("", "edited", body.text) : batch.taskType === "line_verify" && isTriageValue(body.value)
     ? isTriageBatch(batch) && triageable(proposal) && (body.text === undefined || body.text === null)
       ? { ok: true as const, value: body.value, text: null }
       : { ok: false as const, error: "a triage answer is for a line with a candidate in a triage batch, without text" }
@@ -429,13 +431,14 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     const writes = await db.batch([
       db
         .prepare(`UPDATE decisions SET superseded_at = ?3 WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL
-          AND EXISTS (SELECT 1 FROM proposals WHERE id=?1 AND content_sha256=?4)
+          AND EXISTS (SELECT 1 FROM proposals p JOIN batches b ON b.id=p.batch_id
+            WHERE p.id=?1 AND p.content_sha256=?4 AND b.status='open')
           AND NOT EXISTS(SELECT 1 FROM current_reference_consensus_lines WHERE proposal_id=?1 AND lane IN ('audit','accepted'))`)
         .bind(proposal.id, reviewer.id, now, proposal.contentSha256),
       db
         .prepare(
           `INSERT INTO decisions (id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at, decided_on, method)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals WHERE id=?2 AND content_sha256=?6
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals p JOIN batches b ON b.id=p.batch_id WHERE p.id=?2 AND p.content_sha256=?6 AND b.status='open'
              AND (?11=0 OR (EXISTS(SELECT 1 FROM current_reference_consensus_lines WHERE proposal_id=?2 AND lane='audit')
                AND NOT EXISTS(SELECT 1 FROM decisions WHERE proposal_id=?2 AND reviewer_id=?3 AND superseded_at IS NULL)))
              AND (?11=1 OR NOT EXISTS(SELECT 1 FROM current_reference_consensus_lines
@@ -518,6 +521,7 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (isReferenceProofread(batch)) throw new HttpError(400, "invalid_decision", "record Unclear with a note");
   await ctx.env.DB.prepare("INSERT OR IGNORE INTO skips (reviewer_id, proposal_id, created_at) VALUES (?1, ?2, ?3)")
     .bind(reviewer.id, proposal.id, iso(ctx.now))
     .run();
@@ -661,6 +665,11 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
     }
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
+    if (isReferenceProofread(batch)) {
+      const { counts } = proofreadExport(batch, rows.proposals, rows.decisions, reviewer.id);
+      out.push({ id: batch.id, taskType: batch.taskType, title: batch.title, status: batch.status, minReviewers: 1, counts, reviewers: [] });
+      continue;
+    }
     const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
     const drops = batch.taskType === "line_verify" ? await pointedDropsExtra(ctx.env.DB, batch.id) : {};
     const result = buildExport({ batch, ...rows, ...extras, ...drops, exportedAt: iso(ctx.now) });
@@ -701,6 +710,10 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   }
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
+  if (isReferenceProofread(batch)) {
+    const { counts, file } = proofreadExport(batch, rows.proposals, rows.decisions, reviewer.id);
+    return json({ counts, problems: [], files: { [PROOFREAD_FILE]: file } });
+  }
   const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
   const drops = batch.taskType === "line_verify" ? await pointedDropsExtra(ctx.env.DB, batch.id) : {};
   const result = buildExport({ batch, ...rows, ...extras, ...drops, exportedAt: iso(ctx.now) });

@@ -452,3 +452,69 @@ it("uses sealed line order and blank audit typing while keeping real answers and
   expect(decisions.results).toContainEqual({ proposal_id: prior!.id, value: "exact", text: null, superseded_at: null });
   expect(decisions.results).toContainEqual({ proposal_id: audit!.id, value: "edited", text: "טיוטה", superseded_at: null });
 });
+
+it("keeps held-out proofread crops, prefills and structured answers on the one restricted reviewer account", async () => {
+  const { owner, admin, volunteer, req } = await fixtureUsers();
+  const batch = "private-ref-proofread-fixture";
+  const source = JSON.stringify({
+    restricted_review: "held_out_line_proofread", split: "test", trainable: false,
+    reference_sha256: "f".repeat(64), manifest_sha256: "b".repeat(64),
+  });
+  await env.DB.prepare(`INSERT INTO batches(id,task_type,title,source_json,min_reviewers,status,imported_at,restricted_reference)
+    VALUES (?1,'line_verify','Proofread fixture',?2,1,'open','2026-11-27',1)`).bind(batch, source).run();
+  const item = await env.DB.prepare(`INSERT INTO items(batch_id,external_id,title,payload_json)
+    VALUES (?1,'leaf-r1','Invented region','{}') RETURNING id`).bind(batch).first<number>("id");
+  await env.DB.prepare("INSERT INTO restricted_reference_pages(batch_id,item_id,first_allowed,blind_allowed) VALUES (?1,?2,1,0)").bind(batch, item).run();
+  const ids: number[] = [];
+  for (const [i, text] of ["דפוס ישן", "[?]", "נֹסַח מֻמְצָא"].entries()) {
+    const payload = { candidate_text: text, candidate_provenance: "sealed_reference", order: i + 1, leaf: "leaf", region: 1,
+      crop_sha256: "a".repeat(64), line_index: i + 1, attention_spans: [], page: { source: "held_out_reference" } };
+    const row = await env.DB.prepare(`INSERT INTO proposals(batch_id,item_id,external_id,category,confidence,rank,payload_json,media_json,content_sha256,active)
+      VALUES (?1,?2,?3,'review','sealed',?4,?5,?6,?7,1) RETURNING id`).bind(batch, item, `leaf-${i + 1}`,
+        [2, 0, 1][i], JSON.stringify(payload), JSON.stringify({ crop: image }), sha256Hex(text)).first<number>("id");
+    ids.push(row!);
+  }
+  await env.RESTRICTED_REFERENCE_MEDIA!.put(`${batch}/${key}`, "exact fixture raster");
+  const queue = `/api/batches/${batch}/next`;
+  const exported = `/api/admin/batches/${batch}/export`;
+  const line = (i: number) => `/api/proposals/${ids[i]}`;
+  const decide = (i: number, value: string, text?: string) => req("POST", line(i) + "/decision", owner.cookie, host, { value, text });
+  for (const [cookie, origin, status] of [
+    ["", host, 401], [admin.cookie, host, 404], [volunteer.cookie, host, 404], [owner.cookie, alternate, 404],
+  ] as const) {
+    expect((await req("GET", queue, cookie, origin)).status).toBe(status);
+    expect((await req("GET", line(1), cookie, origin)).status).toBe(status);
+    expect((await req("GET", proposalMedia(ids[1]!, "crop"), cookie, origin)).status).toBe(status);
+    expect((await req("POST", line(1) + "/decision", cookie, origin, { value: "exact" })).status).toBe(status);
+    const list = await req("GET", "/api/batches", cookie, origin);
+    expect(await list.text()).not.toContain(batch);
+  }
+  expect((await req("GET", exported, admin.cookie)).status).toBe(404);
+  const png = await req("GET", proposalMedia(ids[1]!, "crop"));
+  expect(png.headers.get("cache-control")).toContain("no-store");
+  expect(new TextDecoder().decode(await png.arrayBuffer())).toBe("exact fixture raster");
+  expect((await req("GET", proposalMedia(ids[1]!, "page"))).status).toBe(404);
+  expect(await (await req("GET", queue)).json()).toMatchObject({
+    proposal: { id: ids[1], view: { referenceProofread: true, candidate: "[?]" },
+      options: [{ value: "exact" }, { value: "edited" }, { value: "unclear" }] },
+    progress: { total: 3, remainingForMe: 3 },
+  });
+  expect((await req("POST", line(1) + "/skip")).status).toBe(400);
+  expect((await decide(1, "unclear", "  ")).status).toBe(400);
+  expect((await decide(1, "unclear", "דיו דהוי")).status).toBe(200);
+  expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: { id: ids[2] } });
+  expect((await decide(2, "edited", "נֹסַח [?]")).status).toBe(200);
+  expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: { id: ids[0] } });
+  expect((await decide(0, "exact")).status).toBe(200);
+  expect(await (await req("GET", queue)).json()).toMatchObject({ proposal: null, progress: { covered: 3, remainingForMe: 0 } });
+  const output = await req("GET", exported);
+  expect(output.headers.get("cache-control")).toContain("no-store");
+  expect(await output.json()).toMatchObject({
+    counts: { exact: 1, edited: 1, unclear: 1, pending: 0 },
+    files: { "reference_proofread.json": { split: "test", trainable: false, lines: [
+      { position: 1, action: "exact", before: "דפוס ישן", after: "דפוס ישן", after_sha256: sha256Hex("דפוס ישן"), note: null },
+      { position: 2, action: "unclear", before: "[?]", after: null, note: "דיו דהוי" },
+      { position: 3, action: "edited", before: "נֹסַח מֻמְצָא", after: "נֹסַח [?]", note: null },
+    ] } },
+  });
+});

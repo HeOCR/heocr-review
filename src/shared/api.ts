@@ -58,6 +58,7 @@ export interface LineVerifyView {
   draft: boolean;
   /** Restricted review of a pinned draft using the normal correction diff. */
   draftVerification?: boolean;
+  referenceProofread?: boolean;
   candidate: string;
   /** The candidate split into runs; attention runs are where the OCR engines disagree with it. */
   runs: AttentionRun[];
