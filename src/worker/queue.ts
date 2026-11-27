@@ -14,6 +14,7 @@ import { assignReserves, type ReserveRow } from "./reserves";
 import { servedMembers, type CurrentDecisionRow, type SubsetMemberRow } from "./subsets";
 import { NOT_GOLD, dueGold, isVolunteerV11 } from "./phist_gold";
 import { VOLUNTEER_DONE, isVolunteerV1, volunteerOpen } from "./verify_resolution";
+import { MASKED_LINE, isReferenceProofread } from "../tasks/reference_proofread";
 import { CONTENT_MATCH_SQL, PENDING_SQL, TRIAGEABLE_SQL, candidateOf, isTriageBatch, triageable } from "../tasks/line_verify/triage";
 
 /** How long a served proposal stays leased to its reviewer before others are offered it first. */
@@ -238,7 +239,7 @@ export async function progressFor(
   // A volunteer_v1 line is covered once it is resolved or unresolved.
   // Gold lines (volunteer_v1_1) are never counted in progress: they are not the batch's lines.
   const g = volunteer ? ` AND ${NOT_GOLD}` : "";
-  const verification = isRestrictedDraftVerification(batch);
+  const verification = isReferenceProofread(batch) || isRestrictedDraftVerification(batch);
   const settled = settledDecision(isTriageBatch(batch) || verification);
   const covered = volunteer
     ? VOLUNTEER_DONE
@@ -260,7 +261,7 @@ export async function progressFor(
     )
     .bind(batch.id, reviewerId, batch.minReviewers, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .first<{ total: number; covered: number; mine: number; skipped: number; remaining: number }>();
-  const pages = verification && !filter?.omitPages ? await verificationPageProgress(db, batch.id, reviewerId) : { total: 0, done: 0 };
+  const pages = isRestrictedDraftVerification(batch) && !filter?.omitPages ? await verificationPageProgress(db, batch.id, reviewerId) : { total: 0, done: 0 };
   return {
     total: (filter ? filter.strata : (row?.total ?? 0)) + pages.total,
     covered: (row?.covered ?? 0) + pages.done,
@@ -287,13 +288,30 @@ async function asTriaged(db: D1Database, batch: BatchRecord, p: ProposalRecord, 
 }
 
 export async function proposalView(db: D1Database, batch: BatchRecord, p: ProposalRecord, reviewerId: string, triage = false, lane: ReferenceLane | null = null): Promise<ProposalView> {
+  const proofread = isReferenceProofread(batch);
   const type = taskType(batch.taskType);
   if (!type) throw new Error(`unknown task type ${batch.taskType}`);
-  const verification = isRestrictedDraftVerification(batch);
+  const verification = isReferenceProofread(batch) || isRestrictedDraftVerification(batch);
   const mine = await db
     .prepare("SELECT value, text, decided_on FROM decisions WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL AND (?3 IS NULL OR proposal_sha256 = ?3)")
     .bind(p.id, reviewerId, isTriageBatch(batch) || verification ? p.contentSha256 : null)
     .first<{ value: string; text: string | null; decided_on: string }>();
+  if (proofread) {
+    const crop = referenceImage(p.media.crop, `${RESTRICTED_MEDIA_PATH}/proposals/${p.id}/crop`);
+    const candidate = String(p.payload.candidate_text);
+    return {
+      id: p.id, batchId: p.batchId, externalId: "", itemTitle: "",
+      view: { kind: "reference_proofread", candidate,
+        crop: crop ? { url: imageUrl(crop.ref), width: crop.width, height: crop.height, box: crop.box } : null },
+      options: [
+        ...(candidate === MASKED_LINE ? [] : [{ value: "exact", label: { he: "אישור", en: "Confirm" }, withText: false }]),
+        { value: "edited", label: { he: "תיקון", en: "Correct" }, withText: true },
+        { value: "unclear", label: { he: "לא ברור", en: "Unclear" }, withText: true },
+        { value: "not_in_image", label: { he: "לא בתמונה", en: "Not in image" }, withText: false },
+      ],
+      mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
+    };
+  }
   const draft = !mine && batch.taskType === PAGE_REVIEW ? await draftFor(db, p, reviewerId) : null;
   const rawView = type.toView(batch.restrictedReference ? {
     ...p, media: {
@@ -318,7 +336,7 @@ export async function proposalView(db: D1Database, batch: BatchRecord, p: Propos
     view: verification && rawView.kind === "line_verify"
       ? { ...rawView, draftVerification: true }
       : masked ? await asTriaged(db, batch, p, rawView) : rawView,
-    options: verification ? options.filter((option) => option.value === "exact" || option.value === "edited") : options,
+    options: verification ? options.filter(option => option.value === "exact" || option.value === "edited") : options,
     mine: mine ? { value: mine.value, text: mine.text, decidedAt: mine.decided_on } : null,
     ...(batch.taskType === PAGE_REVIEW ? { draft } : {}),
   };
@@ -353,7 +371,7 @@ export async function nextFor(
   const [reserves, cutoff] = await gateParams(db, batch.id, nowMs);
   const { results } = await db
     .prepare(openSql(batch.taskType === PAGE_REVIEW, isVolunteerV1(batch) ? { admin } : null,
-      settledDecision(isTriageBatch(batch) || isRestrictedDraftVerification(batch)), filter?.preserveOrder ?? false))
+      settledDecision(isTriageBatch(batch) || isRestrictedDraftVerification(batch) || isReferenceProofread(batch)), filter?.preserveOrder ?? false))
     .bind(batch.id, reviewerId, batch.minReviewers, nowMs - LEASE_MS, 1 + PREFETCH, reserves, cutoff, filter ? JSON.stringify(filter.ids) : null)
     .all<ProposalRow>();
   const open = results.map(toProposal);
@@ -364,7 +382,8 @@ export async function nextFor(
   const progress = await progressFor(db, batch, reviewerId, nowMs, filter, admin);
   const first = rows[0];
   if (!first) return { proposal: null, progress, prefetch: [] };
-  await db
+  // A single authorized reviewer cannot contend for an assignment.
+  if (!isReferenceProofread(batch)) await db
     .prepare(
       `INSERT INTO assignments (proposal_id, reviewer_id, assigned_at) VALUES (?1, ?2, ?3)
        ON CONFLICT (proposal_id, reviewer_id) DO UPDATE SET assigned_at = excluded.assigned_at`,

@@ -1,10 +1,11 @@
 import { enforceReferenceRoute, referenceConsensusActive, referenceFilter, referenceLane } from "./reference-consensus";
+import { MASKED_LINE, isReferenceProofread, normalizeProofread, proofreadExport, PROOFREAD_FILE } from "../tasks/reference_proofread";
 import { normalizeLineDecision } from "../tasks/line_verify";
 import { isContributorWriter } from "./contributor";
 import { canonicalContributorOrigin } from "./contributor/config";
 import { ALLOWED_REFERENCE_PROPOSAL, isRestrictedDraftVerification } from "../tasks/restricted_reference";
 import { canSweep, pendingSweepPages, usesUnplantedReview } from "./page-sweep";
-import { canReadReference, draftSweepPin, privateReferenceImage, referenceReviewerAllowed } from "./restricted_reference";
+import { RESTRICTED_MEDIA_PATH, canReadReference, draftSweepPin, privateReferenceImage, referenceReviewerAllowed } from "./restricted_reference";
 import { PAGE_PASTE_TRAIN } from "../shared/page_paste_train";
 import { isTrainingPaste, TRAIN_EXPORT_FILE } from "../tasks/page_paste_train/export";
 import { nextTrainingPage, saveTrainingPage, trainingAdmin, trainingAdminProgress, trainingAsset, trainingPage, trainingProgress } from "./page_paste_train";
@@ -46,6 +47,9 @@ import {
   setExclusion,
   volunteerReport,
 } from "./consensus";
+import { addProofreadLine, proofreadAdditions, readProofreadRegion, removeProofreadLine } from "./proofread";
+import type { Box } from "../shared/media";
+import { lineTextProblems } from "../tasks/line_verify/schema";
 import { LIMITS, clientKey, enforce, enforceProfileHour, enforceWriteDay } from "./ratelimit";
 
 const PROVIDERS: Record<string, IdentityProvider> = { google: googleProvider, dev: devProvider };
@@ -357,6 +361,58 @@ export async function restrictedProposalImage(ctx: Ctx, id: number, kind: "crop"
   return privateReferenceImage(ctx.env, batch.id, proposal.media[kind]);
 }
 
+async function proofreadContext(ctx: Ctx, id: number, write: boolean) {
+  if (write) assertSameOrigin(ctx.request);
+  const reviewer = await requireReviewer(ctx);
+  if (write && reviewer.terms_version !== TERMS_VERSION) throw new HttpError(403, "terms_required");
+  enforce(write ? LIMITS.writeMinute : LIMITS.readMinute, reviewer.id, ctx.now);
+  const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (!isReferenceProofread(batch)) throw new HttpError(404, "not_found");
+  const item = await readProofreadRegion(ctx.env.DB, batch.id, proposal.itemExternalId);
+  if (!item) throw new HttpError(404, "not_found");
+  return { reviewer, batch, item };
+}
+
+export async function proofreadRegion(ctx: Ctx, id: number, imageOnly: boolean): Promise<Response> {
+  const { reviewer, batch, item } = await proofreadContext(ctx, id, false);
+  const { image } = item.region;
+  if (imageOnly) return privateReferenceImage(ctx.env, batch.id, image);
+  const added = await proofreadAdditions(ctx.env.DB, batch.id, reviewer.id, item.id);
+  return json({
+    batchId: batch.id, itemId: item.id, pageId: "", title: "", mode: "add", proofread: true,
+    image: { url: `${RESTRICTED_MEDIA_PATH}/proposals/${id}/region`, width: image.width, height: image.height, box: null },
+    boxes: [],
+    added: added.map(line => ({ id: line.id, box: line.box, text: line.text, value: "typed" })),
+  });
+}
+
+export async function writeProofreadLine(ctx: Ctx, id: number, addedId?: string): Promise<Response> {
+  const { reviewer, batch, item } = await proofreadContext(ctx, id, true);
+  if (addedId) {
+    if (!await removeProofreadLine(ctx.env.DB, batch.id, item.id, reviewer.id, addedId, iso(ctx.now))) {
+      throw new HttpError(404, "not_found");
+    }
+    return json({ ok: true });
+  }
+  const body = await readJson(ctx.request);
+  const problem = boxProblem(body.box);
+  if (problem) throw new HttpError(400, "invalid_box", problem);
+  const text = typeof body.text === "string" && !/[\r\n\u2028\u2029]/u.test(body.text) ? body.text.trim().normalize("NFC") : "";
+  if (Object.keys(body).some(key => key !== "box" && key !== "text") || lineTextProblems(text).length || text === MASKED_LINE) {
+    throw new HttpError(400, "invalid_line", "Enter the visible text of one missing line.");
+  }
+  const { width, height } = item.region.image;
+  const xy = body.box as Box;
+  const box: Box = [
+    Math.round(xy[0] * width) / width, Math.round(xy[1] * height) / height,
+    Math.round(xy[2] * width) / width, Math.round(xy[3] * height) / height,
+  ];
+  if (boxProblem(box)) throw new HttpError(400, "invalid_box", "Draw a box around the line.");
+  const lineId = await addProofreadLine(ctx.env.DB, batch.id, item.id, reviewer.id, box, text, iso(ctx.now));
+  if (!lineId) throw new HttpError(409, "not_open", "The queue is closed or this box already has an added line.");
+  return json({ id: lineId });
+}
+
 export async function restrictedCompletenessImage(ctx: Ctx, batchId: string, itemId: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.readMinute, reviewer.id, ctx.now);
@@ -381,8 +437,12 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
   if (lane === "audit" ? body.value !== "typed" : isRestrictedDraftVerification(batch) && body.value !== "exact" && body.value !== "edited") {
     throw new HttpError(400, "invalid_decision", "a draft verification decision must be exact or edited");
   }
+  if (isReferenceProofread(batch) && Object.keys(body).some(key => key !== "value" && key !== "text")) {
+    throw new HttpError(400, "invalid_decision", "A proofread decision applies to one line.");
+  }
   // Triage answers (migrations/0012_triage.sql): only in a triage batch, only on a line with a candidate, never text.
-  const normalized = lane === "audit" ? normalizeLineDecision("", "edited", body.text) : batch.taskType === "line_verify" && isTriageValue(body.value)
+  const normalized = isReferenceProofread(batch) ? normalizeProofread(body.value, body.text, String(proposal.payload.candidate_text))
+    : lane === "audit" ? normalizeLineDecision("", "edited", body.text) : batch.taskType === "line_verify" && isTriageValue(body.value)
     ? isTriageBatch(batch) && triageable(proposal) && (body.text === undefined || body.text === null)
       ? { ok: true as const, value: body.value, text: null }
       : { ok: false as const, error: "a triage answer is for a line with a candidate in a triage batch, without text" }
@@ -429,13 +489,14 @@ export async function decide(ctx: Ctx, id: number): Promise<Response> {
     const writes = await db.batch([
       db
         .prepare(`UPDATE decisions SET superseded_at = ?3 WHERE proposal_id = ?1 AND reviewer_id = ?2 AND superseded_at IS NULL
-          AND EXISTS (SELECT 1 FROM proposals WHERE id=?1 AND content_sha256=?4)
+          AND EXISTS (SELECT 1 FROM proposals p JOIN batches b ON b.id=p.batch_id
+            WHERE p.id=?1 AND p.content_sha256=?4 AND b.status='open')
           AND NOT EXISTS(SELECT 1 FROM current_reference_consensus_lines WHERE proposal_id=?1 AND lane IN ('audit','accepted'))`)
         .bind(proposal.id, reviewer.id, now, proposal.contentSha256),
       db
         .prepare(
           `INSERT INTO decisions (id, proposal_id, reviewer_id, value, text, proposal_sha256, terms_version, created_at, decided_on, method)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals WHERE id=?2 AND content_sha256=?6
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10 FROM proposals p JOIN batches b ON b.id=p.batch_id WHERE p.id=?2 AND p.content_sha256=?6 AND b.status='open'
              AND (?11=0 OR (EXISTS(SELECT 1 FROM current_reference_consensus_lines WHERE proposal_id=?2 AND lane='audit')
                AND NOT EXISTS(SELECT 1 FROM decisions WHERE proposal_id=?2 AND reviewer_id=?3 AND superseded_at IS NULL)))
              AND (?11=1 OR NOT EXISTS(SELECT 1 FROM current_reference_consensus_lines
@@ -518,6 +579,7 @@ export async function skip(ctx: Ctx, id: number): Promise<Response> {
   const reviewer = await requireReviewer(ctx);
   enforce(LIMITS.writeMinute, reviewer.id, ctx.now);
   const { proposal, batch } = await activeProposal(ctx, id, reviewer.id);
+  if (isReferenceProofread(batch)) throw new HttpError(400, "invalid_decision", "record Unclear with a note");
   await ctx.env.DB.prepare("INSERT OR IGNORE INTO skips (reviewer_id, proposal_id, created_at) VALUES (?1, ?2, ?3)")
     .bind(reviewer.id, proposal.id, iso(ctx.now))
     .run();
@@ -661,6 +723,12 @@ export async function adminProgress(ctx: Ctx): Promise<Response> {
     }
     if (isConsensus(batch) && ctx.env.CONSENSUS_ENABLED !== "1") continue;
     const rows = await exportRows(ctx.env.DB, batch.id);
+    if (isReferenceProofread(batch)) {
+      const { counts } = proofreadExport(batch, rows.proposals, rows.decisions, reviewer.id,
+        await proofreadAdditions(ctx.env.DB, batch.id, reviewer.id));
+      out.push({ id: batch.id, taskType: batch.taskType, title: batch.title, status: batch.status, minReviewers: 1, counts, reviewers: [] });
+      continue;
+    }
     const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
     const drops = batch.taskType === "line_verify" ? await pointedDropsExtra(ctx.env.DB, batch.id) : {};
     const result = buildExport({ batch, ...rows, ...extras, ...drops, exportedAt: iso(ctx.now) });
@@ -701,6 +769,11 @@ export async function adminExport(ctx: Ctx, batchId: string): Promise<Response> 
   }
   if (isConsensus(batch)) assertConsensusEnabled(ctx.env);
   const rows = await exportRows(ctx.env.DB, batch.id);
+  if (isReferenceProofread(batch)) {
+    const { counts, file } = proofreadExport(batch, rows.proposals, rows.decisions, reviewer.id,
+        await proofreadAdditions(ctx.env.DB, batch.id, reviewer.id));
+    return json({ counts, problems: [], files: { [PROOFREAD_FILE]: file } });
+  }
   const extras = isConsensus(batch) ? await exportExtras(ctx.env.DB, batch.id) : isVolunteerV1(batch) ? { ...(await volunteerExtras(ctx.env.DB, batch.id)), ...(isVolunteerV11(batch) ? await phistGoldExtras(ctx.env.DB, batch.id) : {}) } : {};
   const drops = batch.taskType === "line_verify" ? await pointedDropsExtra(ctx.env.DB, batch.id) : {};
   const result = buildExport({ batch, ...rows, ...extras, ...drops, exportedAt: iso(ctx.now) });

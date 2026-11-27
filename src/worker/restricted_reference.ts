@@ -1,6 +1,7 @@
 import { CAPTURE_BATCH_PREFIX, CAPTURE_DIGEST } from "../shared/registered-captures";
 import { PRIVATE_IMAGE_KEY } from "../shared/media";
 import { isRestrictedDraftVerification, restrictedStaticDirectory } from "../tasks/restricted_reference";
+import { isReferenceProofread, PROOFREAD_PREFIX } from "../tasks/reference_proofread";
 import type { BatchRecord, StoredImage } from "../tasks/types";
 import type { Env } from "./env";
 import { HttpError } from "./http";
@@ -36,6 +37,7 @@ function issuerRegistryPin(config: string | undefined, batchId: string): string 
 }
 
 export function canReadReference(env: Env, url: URL, reviewerId: string, batch: BatchRecord): boolean {
+  if (batch.id.startsWith(PROOFREAD_PREFIX) && !isReferenceProofread(batch)) return false;
   if (sweepPinField(batch.id)) {
     const pin = draftSweepPin(batch);
     if (!pin) return false;

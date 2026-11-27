@@ -81,6 +81,13 @@ export interface LineVerifyView {
   page: ImageView | null;
 }
 
+/** A held-out review response carries only the sealed reference and protected crop. */
+export interface ProofreadLineView {
+  kind: "reference_proofread";
+  candidate: string;
+  crop: ImageView | null;
+}
+
 /** One pre-fill line of a page under review, with its "look here" flags (never a proposed correction). */
 export interface PageReviewLine {
   /** Index into the pre-fill's lines (blank lines counted, not shown). */
@@ -141,7 +148,7 @@ export interface LineConsensusView {
   page: ImageView | null;
 }
 
-export type ProposalViewBody = TextCorrectionView | LineVerifyView | PageReviewView | LineConsensusView;
+export type ProposalViewBody = TextCorrectionView | LineVerifyView | ProofreadLineView | PageReviewView | LineConsensusView;
 
 export interface DecisionOption {
   value: string;
@@ -238,6 +245,7 @@ export interface PageCheckView {
   pageId: string;
   title: string;
   mode: "check" | "add";
+  proofread?: boolean;
   image: ImageView | null;
   boxes: PageLineBox[];
   added: { id: string; box: Box; text: string | null; value: "typed" | "unreadable" }[];
