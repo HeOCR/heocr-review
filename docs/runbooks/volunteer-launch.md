@@ -105,6 +105,12 @@ deploy, so there is no separate privacy-text deploy.
    - signed in, the volunteer line review serves a line;
    - the existing decision counts are unchanged from step 0;
    - `npm run check-public` passes on a `--public` export of each volunteer batch.
+   - **P-hist gold smoke test on the deployed Worker** (heocr-eval, 2026-11-19). heocr-lead or the maintainer signs in,
+     answers about 5 lines of one P-hist batch, and stops. Then read, counts only:
+     `SELECT COUNT(*) FROM phist_gold_grades WHERE reviewer_id = '<rv>'` must be at least 1 (front-loaded schedule: 1 in
+     5), with no `gold_id` twice; their `verify_votes` rows exist for the normal lines. The logic is covered by the
+     Worker tests and was checked on a copy of preview's D1 on 2026-11-19 (gold at n = 2, 5, 12, 18 of 20, as
+     scheduled). This step covers the deployment.
 6. **Report to heocr-lead.**
 
 ## Rollback
