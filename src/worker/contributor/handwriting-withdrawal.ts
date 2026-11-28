@@ -24,14 +24,20 @@ export async function recordHandwritingPublication(ctx: Ctx) {
   return json({recorded:true},200,noStore);
 }
 
+const rosters = ["contributor_handwriting_roster", "contributor_family_staff_roster"] as const;
 type Withdrawal = { writer_id: string; split: ContributorSplit; live: number };
 
 export async function purgeHandwritingEnrolment(ctx: Ctx, receipt: string) {
   const db = ctx.env.DB;
   const receiptHash = await hash(receipt);
-  const row = await db.prepare(`SELECT r.writer_id,r.split, e.writer_id IS NOT NULL AS live
-    FROM contributor_handwriting_roster r LEFT JOIN contributor_enrolments e USING(writer_id)
-    WHERE e.receipt=?1 OR r.withdrawal_receipt_sha256=?2`).bind(receipt,receiptHash).first<Withdrawal>();
+  let table: typeof rosters[number] = rosters[0];
+  let row: Withdrawal | null = null;
+  for (table of rosters) {
+    row = await db.prepare(`SELECT r.writer_id,r.split, e.writer_id IS NOT NULL AS live
+      FROM ${table} r LEFT JOIN contributor_enrolments e USING(writer_id)
+      WHERE e.receipt=?1 OR r.withdrawal_receipt_sha256=?2`).bind(receipt,receiptHash).first<Withdrawal>();
+    if (row) break;
+  }
   if (!row) return false;
 
   // This write closes consent, upload, and release eligibility before touching R2.
@@ -60,7 +66,7 @@ export async function purgeHandwritingEnrolment(ctx: Ctx, receipt: string) {
 
   if (row.live) {
     await db.batch([
-      db.prepare(`UPDATE contributor_handwriting_roster SET withdrawal_receipt_sha256=?
+      db.prepare(`UPDATE ${table} SET withdrawal_receipt_sha256=?
         WHERE writer_id=? AND withdrawal_receipt_sha256 IS NULL`).bind(receiptHash,row.writer_id),
       db.prepare(`UPDATE reviewers SET handwriting_opted_out=1 WHERE id=(
         SELECT writer_account FROM contributor_enrolments WHERE writer_id=? AND receipt=?)`).bind(row.writer_id,receipt),

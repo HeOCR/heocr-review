@@ -192,3 +192,28 @@ Kids' collection is **OFF** until the pinned plan carries a `kids` block. Withou
   snapshot keeps the v1 row shape for adults and adds `slot` and `second` on kids' rows.
 - **Before ON:** a dry signup on a local Worker only (`npm run dev` with a local plan), never production. Then
   eval's read-only checks: the deployed slot-list sha, the pack per split, and the checkpoint.
+
+## Family-staff cohort (allocation amendment 6, restricted-eval #2035)
+
+An adult cohort on its **own pinned plan**. It is separate from the v3 plan above, so switching it on never changes
+that plan's pin or its enrolled writers. It's OFF unless `CONTRIBUTOR_FAMILY_STAFF_CONFIG_SHA256` is set.
+
+- **Plan:** `heocr.handwriting_family_staff.v1`, stored at `contributor-v1/handwriting-family-staff/<sha256>.json` in
+  the **private DEV bucket** (`CONTRIBUTOR_DEV_MEDIA`), because it holds the DEV pack's text. Fields:
+  `approval` (including `allocationAmendmentSha256` = amendment 6) and `policy` (the v3 adult consent, unchanged);
+  `invite` `{sha256,maxUses,expiresAt}` (one shared code, hashed like the v3 cohort code, `maxUses` ≤ 50);
+  `calibration` (the shared line, exactly once in each pack); and `packs` `{train,dev}`. Each pack has 8–10 handwriting
+  tasks `HW-FS-T01…` or `HW-FS-D01…`, with 8–12 sentences each, a sheet PDF pin, a prompt pin and rights. No other
+  line may repeat within or across the packs.
+- **Sheet PDFs** go in the split's own bucket at `contributor-v1/sheets/<sha256>.pdf`: TRAIN in the TRAIN bucket, DEV
+  in the DEV bucket.
+- **Signup:** adults only. The next slot n is fixed with its split before any sheet is shown: 1 DEV, 2 TRAIN, 3 DEV,
+  then TRAIN when sha256(`20261128:hw3-family-staff:<n>`) < 0.7 (first 16 hex digits ÷ 16¹⁶), else DEV. Withdrawal keeps
+  the roster row, so a slot is never reused. Each writer gets their split's pack in a seeded order (prefix
+  `20261128:hw3-family-staff-order:`).
+- **No payment:** no payment code is ever shown, and `ops-health` payment views don't read this roster.
+- **Release:** these rows aren't in `contributor_handwriting_release_candidates`, so nothing can be published. Any
+  later release needs its own change.
+- **Eval roster:** read it with a production D1 query over `contributor_family_staff_roster` (slot, writer code, split).
+  The roster checkpoint endpoint covers only the v3 plan.
+- **Revoke** the code with the same operator revoke route.

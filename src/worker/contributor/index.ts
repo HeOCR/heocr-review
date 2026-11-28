@@ -1,7 +1,9 @@
 import { collisionFree, paymentCodeFromMac, paymentMessage } from "../../shared/payment-code";
 import { purgeHandwritingEnrolment, recordHandwritingPublication } from "./handwriting-withdrawal";
+import { familyStaffOffer, familyStaffPlan, familyStaffSignup, familyStaffWriters } from "./family-staff";
 import {
   acceptGuardian, guardianCode, handwritingOffer, handwritingPlan, handwritingSignup, revokeHandwritingInvite, selfWriters, handwritingOptedOut,
+  readInvitation,
 } from "./handwriting";
 import { contributorPhotoType } from "./photo";
 import {
@@ -28,7 +30,7 @@ type Enrolment = {
   receipt: string; withdrawn_at: string | null; purged_at: string | null;
   writer_id: string; writer_account: string; guardian_account: string | null; age_band: AgeBand; split: ContributorSplit;
 };
-type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null; selfPin: string | null };
+type Access = { ctx: Ctx; manifest: Manifest; actor: string; writer: Writer; role: "guardian" | "writer"; row: Enrolment | null; selfPin: string | null; familyStaff: boolean };
 const enrollmentFields = `writer_id, writer_account, guardian_account, age_band, split, receipt,
   guardian_version, guardian_sha256, assent_version, assent_sha256, withdrawn_at, purged_at`;
 const current = (a: Access) => a.manifest.policy;
@@ -80,16 +82,21 @@ async function access(ctx: Ctx, requested: string | null): Promise<Access> {
   const actor = await session(ctx);
   enforce(ctx.request.method === "GET" ? LIMITS.readMinute : LIMITS.writeMinute, actor, ctx.now);
   const signup = await handwritingPlan(ctx);
-  const manifest = signup?.manifest ?? await contributorManifest(ctx.env);
-  const writers = signup ? await selfWriters(ctx, signup, actor) : manifest.writers;
+  const family = await familyStaffPlan(ctx);
+  const familyOwn = family ? await familyStaffWriters(ctx, family, actor) : [];
+  const writers = [...familyOwn, ...(signup ? await selfWriters(ctx, signup, actor)
+    : family ? [] : (await contributorManifest(ctx.env)).writers)];
   const writer = writers.find(w => w.writerAccount === actor && (!requested || w.id === requested)) ??
     writers.find(w => w.guardianAccount === actor && w.id === requested);
   if (!writer) throw gone();
+  const familyStaff = familyOwn.includes(writer);
+  const manifest = (familyStaff ? family!.manifest : signup?.manifest) ?? await contributorManifest(ctx.env);
+  const selfPin = familyStaff ? family!.pin : signup?.pin ?? null;
   const row = await ctx.env.DB.prepare(`SELECT ${enrollmentFields} FROM contributor_enrolments WHERE writer_id=?`)
     .bind(writer.id).first<Enrolment>();
-  if (row ? !owner(row, writer) : signup) throw gone();
+  if (row ? !owner(row, writer) : selfPin) throw gone();
   return {ctx, manifest, actor, writer, role: writer.writerAccount === actor ? "writer" : "guardian", row,
-    selfPin: signup?.pin ?? null};
+    selfPin, familyStaff};
 }
 function state(a: Access): ContributorProfile["state"] {
   if (a.row?.withdrawn_at) return "withdrawn";
@@ -149,7 +156,7 @@ async function nextView(a: Access, task: Task, done: Set<string>): Promise<Contr
  */
 async function paymentCode(a: Access): Promise<string | null> {
   const secret = a.ctx.env.CONTRIBUTOR_PAYMENT_CODE_SECRET;
-  if (!secret || !a.selfPin || a.role !== "writer") return null;
+  if (!secret || !a.selfPin || a.familyStaff || a.role !== "writer") return null;
   const { results } = await a.ctx.env.DB.prepare("SELECT writer_id FROM contributor_handwriting_roster WHERE config_sha256=?")
     .bind(a.selfPin).all<{ writer_id: string }>();
   const codes = new Map<string, string>();
@@ -290,7 +297,10 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
     SELECT writer_id,?,?,?,?,guardian_sha256,assent_sha256,?,?,?,?,? FROM contributor_enrolments
     WHERE writer_id=? AND writer_account=? AND guardian_account IS ? AND split=? AND withdrawn_at IS NULL
       AND guardian_version IS ? AND guardian_sha256 IS ? AND assent_version=? AND assent_sha256=?
-      ${a.selfPin ? `AND EXISTS (
+      ${a.familyStaff ? `AND EXISTS (
+        SELECT 1 FROM contributor_family_staff_roster r
+        WHERE r.writer_id=contributor_enrolments.writer_id AND r.config_sha256=?
+          AND r.split=contributor_enrolments.split AND r.split=?)` : a.selfPin ? `AND EXISTS (
         SELECT 1 FROM contributor_handwriting_roster r
         WHERE r.writer_id=contributor_enrolments.writer_id AND r.config_sha256=?
           AND r.split=contributor_enrolments.split AND r.age_band=contributor_enrolments.age_band
@@ -298,7 +308,8 @@ async function save(a: Access, task: Task, digest: string, key: string|null, rev
     ON CONFLICT DO NOTHING
   `).bind(task.id,task.kind,policy.version,policy.licence,ref,digest,key,review,now(a.ctx),
     w.id,w.writerAccount,w.guardianAccount,w.split,adultWriter(a)?null:consentKey(a),a.row!.guardian_sha256,consentKey(a),a.row!.assent_sha256,
-    ...(a.selfPin ? [a.selfPin,task.page.slice("HW-V3-".length,"HW-V3-".length+1),task.page.slice("HW-V3-".length,"HW-V3-".length+1)] : [])).run();
+    ...(a.familyStaff ? [a.selfPin, task.page.startsWith("HW-FS-T") ? "train" : "dev"] :
+      a.selfPin ? [a.selfPin,task.page.slice("HW-V3-".length,"HW-V3-".length+1),task.page.slice("HW-V3-".length,"HW-V3-".length+1)] : [])).run();
   if (result.meta.changes===1) return true;
   const saved=await a.ctx.env.DB.prepare("SELECT content_sha256,reference_sha256 FROM contributor_submissions WHERE writer_id=? AND task_id=?")
     .bind(w.id,task.id).first<{content_sha256:string; reference_sha256:string|null}>();
@@ -388,20 +399,34 @@ export async function contributor(ctx: Ctx) {
     const actor=await session(ctx);
     enforce(method==="GET" ? LIMITS.readMinute : LIMITS.writeMinute,actor,ctx.now);
     const signup=await handwritingPlan(ctx);
+    const family=await familyStaffPlan(ctx);
     if (suffix==="/enrolments" && method==="GET") {
-      const writers=signup ? await selfWriters(ctx,signup,actor) : (await contributorManifest(ctx.env)).writers;
+      const writers=[...(family ? await familyStaffWriters(ctx,family,actor) : []),
+        ...(signup ? await selfWriters(ctx,signup,actor) : family ? [] : (await contributorManifest(ctx.env)).writers)];
+      const open=signup ?? family;
       return json({enrolments:writers.filter(w=>w.guardianAccount===actor||w.writerAccount===actor)
         .map(w=>({writer:w.id,ageBand:w.ageBand,role:w.writerAccount===actor?"writer":"guardian"})),
-        ...(signup && !await handwritingOptedOut(ctx,actor) ? {signup:{guardian:signup.manifest.policy.guardian,
-          version:signup.manifest.policy.version}} : {})},200,privateHeaders);
+        ...(open && !await handwritingOptedOut(ctx,actor) ? {signup:{guardian:open.manifest.policy.guardian,
+          version:open.manifest.policy.version}} : {})},200,privateHeaders);
     }
-    if (!signup) throw gone();
-    if (revoke && method==="POST") return revokeHandwritingInvite(ctx,signup,actor);
-    if (options && method==="POST") return json(await handwritingOffer(ctx,signup,actor),200,privateHeaders);
-    if (suffix==="/enrolments" && method==="POST") {
-      const writer=await handwritingSignup(ctx,signup,actor);
+    if (!signup && !family) throw gone();
+    if (revoke && method==="POST") return revokeHandwritingInvite(ctx,signup,actor,family);
+    if ((options || suffix==="/enrolments") && method==="POST") {
+      const body=await readInvitation(ctx,actor);
+      // The family-staff code picks its own plan; every other code goes to the v3 plan as before.
+      const familyCode=family && typeof body.inviteCode==="string" &&
+        await hash(body.inviteCode)===family.plan.invite.sha256 ? family : null;
+      if (options) {
+        if (familyCode) return json(await familyStaffOffer(ctx,familyCode,actor,body.ageBand),200,privateHeaders);
+        if (!signup) throw gone();
+        return json(await handwritingOffer(ctx,signup,actor,body),200,privateHeaders);
+      }
+      if (!familyCode && !signup) throw gone();
+      const writer=familyCode ? await familyStaffSignup(ctx,familyCode,actor,body)
+        : await handwritingSignup(ctx,signup!,actor,body);
       return json(await profile(await access(ctx,writer)),200,privateHeaders);
     }
+    if (!signup) throw gone();
     if (suffix==="/guardian" && method==="POST") {
       const writer=await acceptGuardian(ctx,signup,actor);
       return json(await profile(await access(ctx,writer)),200,privateHeaders);

@@ -18,6 +18,8 @@ export interface Env {
   CONTRIBUTOR_APP_ENABLED?: string;
   CONTRIBUTOR_CONFIG_SHA256?: string;
   CONTRIBUTOR_HANDWRITING_CONFIG_SHA256?: string;
+  /** Pinned family-staff plan (allocation amendment 6), stored in CONTRIBUTOR_DEV_MEDIA. Absent = that cohort is off. */
+  CONTRIBUTOR_FAMILY_STAFF_CONFIG_SHA256?: string;
   CONTRIBUTOR_ROSTER_REVIEWER_ID?: string;
   /** Secret: SHA-256 verifier for the dedicated roster bearer. */
   CONTRIBUTOR_ROSTER_TOKEN_SHA256?: string;
