@@ -50,4 +50,4 @@ export type HandwritingSignup = {
   version: string;
 };
 
-export type HandwritingOffer = { split: ContributorSplit; sets: HandwritingSet[] };
+export type HandwritingOffer = { split: ContributorSplit; sets: (HandwritingSet | "FS")[] };

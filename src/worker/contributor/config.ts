@@ -10,6 +10,7 @@ const digest = /^[a-f0-9]{64}$/;
 const opaque = /^[A-Za-z0-9_-]{1,64}$/;
 const account = /^rv_[a-f0-9]{8}$/;
 const v3Page = /^HW-V3-([A-G])0[1-4]$/;
+const familyPage = /^HW-FS-[TD](0[1-9]|10)$/;
 const writerKey = /^cw-[a-f0-9]{32}$/;
 type Copy = Record<Language, ConsentCopy>;
 
@@ -59,9 +60,11 @@ function validTask(task: Task, split: ContributorSplit) {
   if (task.kind === "handwriting") {
     const v3 = v3Page.test(task.page);
     const length = task.sentences?.length;
+    const sheet = typeof task.sheetSha256 === "string" && digest.test(task.sheetSha256);
     return Array.isArray(task.sentences) && (v3
-      ? length === 30 && typeof task.sheetSha256 === "string" && digest.test(task.sheetSha256)
-      : !task.page.startsWith("HW-V3-") && task.sheetSha256 === undefined && length >= 1 && length <= 10) &&
+      ? length === 30 && sheet
+      : familyPage.test(task.page) ? length >= 8 && length <= 12 && sheet && (split === "train" || split === "dev")
+      : !task.page.startsWith("HW-V3-") && !task.page.startsWith("HW-FS-") && task.sheetSha256 === undefined && length >= 1 && length <= 10) &&
       task.sentences.every(s => typeof s === "string" && s.trim().length > 0 && s.length <= 220 && !/[\p{Cc}\p{Cf}]/u.test(s)) &&
       digest.test(task.promptSha256) && typeof task.rights === "string" && /^(PD|CC0-1\.0): \S/.test(task.rights) && task.rights.length <= 240;
   }

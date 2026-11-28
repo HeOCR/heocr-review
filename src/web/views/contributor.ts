@@ -20,12 +20,13 @@ const bands: Record<ContributorProfile["ageBand"], Pair> = {
   "10_12": [ltr("10–12"), "10–12"], "13_15": [ltr("13–15"), "13–15"], "16_17": [ltr("16–17"), "16–17"], "13_17": [ltr("13–17"), "13–17"], "18_plus": [ltr("18+"), "18+"],
 };
 // F (TEST) and G (DEV) are never offered: kids get them with their pack, so they have no picker name.
-const setNames: Partial<Record<HandwritingSet, Pair>> = {
+const setNames: Partial<Record<HandwritingSet | "FS", Pair>> = {
   A: ["מקורות", "Sources"],
   B: ["מסמכי יסוד", "Founding texts"],
   C: ["שירה עברית ישנה", "Old Hebrew poetry"],
   D: ["פרוזה יומיומית", "Everyday prose"],
   E: ["שירה עברית", "Hebrew poetry"],
+  FS: ["דפי שורות ארוכות", "Long-line pages"],
 };
 const btn = (label: string, action: () => void, primary = false) =>
   h("button", {type:"button", class: primary ? "act primary" : "act", onclick:action}, label);

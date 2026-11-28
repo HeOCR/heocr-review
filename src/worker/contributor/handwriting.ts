@@ -90,8 +90,8 @@ async function kidsSlots(bucket: R2Bucket, pin: string): Promise<KidsSlots> {
 }
 
 /** A kid's 8 sheets in seeded order: rank each page by sha256(seed + ":" + page), seed = sha256(prefix + writer code). */
-export async function kidsSheetOrder<T extends { page: string }>(writer: string, tasks: T[]): Promise<T[]> {
-  const seed = await hash(KIDS_ORDER_PREFIX + writer);
+export async function kidsSheetOrder<T extends { page: string }>(writer: string, tasks: T[], prefix = KIDS_ORDER_PREFIX): Promise<T[]> {
+  const seed = await hash(prefix + writer);
   const keyed = await Promise.all(tasks.map(async task => [await hash(seed + ":" + task.page), task] as const));
   return keyed.sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0).map(([,task]) => task);
 }
@@ -184,9 +184,13 @@ export async function handwritingOptedOut(ctx: Ctx, actor: string) {
     .bind(actor).first<number>("handwriting_opted_out")) === 1;
 }
 
-async function invitation(ctx: Ctx, signup: HandwritingPlan, actor: string) {
+/** One attempt limit for every cohort's invitation, counted before the code is looked at. */
+export async function readInvitation(ctx: Ctx, actor: string) {
   enforce(attemptLimit, actor, ctx.now);
-  const body = await readJson(ctx.request);
+  return readJson(ctx.request);
+}
+
+async function invitation(ctx: Ctx, signup: HandwritingPlan, actor: string, body: Record<string, unknown>) {
   const { inviteCode, ageBand } = body;
   if (typeof inviteCode !== "string" || !invite.test(inviteCode) || !handwritingAgeBands.some(band => band === ageBand)) throw invalid();
   const pin = await hash(inviteCode);
@@ -216,8 +220,8 @@ async function kidsSlot(ctx: Ctx, signup: HandwritingPlan, band: KidsBand, args:
 const kidsOffer = (split: ContributorSplit): HandwritingOffer =>
   ({ split, sets: split === "train" ? [...KIDS_PACKS.train.second] : [KIDS_PACKS[split].primary] });
 
-export async function handwritingOffer(ctx: Ctx, signup: HandwritingPlan, actor: string): Promise<HandwritingOffer> {
-  const { args, ageBand } = await invitation(ctx,signup,actor);
+export async function handwritingOffer(ctx: Ctx, signup: HandwritingPlan, actor: string, body: Record<string, unknown>): Promise<HandwritingOffer> {
+  const { args, ageBand } = await invitation(ctx,signup,actor,body);
   if (isKidsBand(ageBand)) {
     // Every minor goes through the kids' block (amendment 3); with no kids block pinned, minors cannot enrol.
     if (!signup.kids) throw unavailable();
@@ -229,8 +233,9 @@ export async function handwritingOffer(ctx: Ctx, signup: HandwritingPlan, actor:
   return { split:results[0]!.split, sets:results.map(row => row.set_id) };
 }
 
-export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor: string) {
-  const { body:{split,set}, args, ageBand } = await invitation(ctx,signup,actor);
+export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor: string, body: Record<string, unknown>) {
+  const { args, ageBand } = await invitation(ctx,signup,actor,body);
+  const { split, set } = body;
   if (!splits.includes(split as ContributorSplit) || !handwritingSets.includes(set as HandwritingSet)) throw invalid();
   const db = ctx.env.DB;
   const writer = randomId("cw-", 16);
@@ -274,13 +279,16 @@ export async function handwritingSignup(ctx: Ctx, signup: HandwritingPlan, actor
 }
 
 /** Record a revocation without changing the pinned plan or existing writers. */
-export async function revokeHandwritingInvite(ctx: Ctx, signup: HandwritingPlan, actor: string) {
+export async function revokeHandwritingInvite(ctx: Ctx, signup: HandwritingPlan | null, actor: string,
+    family: { pin: string; plan: { invite: { sha256: string } } } | null = null) {
   if (!(ctx.env.ADMIN_REVIEWER_IDS??"").split(",").map(id=>id.trim()).includes(actor)) throw gone();
   const { sha256 } = await readJson(ctx.request);
   if (typeof sha256 !== "string" || !digest.test(sha256)) throw invalid();
-  if (sha256 !== signup.plan.cohort?.sha256 && !signup.plan.invites.includes(sha256)) throw gone();
+  const pin = family && sha256 === family.plan.invite.sha256 ? family.pin :
+    signup && (sha256 === signup.plan.cohort?.sha256 || signup.plan.invites.includes(sha256)) ? signup.pin : null;
+  if (!pin) throw gone();
   await ctx.env.DB.prepare(`INSERT INTO contributor_handwriting_revoked_invites(config_sha256,invite_sha256,revoked_at)
-    VALUES(?,?,?) ON CONFLICT DO NOTHING`).bind(signup.pin,sha256,new Date(ctx.now).toISOString()).run();
+    VALUES(?,?,?) ON CONFLICT DO NOTHING`).bind(pin,sha256,new Date(ctx.now).toISOString()).run();
   return json({revoked:true},200,noStore);
 }
 
